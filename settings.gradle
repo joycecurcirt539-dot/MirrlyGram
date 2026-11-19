@@ -1,9 +1,10 @@
 include ':TMessagesProj'
 include ':TMessagesProj_App'
-include ':TMessagesProj_AppHuawei'
-include ':TMessagesProj_AppHockeyApp'
-include ':TMessagesProj_AppStandalone'
-include ':TMessagesProj_AppTests'
+// Unused upstream app modules disabled to speed up Gradle configuration and avoid building unused variants:
+// include ':TMessagesProj_AppHuawei'
+// include ':TMessagesProj_AppHockeyApp'
+// include ':TMessagesProj_AppStandalone'
+// include ':TMessagesProj_AppTests'
 include ':jlatexmath'
 project(':jlatexmath').projectDir = file('TMessagesProj/lib/jlatexmath/jlatexmath')
 

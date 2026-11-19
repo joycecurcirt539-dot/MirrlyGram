@@ -4,8 +4,8 @@ param(
     [switch]$AfterBuild,
     [switch]$IncludeRootArtifacts,
     [int]$DebugMaxMB = 512,
-    [int]$TargetMaxMB = 1024,
-    [int]$CxxMaxMB = 2500,
+    [int]$TargetMaxMB = 1536,
+    [int]$CxxMaxMB = 4096,
     [int]$StaleDays = 2,
     [int]$CxxStaleDays = 2
 )
@@ -178,7 +178,11 @@ if ($Full) {
             }
         }
 
-        $androidTargets = @('aarch64-linux-android', 'armv7-linux-androideabi', 'i686-linux-android', 'x86_64-linux-android')
+        foreach ($dropTarget in @('i686-linux-android', 'x86_64-linux-android')) {
+            Remove-DirSafely -Path (Join-Path $targetDir $dropTarget) -FreedBytes ([ref]$freed)
+        }
+
+        $androidTargets = @('aarch64-linux-android', 'armv7-linux-androideabi')
         foreach ($abiTarget in $androidTargets) {
             $abiRoot = Join-Path $targetDir $abiTarget
             if (-not (Test-Path -LiteralPath $abiRoot)) { continue }
@@ -199,14 +203,13 @@ if ($Full) {
                 if ((Get-DirBytes -Path $targetDir) -le ($TargetMaxMB * 1MB)) { break }
                 $subPath = Join-Path $targetDir $sub
                 if (-not (Test-Path -LiteralPath $subPath)) { continue }
-                if ($AfterBuild -and ($sub -eq 'aarch64-linux-android')) { continue }
+                if ($AfterBuild -and ($sub -in @('aarch64-linux-android', 'armv7-linux-androideabi'))) { continue }
                 Remove-DirSafely -Path $subPath -FreedBytes ([ref]$freed)
             }
         }
     }
 
     $nativeDupDirs = @(
-        'TMessagesProj\build\intermediates\cxx',
         'TMessagesProj\build\intermediates\library_jni',
         'TMessagesProj\build\intermediates\merged_native_libs'
     )
@@ -230,34 +233,92 @@ if ($Full) {
         }
     }
 
+    # Keep only the latest RelWithDebInfo C++ cache for active ARM ABIs across both .cxx and intermediates/cxx.
+    $keepCxxAbis = @('arm64-v8a', 'armeabi-v7a')
     $cxxRoot = Join-Path $repoRoot 'TMessagesProj\.cxx'
+    $intermCxxRoot = Join-Path $repoRoot 'TMessagesProj\build\intermediates\cxx'
+    $latestCxxHash = $null
+
     if (Test-Path -LiteralPath $cxxRoot) {
-        $cxxAbiEntries = @()
         Get-ChildItem -LiteralPath $cxxRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-            Get-ChildItem -LiteralPath $_.FullName -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-                Get-ChildItem -LiteralPath $_.FullName -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-                    $abiCxxDir = $_.FullName
-                    $newest = Get-ChildItem -LiteralPath $abiCxxDir -Recurse -File -ErrorAction SilentlyContinue |
-                        Sort-Object LastWriteTime -Descending | Select-Object -First 1
-                    $ts = if ($newest) { $newest.LastWriteTime } else { [datetime]::MinValue }
-                    if (-not $AfterBuild -and $ts -lt $cxxCutoff) {
-                        Remove-DirSafely -Path $abiCxxDir -FreedBytes ([ref]$freed)
-                    } elseif (Test-Path -LiteralPath $abiCxxDir) {
-                        $cxxAbiEntries += [PSCustomObject]@{ Path = $abiCxxDir; Newest = $ts }
+            if ($_.Name -notin @('RelWithDebInfo', 'tools')) {
+                Remove-DirSafely -Path $_.FullName -FreedBytes ([ref]$freed)
+            }
+        }
+
+        $cxxRelDir = Join-Path $cxxRoot 'RelWithDebInfo'
+        if (Test-Path -LiteralPath $cxxRelDir) {
+            $hashEntries = @(Get-ChildItem -LiteralPath $cxxRelDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                $newest = Get-ChildItem -LiteralPath $_.FullName -Recurse -File -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                [PSCustomObject]@{
+                    Name   = $_.Name
+                    Path   = $_.FullName
+                    Newest = if ($newest) { $newest.LastWriteTime } else { $_.LastWriteTime }
+                }
+            } | Sort-Object Newest -Descending)
+
+            if ($hashEntries.Count -gt 0) {
+                $latestCxxHash = $hashEntries[0].Name
+                for ($i = 1; $i -lt $hashEntries.Count; $i++) {
+                    Remove-DirSafely -Path $hashEntries[$i].Path -FreedBytes ([ref]$freed)
+                }
+
+                Get-ChildItem -LiteralPath $hashEntries[0].Path -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                    if ($keepCxxAbis -notcontains $_.Name) {
+                        Remove-DirSafely -Path $_.FullName -FreedBytes ([ref]$freed)
                     }
                 }
             }
         }
+    }
 
-        if ($cxxAbiEntries.Count -gt 1 -and ((Get-DirBytes -Path $cxxRoot) -gt ($CxxMaxMB * 1MB))) {
-            $maxTs = ($cxxAbiEntries | Sort-Object Newest -Descending | Select-Object -First 1).Newest
-            $staleBuildCutoff = $maxTs.AddHours(-2)
-            foreach ($entry in ($cxxAbiEntries | Sort-Object Newest)) {
-                if ((Get-DirBytes -Path $cxxRoot) -le ($CxxMaxMB * 1MB)) { break }
-                if ($entry.Newest -lt $staleBuildCutoff) {
-                    Remove-DirSafely -Path $entry.Path -FreedBytes ([ref]$freed)
+    if (Test-Path -LiteralPath $intermCxxRoot) {
+        Get-ChildItem -LiteralPath $intermCxxRoot -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_.Name -ne 'RelWithDebInfo') {
+                Remove-DirSafely -Path $_.FullName -FreedBytes ([ref]$freed)
+            }
+        }
+
+        $intermRelDir = Join-Path $intermCxxRoot 'RelWithDebInfo'
+        if (Test-Path -LiteralPath $intermRelDir) {
+            $intermEntries = @(Get-ChildItem -LiteralPath $intermRelDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                $newest = Get-ChildItem -LiteralPath $_.FullName -Recurse -File -ErrorAction SilentlyContinue |
+                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+                [PSCustomObject]@{
+                    Name   = $_.Name
+                    Path   = $_.FullName
+                    Newest = if ($newest) { $newest.LastWriteTime } else { $_.LastWriteTime }
+                }
+            } | Sort-Object Newest -Descending)
+
+            if ($intermEntries.Count -gt 0) {
+                $keepIntermHash = if ($latestCxxHash -and ($intermEntries.Name -contains $latestCxxHash)) { $latestCxxHash } else { $intermEntries[0].Name }
+                foreach ($entry in $intermEntries) {
+                    if ($entry.Name -ne $keepIntermHash) {
+                        Remove-DirSafely -Path $entry.Path -FreedBytes ([ref]$freed)
+                    } else {
+                        $objDir = Join-Path $entry.Path 'obj'
+                        if (Test-Path -LiteralPath $objDir) {
+                            Get-ChildItem -LiteralPath $objDir -Directory -ErrorAction SilentlyContinue | ForEach-Object {
+                                if ($keepCxxAbis -notcontains $_.Name) {
+                                    Remove-DirSafely -Path $_.FullName -FreedBytes ([ref]$freed)
+                                }
+                            }
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    if (-not $AfterBuild -and $latestCxxHash) {
+        $totalCxxBytes = (Get-DirBytes -Path $cxxRoot) + (Get-DirBytes -Path $intermCxxRoot)
+        if ($totalCxxBytes -gt ($CxxMaxMB * 1MB)) {
+            $v7Cxx = Join-Path $cxxRoot "RelWithDebInfo\$latestCxxHash\armeabi-v7a"
+            Remove-DirSafely -Path $v7Cxx -FreedBytes ([ref]$freed)
+            $v7Obj = Join-Path $intermCxxRoot "RelWithDebInfo\$latestCxxHash\obj\armeabi-v7a"
+            Remove-DirSafely -Path $v7Obj -FreedBytes ([ref]$freed)
         }
     }
 

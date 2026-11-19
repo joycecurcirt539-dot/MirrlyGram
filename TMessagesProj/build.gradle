@@ -153,10 +153,8 @@ android {
 
         multiDexEnabled true
 
-        if (rootProject.ext.mirrlySingleAbi) {
-            ndk {
-                abiFilters.add(rootProject.ext.mirrlySingleAbi)
-            }
+        ndk {
+            abiFilters.addAll(rootProject.ext.mirrlyAfatAbis)
         }
 
         buildConfigField "String", "YANDEX_MAPKIT_API_KEY", "\"" + escapeJavaString(getOptionalProp("YANDEX_MAPKIT_API_KEY")) + "\""

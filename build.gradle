@@ -7,7 +7,7 @@ ext {
     def nativeDebugSymbolsProp = project.findProperty('withNativeDebugSymbols')?.toString()?.trim()
     mirrlySingleAbi = singleAbiProp ?: null
     mirrlyNativeDebugSymbolLevel = (nativeDebugSymbolsProp?.equalsIgnoreCase('true')) ? 'FULL' : 'NONE'
-    mirrlyAfatAbis = mirrlySingleAbi ? [mirrlySingleAbi] : ['armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64']
+    mirrlyAfatAbis = mirrlySingleAbi ? [mirrlySingleAbi] : ['armeabi-v7a', 'arm64-v8a']
 }
 
 buildscript {
