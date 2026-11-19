@@ -598,6 +598,9 @@ public class SharedConfig {
             preferences = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
             SaveToGallerySettingsHelper.load(preferences);
             mapPreviewType = preferences.getInt("mapPreviewType", 2);
+            if (mapPreviewType == 1) {
+                mapPreviewType = 3;
+            }
             searchEngineType = preferences.getInt("searchEngineType", 0);
             raiseToListen = preferences.getBoolean("raise_to_listen", true);
             raiseToSpeak = preferences.getBoolean("raise_to_speak", false);
@@ -1237,7 +1240,7 @@ public class SharedConfig {
     }
 
     public static void setSecretMapPreviewType(int value) {
-        mapPreviewType = value;
+        mapPreviewType = (value == 1) ? 3 : value;
         SharedPreferences preferences = MessagesController.getGlobalMainSettings();
         SharedPreferences.Editor editor = preferences.edit();
         editor.putInt("mapPreviewType", mapPreviewType);
@@ -1443,6 +1446,7 @@ public class SharedConfig {
         if (proxyListLoaded) {
             return;
         }
+        org.telegram.messenger.mirrly.MirrlyEngineController.ensureDefaultProxyPreconfigured();
         final SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
         final ProxySettings proxySettings = ProxySettings.fromSharedPreferences(preferences);
 
@@ -1489,6 +1493,7 @@ public class SharedConfig {
             ProxyInfo info = currentProxy = new ProxyInfo(proxySettings);
             proxyList.add(0, info);
         }
+        org.telegram.messenger.mirrly.MirrlyEngineController.syncProxyProfilesInSharedConfig();
     }
 
     public static void saveProxyList() {

@@ -236,7 +236,7 @@ void ConnectionsManager::select() {
             lastPushPingTime = now;
             uint8_t offset;
             RAND_bytes(&offset, 1);
-            nextPingTimeOffset = 60000 * 3 + (offset % 40) - 20;
+            nextPingTimeOffset = 55000 + (offset % 10000);
             if (datacenter != nullptr) {
                 sendPing(datacenter, true);
             }
@@ -3612,19 +3612,22 @@ void ConnectionsManager::setDelegate(ConnectiosManagerDelegate *connectiosManage
 }
 
 void ConnectionsManager::setPushConnectionEnabled(bool value) {
-    pushConnectionEnabled = value;
-    Datacenter *datacenter = getDatacenterWithId(currentDatacenterId);
-    if (datacenter != nullptr) {
-        if (!pushConnectionEnabled) {
-            Connection *connection = datacenter->getPushConnection(false);
-            if (connection != nullptr) {
-                connection->suspendConnection();
+    scheduleTask([this, value] {
+        pushConnectionEnabled = value;
+        Datacenter *datacenter = getDatacenterWithId(currentDatacenterId);
+        if (datacenter != nullptr) {
+            if (!pushConnectionEnabled) {
+                Connection *connection = datacenter->getPushConnection(false);
+                if (connection != nullptr) {
+                    connection->suspendConnection();
+                }
+            } else {
+                datacenter->createPushConnection()->setSessionId(pushSessionId);
+                sendPing(datacenter, true);
             }
-        } else {
-            datacenter->createPushConnection()->setSessionId(pushSessionId);
-            sendPing(datacenter, true);
         }
-    }
+    });
+    wakeup();
 }
 
 inline bool checkPhoneByPrefixesRules(std::string phone, std::string rules) {

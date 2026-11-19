@@ -19,7 +19,7 @@
 #ifdef DEBUG_VERSION
 bool LOGS_ENABLED = true;
 #else
-bool LOGS_ENABLED = false;
+bool LOGS_ENABLED = true;
 #endif
 
 bool REF_LOGS_ENABLED = false;

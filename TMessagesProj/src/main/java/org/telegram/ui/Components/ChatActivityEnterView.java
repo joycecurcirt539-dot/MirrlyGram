@@ -12799,7 +12799,14 @@ public class ChatActivityEnterView extends FrameLayout implements
                     }
                     MediaDataController.getInstance(currentAccount).addRecentSticker(MediaDataController.TYPE_IMAGE, parent, sticker, (int) (System.currentTimeMillis() / 1000), false);
                 };
-                if (!showConfirmAlert(runnable)) {
+                if (org.telegram.messenger.mirrly.MirrlyConfig.confirmMediaSend && parentActivity != null) {
+                    new org.telegram.ui.ActionBar.AlertDialog.Builder(parentActivity, resourcesProvider)
+                            .setTitle(LocaleController.getString(R.string.MirrlyStickerConfirmTitle))
+                            .setMessage(LocaleController.getString(R.string.MirrlyStickerConfirmMessage))
+                            .setPositiveButton(LocaleController.getString(R.string.Send), (d, w) -> runnable.run())
+                            .setNegativeButton(LocaleController.getString(R.string.Cancel), null)
+                            .show();
+                } else if (!showConfirmAlert(runnable)) {
                     runnable.run();
                 }
             });

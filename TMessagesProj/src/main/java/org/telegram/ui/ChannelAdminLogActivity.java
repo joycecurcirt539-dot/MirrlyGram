@@ -2775,6 +2775,8 @@ public class ChannelAdminLogActivity extends BaseFragment implements Notificatio
         builder.setPositiveButton(getString(R.string.OK), null);
         if (message.type == MessageObject.TYPE_VIDEO) {
             builder.setMessage(getString(R.string.NoPlayerInstalled));
+        } else if (AndroidUtilities.isApkDocument(message)) {
+            builder.setMessage(getString(R.string.ApkInstallFailed));
         } else {
             builder.setMessage(LocaleController.formatString(R.string.NoHandleAppInstalled, message.getDocument().mime_type));
         }

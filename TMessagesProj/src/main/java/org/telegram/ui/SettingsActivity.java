@@ -795,6 +795,16 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             items.add(UItem.asShadow(null));
         }
 
+        items.add(SettingCell.Factory.of(
+                100,
+                0xFF8A68F7,
+                0xFF5B4CE6,
+                R.drawable.settings_mirrly,
+                getString(R.string.MirrlySettingsTitle),
+                getString(R.string.MirrlySettingsInfo)
+        ));
+        items.add(UItem.asShadow(null));
+
         items.add(SettingCell.Factory.of(1, IconBackgroundColors.BLUE.top, IconBackgroundColors.BLUE.bottom, R.drawable.settings_account, getString(R.string.SettingsAccount), getString(R.string.SettingsAccountInfo)));
         items.add(SettingCell.Factory.of(2, IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.settings_chat, getString(R.string.SettingsChat), getString(R.string.SettingsChatInfo)));
         items.add(SettingCell.Factory.of(3, IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.settings_privacy, getString(R.string.SettingsPrivacySecurity), getString(R.string.SettingsPrivacySecurityInfo)));
@@ -837,6 +847,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             items.add(UItem.asShadow(null));
 
         items.add(UItem.asHeader(getString(R.string.SettingsHelp)));
+        items.add(SettingCell.Factory.of(101, 0xFF8A68F7, 0xFF5B4CE6, R.drawable.settings_mirrly, getString(R.string.MirrlyAboutTitle)));
         items.add(SettingCell.Factory.of(17, IconBackgroundColors.ORANGE.top, IconBackgroundColors.ORANGE.bottom, R.drawable.settings_ask, getString(R.string.AskAQuestion)));
         items.add(SettingCell.Factory.of(18, IconBackgroundColors.BLUE_LIGHT.top, IconBackgroundColors.BLUE_LIGHT.bottom, R.drawable.settings_faq, getString(R.string.TelegramFAQ)));
         items.add(SettingCell.Factory.of(23, IconBackgroundColors.PURPLE.top, IconBackgroundColors.PURPLE.bottom, R.drawable.settings_features, getString(R.string.TelegramFeatures)));
@@ -917,6 +928,12 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             return;
         }
         switch (item.id) {
+            case 100:
+                presentSettingFragment(new MirrlyGramSettingsActivity());
+                break;
+            case 101:
+                presentSettingFragment(new MirrlyAboutActivity());
+                break;
             case 1:
                 presentSettingFragment(new UserInfoActivity());
                 break;

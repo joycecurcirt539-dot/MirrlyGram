@@ -20,6 +20,7 @@ import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.LongSparseArray;
@@ -30,6 +31,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.Keep;
+import androidx.core.app.NotificationManagerCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -105,6 +107,8 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
 
     private int notificationsServiceRow;
     private int notificationsServiceConnectionRow;
+    private int batteryOptimizationRow;
+    private int systemNotificationsDisabledRow;
 
     private int notificationsSectionRow;
     @Keep
@@ -217,6 +221,8 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
         otherSectionRow = rowCount++;
         notificationsServiceRow = rowCount++;
         notificationsServiceConnectionRow = rowCount++;
+        batteryOptimizationRow = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? rowCount++ : -1;
+        systemNotificationsDisabledRow = !isSystemNotificationsEnabled() ? rowCount++ : -1;
         androidAutoAlertRow = -1;
         repeatRow = rowCount++;
         resetSection2Row = rowCount++;
@@ -732,15 +738,15 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                 editor.commit();
                 getNotificationsController().updateBadge();
             } else if (position == notificationsServiceConnectionRow) {
-                SharedPreferences preferences = MessagesController.getNotificationsSettings(currentAccount);
-                enabled = preferences.getBoolean("pushConnection", getMessagesController().backgroundConnection);
+                SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();
+                enabled = preferences.getBoolean("pushConnection", true);
                 SharedPreferences.Editor editor = preferences.edit();
                 editor.putBoolean("pushConnection", !enabled);
                 editor.commit();
-                if (!enabled) {
-                    ConnectionsManager.getInstance(currentAccount).setPushConnectionEnabled(true);
-                } else {
-                    ConnectionsManager.getInstance(currentAccount).setPushConnectionEnabled(false);
+                for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                    if (UserConfig.getInstance(a).isClientActivated()) {
+                        ConnectionsManager.getInstance(a).setPushConnectionEnabled(!enabled);
+                    }
                 }
             } else if (position == accountsAllRow) {
                 SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();
@@ -761,8 +767,8 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                     }
                 }
             } else if (position == notificationsServiceRow) {
-                SharedPreferences preferences = MessagesController.getNotificationsSettings(currentAccount);
-                enabled = preferences.getBoolean("pushService", getMessagesController().keepAliveService);
+                SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();
+                enabled = preferences.getBoolean("pushService", true);
                 SharedPreferences.Editor editor = preferences.edit();
                 editor.putBoolean("pushService", !enabled);
                 editor.commit();
@@ -812,6 +818,49 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                 });
                 builder.setNegativeButton(getString("Cancel", R.string.Cancel), null);
                 showDialog(builder.create());
+            } else if (position == batteryOptimizationRow) {
+                Activity activity = getParentActivity();
+                if (activity != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    boolean ignoring = isIgnoringBatteryOptimizations();
+                    if (!ignoring) {
+                        try {
+                            Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                            intent.setData(Uri.parse("package:" + activity.getPackageName()));
+                            activity.startActivity(intent);
+                        } catch (Throwable ignore) {
+                            try {
+                                activity.startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                            } catch (Throwable t) {
+                                FileLog.e(t);
+                            }
+                        }
+                    } else {
+                        try {
+                            activity.startActivity(new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+                        } catch (Throwable t) {
+                            FileLog.e(t);
+                        }
+                    }
+                }
+                return;
+            } else if (position == systemNotificationsDisabledRow) {
+                Activity activity = getParentActivity();
+                if (activity != null) {
+                    try {
+                        Intent intent;
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+                            intent.putExtra(Settings.EXTRA_APP_PACKAGE, activity.getPackageName());
+                        } else {
+                            intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                            intent.setData(Uri.parse("package:" + activity.getPackageName()));
+                        }
+                        activity.startActivity(intent);
+                    } catch (Throwable t) {
+                        FileLog.e(t);
+                    }
+                }
+                return;
             }
             if (view instanceof TextCheckCell) {
                 ((TextCheckCell) view).setChecked(!enabled);
@@ -916,6 +965,29 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
         builder.setNeutralButton(getString("ViewExceptions", R.string.ViewExceptions), (dialogInterface, i) -> presentFragment(new NotificationsCustomSettingsActivity(-1, exceptions, autoExceptions)));
         builder.setNegativeButton(getString("OK", R.string.OK), (di, i) -> whenDone.run());
         showDialog(builder.create());
+    }
+
+    private boolean isIgnoringBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || ApplicationLoader.applicationContext == null) {
+            return true;
+        }
+        try {
+            PowerManager pm = (PowerManager) ApplicationLoader.applicationContext.getSystemService(Context.POWER_SERVICE);
+            return pm == null || pm.isIgnoringBatteryOptimizations(ApplicationLoader.applicationContext.getPackageName());
+        } catch (Throwable ignore) {
+            return true;
+        }
+    }
+
+    private boolean isSystemNotificationsEnabled() {
+        if (ApplicationLoader.applicationContext == null) {
+            return true;
+        }
+        try {
+            return NotificationManagerCompat.from(ApplicationLoader.applicationContext).areNotificationsEnabled();
+        } catch (Throwable ignore) {
+            return true;
+        }
     }
 
     @Override
@@ -1029,9 +1101,13 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                     } else if (position == androidAutoAlertRow) {
                         checkCell.setTextAndCheck("Android Auto", preferences.getBoolean("EnableAutoNotifications", false), true);
                     } else if (position == notificationsServiceRow) {
-                        checkCell.setTextAndValueAndCheck(getString("NotificationsService", R.string.NotificationsService), getString("NotificationsServiceInfo", R.string.NotificationsServiceInfo), preferences.getBoolean("pushService", getMessagesController().keepAliveService), true, true);
+                        checkCell.setTextAndValueAndCheck(getString("NotificationsService", R.string.NotificationsService), getString("NotificationsServiceInfo", R.string.NotificationsServiceInfo), MessagesController.getGlobalNotificationsSettings().getBoolean("pushService", true), true, true);
                     } else if (position == notificationsServiceConnectionRow) {
-                        checkCell.setTextAndValueAndCheck(getString("NotificationsServiceConnection", R.string.NotificationsServiceConnection), getString("NotificationsServiceConnectionInfo", R.string.NotificationsServiceConnectionInfo), preferences.getBoolean("pushConnection", getMessagesController().backgroundConnection), true, true);
+                        checkCell.setTextAndValueAndCheck(getString("NotificationsServiceConnection", R.string.NotificationsServiceConnection), getString("NotificationsServiceConnectionInfo", R.string.NotificationsServiceConnectionInfo), MessagesController.getGlobalNotificationsSettings().getBoolean("pushConnection", true), true, true);
+                    } else if (position == batteryOptimizationRow) {
+                        boolean ignoring = isIgnoringBatteryOptimizations();
+                        String value = ignoring ? getString(R.string.MirrlyBatteryUnrestrictedEnabled) : getString(R.string.MirrlyBatteryUnrestrictedInfo);
+                        checkCell.setTextAndValueAndCheck(getString(R.string.MirrlyBatteryUnrestricted), value, ignoring, true, true);
                     } else if (position == badgeNumberShowRow) {
                         checkCell.setTextAndCheck(getString("BadgeNumberShow", R.string.BadgeNumberShow), getNotificationsController().showBadgeNumber, true);
                     } else if (position == badgeNumberMutedRow) {
@@ -1052,6 +1128,11 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                     settingsCell.setMultilineDetail(true);
                     if (position == resetNotificationsRow) {
                         settingsCell.setTextAndValue(getString("ResetAllNotifications", R.string.ResetAllNotifications), getString("UndoAllCustom", R.string.UndoAllCustom), false);
+                    } else if (position == systemNotificationsDisabledRow) {
+                        String value = isSystemNotificationsEnabled()
+                                ? getString(R.string.MirrlyBatteryUnrestrictedEnabled)
+                                : getString(R.string.MirrlySystemNotificationsDisabledInfo);
+                        settingsCell.setTextAndValue(getString(R.string.MirrlySystemNotificationsDisabled), value, true);
                     }
                     break;
                 }
@@ -1212,11 +1293,11 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                 return 0;
             } else if (position == inappSoundRow || position == inappVibrateRow || position == notificationsServiceConnectionRow ||
                     position == inappPreviewRow || position == contactJoinedRow || position == pinnedMessageRow ||
-                    position == notificationsServiceRow || position == badgeNumberMutedRow || position == badgeNumberMessagesRow ||
+                    position == notificationsServiceRow || position == batteryOptimizationRow || position == badgeNumberMutedRow || position == badgeNumberMessagesRow ||
                     position == badgeNumberShowRow || position == inappPriorityRow || position == inchatSoundRow ||
                     position == androidAutoAlertRow || position == accountsAllRow) {
                 return 1;
-            } else if (position == resetNotificationsRow) {
+            } else if (position == resetNotificationsRow || position == systemNotificationsDisabledRow) {
                 return 2;
             } else if (position == privateRow || position == groupRow || position == channelsRow || position == storiesRow || position == reactionsRow) {
                 return 3;

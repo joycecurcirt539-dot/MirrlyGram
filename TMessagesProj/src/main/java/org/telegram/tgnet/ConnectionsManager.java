@@ -8,6 +8,7 @@ import android.content.pm.InstallSourceInfo;
 import android.content.pm.PackageInfo;
 import android.os.AsyncTask;
 import android.os.Build;
+import android.os.PowerManager;
 import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.Base64;
@@ -292,11 +293,7 @@ public class ConnectionsManager extends BaseController {
 
     public boolean isPushConnectionEnabled() {
         SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();
-        if (preferences.contains("pushConnection")) {
-            return preferences.getBoolean("pushConnection", true);
-        } else {
-            return MessagesController.getMainSettings(UserConfig.selectedAccount).getBoolean("backgroundConnection", false);
-        }
+        return preferences.getBoolean("pushConnection", true);
     }
 
     public long getCurrentTimeMillis() {
@@ -657,6 +654,7 @@ public class ConnectionsManager extends BaseController {
     }
 
     public void checkConnection() {
+        org.telegram.messenger.mirrly.MirrlyEngineController.notifyNetworkState();
         byte selectedStrategy = getIpStrategy();
         if (BuildVars.LOGS_ENABLED) {
             FileLog.d("selected ip strategy " + selectedStrategy);
@@ -670,6 +668,7 @@ public class ConnectionsManager extends BaseController {
     }
 
     public void init(int version, int layer, int apiId, String deviceModel, String systemVersion, String appVersion, String langCode, String systemLangCode, String configPath, String logPath, String regId, String cFingerprint, int timezoneOffset, long userId, boolean userPremium, boolean enablePushConnection) {
+        org.telegram.messenger.mirrly.MirrlyEngineController.ensureDefaultProxyPreconfigured();
         final SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
         final ProxySettings proxySettings = ProxySettings.fromSharedPreferences(preferences);
         if (preferences.getBoolean("proxy_enabled", false) && proxySettings.isValid()) {
@@ -978,8 +977,44 @@ public class ConnectionsManager extends BaseController {
         }
     }
 
+    private static volatile PowerManager.WakeLock internalPushWakeLock;
+
     public static void onInternalPushReceived(final int currentAccount) {
-        KeepAliveJob.startJob();
+        try {
+            if (ApplicationLoader.applicationContext != null) {
+                PowerManager.WakeLock wakeLock = internalPushWakeLock;
+                if (wakeLock == null) {
+                    PowerManager pm = (PowerManager) ApplicationLoader.applicationContext.getSystemService(Context.POWER_SERVICE);
+                    if (pm != null) {
+                        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "mirrlygram:internal_push");
+                        wakeLock.setReferenceCounted(false);
+                        internalPushWakeLock = wakeLock;
+                    }
+                }
+                if (wakeLock != null) {
+                    wakeLock.acquire(25_000L);
+                }
+            }
+        } catch (Throwable t) {
+            FileLog.e(t);
+        }
+        try {
+            KeepAliveJob.startJob();
+        } catch (Throwable t) {
+            FileLog.e(t);
+        }
+        AndroidUtilities.runOnUIThread(ApplicationLoader::postInitApplication);
+        Utilities.stageQueue.postRunnable(() -> {
+            try {
+                org.telegram.messenger.mirrly.MirrlyEngineController.ensureStarted();
+                if (UserConfig.getInstance(currentAccount).isClientActivated()) {
+                    ConnectionsManager.getInstance(currentAccount).resumeNetworkMaybe();
+                    AccountInstance.getInstance(currentAccount).getMessagesController().getDifference();
+                }
+            } catch (Throwable t) {
+                FileLog.e(t);
+            }
+        });
     }
 
     public static void setProxySettings(boolean enabled, ProxySettings settings) {

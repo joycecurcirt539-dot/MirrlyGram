@@ -736,9 +736,7 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
         cameraReady = false;
         selectedCamera = null;
         if (!fromPaused) {
-            if (!useCamera2) {
-                isFrontface = true;
-            }
+            isFrontface = !org.telegram.messenger.mirrly.MirrlyConfig.isRoundVideoBackCamera();
             updateFlash();
             recordedTime = 0;
             progress = 0;
@@ -780,6 +778,7 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
             FileLog.d("InstantCamera show round camera " + cameraFile.getAbsolutePath());
         }
 
+        surfaceIndex = 0;
         if (useCamera2) {
             bothCameras = DualCameraView.roundDualAvailableStatic(getContext());
             if (bothCameras) {
@@ -796,7 +795,11 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                 camera2SessionCurrent = camera2Sessions[isFrontface ? 0 : 1];
                 if (camera2SessionCurrent != null && camera2Sessions[isFrontface ? 1 : 0] == null) {
                     bothCameras = false;
+                    if (!isFrontface) {
+                        previewSize[0] = previewSize[1];
+                    }
                 }
+                surfaceIndex = bothCameras && !isFrontface ? 1 : 0;
                 if (BuildVars.LOGS_ENABLED) {
                     FileLog.d("InstantCamera legacy switch capability: dual=" + bothCameras
                             + ", initialFacing=" + (isFrontface ? "FRONT" : "BACK")
@@ -2714,7 +2717,7 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
                 GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
             }
 
-            if (previewSize != null) {
+            if (previewSize != null && previewSize[surfaceIndex] != null) {
                 GLES20.glUniform2f(previewSizeHandle, previewSize[surfaceIndex].getWidth(), previewSize[surfaceIndex].getHeight());
                 GLES20.glUniform2f(texelSizeHandle, (float) 1f / previewSize[surfaceIndex].getWidth() / 2f, (float) 1f / previewSize[surfaceIndex].getHeight() / 2f);
             }
@@ -3394,16 +3397,17 @@ public class InstantCameraView extends InstantCameraViewBase implements Notifica
             }
             overlayHelper = new InstantCameraVideoEncoderOverlayHelper(videoWidth, videoHeight);
 
+            Size activePreviewSize = previewSize[surfaceIndex] != null ? previewSize[surfaceIndex] : previewSize[0];
             String vertexShaderSource, fragmentShaderSource;
             if (overlayHelper != null) {
                 vertexShaderSource = VERTEX_SHADER;
-                fragmentShaderSource = createFragmentShaderV2(previewSize[0]);
+                fragmentShaderSource = createFragmentShaderV2(activePreviewSize);
             } else if (useCamera2) {
                 vertexShaderSource = AndroidUtilities.readRes(R.raw.instant_lanczos_vert);
                 fragmentShaderSource = AndroidUtilities.readRes(R.raw.instant_lanczos_frag_oes);
             } else {
                 vertexShaderSource = VERTEX_SHADER;
-                fragmentShaderSource = createFragmentShader(previewSize[0]);
+                fragmentShaderSource = createFragmentShader(activePreviewSize);
             }
             int vertexShader = loadShader(GLES20.GL_VERTEX_SHADER, vertexShaderSource);
             int fragmentShader = loadShader(GLES20.GL_FRAGMENT_SHADER, fragmentShaderSource);

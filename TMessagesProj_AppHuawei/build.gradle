@@ -85,7 +85,7 @@ android {
             shrinkResources false
             multiDexEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), '../TMessagesProj/proguard-rules.pro'
-            ndk.debugSymbolLevel = 'FULL'
+            ndk.debugSymbolLevel = rootProject.ext.mirrlyNativeDebugSymbolLevel
         }
         release {
             debuggable false
@@ -95,7 +95,7 @@ android {
             shrinkResources false
             multiDexEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), '../TMessagesProj/proguard-rules.pro'
-            ndk.debugSymbolLevel = 'FULL'
+            ndk.debugSymbolLevel = rootProject.ext.mirrlyNativeDebugSymbolLevel
         }
     }
 
@@ -112,7 +112,7 @@ android {
     productFlavors {
         afat {
             ndk {
-                abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
+                abiFilters.addAll(rootProject.ext.mirrlyAfatAbis)
             }
             sourceSets.debug {
                 manifest.srcFile '../TMessagesProj/config/debug/AndroidManifest_SDK23.xml'

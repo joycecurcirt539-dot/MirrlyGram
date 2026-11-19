@@ -18,18 +18,33 @@ public class ScreenReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
+        if (intent == null || intent.getAction() == null) {
+            return;
+        }
         if (intent.getAction().equals(Intent.ACTION_SCREEN_OFF)) {
             if (BuildVars.LOGS_ENABLED) {
                 FileLog.d("screen off");
             }
-            ConnectionsManager.getInstance(UserConfig.selectedAccount).setAppPaused(true, true);
+            for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                if (a == UserConfig.selectedAccount || UserConfig.getInstance(a).isClientActivated()) {
+                    ConnectionsManager.getInstance(a).setAppPaused(true, true);
+                }
+            }
             ApplicationLoader.isScreenOn = false;
         } else if (intent.getAction().equals(Intent.ACTION_SCREEN_ON)) {
             if (BuildVars.LOGS_ENABLED) {
                 FileLog.d("screen on");
             }
-            ConnectionsManager.getInstance(UserConfig.selectedAccount).setAppPaused(false, true);
             ApplicationLoader.isScreenOn = true;
+            org.telegram.messenger.mirrly.MirrlyEngineController.notifyScreenWake();
+            for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                if (a == UserConfig.selectedAccount || UserConfig.getInstance(a).isClientActivated()) {
+                    ConnectionsManager.getInstance(a).setAppPaused(false, true);
+                }
+            }
+            if (MessagesController.getGlobalNotificationsSettings().getBoolean("pushService", true)) {
+                ApplicationLoader.startPushService();
+            }
         }
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.screenStateChanged);
     }

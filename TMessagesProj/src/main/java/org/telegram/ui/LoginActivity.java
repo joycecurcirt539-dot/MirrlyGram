@@ -1803,6 +1803,12 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             return;
         }
         if (res.type instanceof TLRPC.TL_auth_sentCodeTypeFirebaseSms && !res.type.verifiedFirebase && !isRequestingFirebaseSms) {
+            if (TextUtils.isEmpty(BuildVars.SAFETYNET_KEY)) {
+                FileLog.d("Fallback to normal SMS code view for fork");
+                res.type.verifiedFirebase = true;
+                fillNextCodeParams(params, res, animate);
+                return;
+            }
             if (PushListenerController.GooglePushListenerServiceProvider.INSTANCE.hasServices()) {
                 TLRPC.TL_auth_sentCodeTypeFirebaseSms r = (TLRPC.TL_auth_sentCodeTypeFirebaseSms) res.type;
                 needShowProgress(0);
@@ -2936,6 +2942,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
 
                     private void onConfirm(PhoneNumberConfirmView confirmView) {
                         confirmedNumber = true;
+                        checkPermissions = false;
                         currentDoneType = DONE_TYPE_FLOATING;
                         needShowProgress(0, false);
 
@@ -3008,7 +3015,10 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                 });
                 phoneNumberConfirmView.show();
                 return;
-            } else confirmedNumber = false;
+            } else {
+                confirmedNumber = false;
+                checkPermissions = false;
+            }
 
             if (phoneNumberConfirmView != null) {
                 phoneNumberConfirmView.dismiss();
@@ -3118,6 +3128,7 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             settings.allow_app_hash = settings.allow_firebase = PushListenerController.GooglePushListenerServiceProvider.INSTANCE.hasServices();
             if (forceDisableSafetyNet || TextUtils.isEmpty(BuildVars.SAFETYNET_KEY)) {
                 settings.allow_firebase = false;
+                settings.allow_app_hash = false;
             }
 
             ArrayList<TLRPC.TL_auth_authorization> loginTokens = AuthTokensHelper.getSavedLogInTokens();
@@ -3272,8 +3283,15 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
                         } else if (error.text.startsWith("FLOOD_WAIT")) {
                             needShowAlert(getString(R.string.RestorePasswordNoEmailTitle), getString("FloodWait", R.string.FloodWait));
                         } else if (error.code != -1000) {
-                            AlertsCreator.processError(currentAccount, error, LoginActivity.this, req, phoneInputData.phoneNumber);
+                            Dialog dlg = AlertsCreator.processError(currentAccount, error, LoginActivity.this, req, phoneInputData.phoneNumber);
+                            if (dlg == null) {
+                                needShowAlert(getString(R.string.RestorePasswordNoEmailTitle), error.text);
+                            }
+                        } else {
+                            needShowAlert(getString(R.string.RestorePasswordNoEmailTitle), LocaleController.getString(R.string.WaitingForNetwork));
                         }
+                    } else {
+                        needShowAlert(getString(R.string.RestorePasswordNoEmailTitle), LocaleController.getString(R.string.WaitingForNetwork));
                     }
                 }
                 if (!isRequestingFirebaseSms) {
@@ -8971,6 +8989,12 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
         private final PointF pointF = new PointF();
         private void updateFabPosition() {
             ViewPositionWatcher.computeCoordinatesInParent(fabContainer, fragmentView, pointF);
+            if (pointF.y <= 0 && fragmentView != null && fragmentView.getMeasuredHeight() > 0) {
+                pointF.y = fragmentView.getMeasuredHeight() - AndroidUtilities.dp(88);
+            }
+            if (pointF.x <= 0 && fragmentView != null && fragmentView.getMeasuredWidth() > 0) {
+                pointF.x = fragmentView.getMeasuredWidth() - AndroidUtilities.dp(72);
+            }
             fabButton.setTranslationX(pointF.x);
             fabButton.setTranslationY(pointF.y);
             requestLayout();
@@ -9001,7 +9025,14 @@ public class LoginActivity extends BaseFragment implements NotificationCenter.No
             super.onLayout(changed, left, top, right, bottom);
 
             int height = popupLayout.getMeasuredHeight();
-            int popupBottom = (int) (fabButton.getTranslationY() - AndroidUtilities.dp(32));
+            float targetY = fabButton.getTranslationY();
+            if (targetY <= 0 && fragmentView != null && fragmentView.getMeasuredHeight() > 0) {
+                targetY = fragmentView.getMeasuredHeight() - AndroidUtilities.dp(88);
+            }
+            int popupBottom = (int) (targetY - AndroidUtilities.dp(32));
+            if (popupBottom - height < AndroidUtilities.dp(48)) {
+                popupBottom = height + AndroidUtilities.dp(64);
+            }
             popupLayout.layout(popupLayout.getLeft(), popupBottom - height, popupLayout.getRight(), popupBottom);
         }
 

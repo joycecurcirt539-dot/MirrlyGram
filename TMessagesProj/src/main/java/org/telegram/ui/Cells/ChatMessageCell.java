@@ -3226,28 +3226,39 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
     }
 
     private boolean checkDateMotionEvent(MotionEvent event) {
-        if (!currentMessageObject.isImportedForward()) {
+        boolean isImported = currentMessageObject.isImportedForward();
+        boolean hasNote = !isImported && org.telegram.messenger.mirrly.MirrlyVaultStorage.hasDossierNote(currentMessageObject.getDialogId(), currentMessageObject.getId());
+        if (!isImported && !hasNote) {
             return false;
         }
         int x = (int) getEventX(event);
         int y = (int) getEventY(event);
+        int slop = hasNote ? dp(6) : 0;
 
         boolean result = false;
         if (event.getAction() == MotionEvent.ACTION_DOWN) {
-            if (x >= drawTimeX && x <= drawTimeX + timeWidth && y >= drawTimeY && y <= drawTimeY + dp(20)) {
+            if (x >= drawTimeX - slop && x <= drawTimeX + timeWidth + slop && y >= drawTimeY - slop && y <= drawTimeY + dp(20) + slop) {
                 timePressed = true;
                 result = true;
                 invalidate();
             }
-        } else {
-            if (event.getAction() == MotionEvent.ACTION_UP) {
-                if (timePressed) {
-                    timePressed = false;
-                    playSoundEffect(SoundEffectConstants.CLICK);
-                    delegate.didPressTime(this);
-                    invalidate();
-                    result = true;
-                }
+        } else if (event.getAction() == MotionEvent.ACTION_MOVE) {
+            if (timePressed && (x < drawTimeX - slop || x > drawTimeX + timeWidth + slop || y < drawTimeY - slop || y > drawTimeY + dp(20) + slop)) {
+                timePressed = false;
+                invalidate();
+            }
+        } else if (event.getAction() == MotionEvent.ACTION_CANCEL) {
+            if (timePressed) {
+                timePressed = false;
+                invalidate();
+            }
+        } else if (event.getAction() == MotionEvent.ACTION_UP) {
+            if (timePressed) {
+                timePressed = false;
+                playSoundEffect(SoundEffectConstants.CLICK);
+                delegate.didPressTime(this);
+                invalidate();
+                result = true;
             }
         }
         return result;
@@ -15560,6 +15571,18 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
      * before a cell lays it out (RichWidgetBlock#estimateSafeArea).
      */
     public static String timeString(MessageObject current, MessageObject message, boolean edited, int editDate) {
+        String base = timeStringInternal(current, message, edited, editDate);
+        if (android.text.TextUtils.isEmpty(base) || current == null) {
+            return base;
+        }
+        StringBuilder prefix = new StringBuilder();
+        if (org.telegram.messenger.mirrly.MirrlyVaultStorage.hasDossierNote(current.getDialogId(), current.getId())) {
+            prefix.append(LocaleController.getString(R.string.MirrlyMessageNotePrefix)).append(" • ");
+        }
+        return prefix.length() > 0 ? (prefix.toString() + base) : base;
+    }
+
+    private static String timeStringInternal(MessageObject current, MessageObject message, boolean edited, int editDate) {
         if (current.notime || current.isSponsored() || current.isQuickReply() || current.isWelcomeMessage()) {
             return "";
         } else if (current.scheduled && current.messageOwner.date == 0x7FFFFFFE) {

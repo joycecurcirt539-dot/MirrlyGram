@@ -390,9 +390,12 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
         showInitialPlaceholder();
         upload = new TelegramRoundVideoUpload(currentAccount, secretChat);
         activeOutputResolution = SharedSettings.roundVideoOutputResolution.get();
+        RoundVideoSession.CameraFacing initialFacing = org.telegram.messenger.mirrly.MirrlyConfig.isRoundVideoBackCamera()
+                ? RoundVideoSession.CameraFacing.BACK
+                : SharedSettings.roundVideoLastCamera.get();
         session = new RoundVideoSession.Builder(getContext(), textureView)
                 .setOutputDirectory(new File(ApplicationLoader.getFilesDirFixed(), "cache"))
-                .setInitialFacing(SharedSettings.roundVideoLastCamera.get())
+                .setInitialFacing(initialFacing)
                 .setOutputResolution(activeOutputResolution)
                 .setVideoBitrate(SharedSettings.roundVideoVideoBitrate.get())
                 .setCameraResolution(SharedSettings.roundVideoCameraResolution.get())
@@ -770,7 +773,8 @@ public final class InstantCameraView2 extends InstantCameraViewBase {
                 @NonNull RoundVideoSession.CameraCapabilities cameraCapabilities
         ) {
             capabilities = cameraCapabilities;
-            if (cameraCapabilities.getActiveFacing() != null) {
+            if (cameraCapabilities.getActiveFacing() != null
+                    && !org.telegram.messenger.mirrly.MirrlyConfig.isRoundVideoBackCamera()) {
                 SharedSettings.roundVideoLastCamera.set(cameraCapabilities.getActiveFacing());
             }
             updateButtons();

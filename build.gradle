@@ -1,4 +1,15 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
+ext {
+    def singleAbiProp = project.findProperty('singleAbi')?.toString()?.trim()
+    if (!singleAbiProp) {
+        singleAbiProp = System.getenv('MIRRLY_SINGLE_ABI')?.trim()
+    }
+    def nativeDebugSymbolsProp = project.findProperty('withNativeDebugSymbols')?.toString()?.trim()
+    mirrlySingleAbi = singleAbiProp ?: null
+    mirrlyNativeDebugSymbolLevel = (nativeDebugSymbolsProp?.equalsIgnoreCase('true')) ? 'FULL' : 'NONE'
+    mirrlyAfatAbis = mirrlySingleAbi ? [mirrlySingleAbi] : ['armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64']
+}
+
 buildscript {
     repositories {
         mavenCentral()
@@ -27,9 +38,54 @@ repositories {
 //          licences/                          (~20 KB; pure license text files)
 subprojects {
     plugins.withId('com.android.application') {
+        def localPropsFile = rootProject.file('local.properties')
+        def googleMapsKey = 'AIzaSyA-t0jLPjUt2FxrA8VPK2EiYHcYcboIR6k'
+        if (localPropsFile.exists()) {
+            def props = new Properties()
+            props.load(new FileInputStream(localPropsFile))
+            def customKey = props.getProperty('GOOGLE_MAPS_API_KEY')?.trim()
+            if (customKey) {
+                googleMapsKey = customKey
+            }
+        }
         android {
+            defaultConfig {
+                manifestPlaceholders = [googleMapsApiKey: googleMapsKey]
+            }
             androidResources {
                 ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~:!optional:!licences:!*stmary*:!*eufb*'
+            }
+        }
+        if (!project.hasProperty('skipAutoClean') && System.getProperty('os.name').toLowerCase().contains('windows')) {
+            tasks.matching { it.name.startsWith('assemble') || it.name.startsWith('bundle') }.configureEach {
+                finalizedBy(rootProject.tasks.named('cleanMirrlyJunk'))
+            }
+        }
+        if (project.name != 'TMessagesProj_AppTests') {
+            def releaseDir = rootProject.layout.projectDirectory.dir("release")
+            android.applicationVariants.all { variant ->
+                if (variant.assembleProvider != null) {
+                    def archTag = rootProject.ext.mirrlySingleAbi ?: (variant.flavorName == "afat" || !variant.flavorName ? "universal" : variant.flavorName)
+                    def moduleTag = ""
+                    if (project.name == "TMessagesProj_AppStandalone" && variant.buildType.name != "standalone") {
+                        moduleTag = "-standalone"
+                    } else if (project.name == "TMessagesProj_AppHuawei") {
+                        moduleTag = "-huawei"
+                    } else if (project.name == "TMessagesProj_AppHockeyApp") {
+                        moduleTag = "-ha"
+                    }
+                    def destFileName = "MirrlyGram-${APP_VERSION_NAME}${moduleTag}-${archTag}-${variant.buildType.name}.apk"
+                    def copyTask = tasks.register("copy${variant.name.capitalize()}ApkToRelease", Copy) {
+                        from(variant.packageApplicationProvider.map { it.outputDirectory }) {
+                            include "*.apk"
+                        }
+                        into(releaseDir)
+                        rename { destFileName }
+                    }
+                    variant.assembleProvider.configure {
+                        finalizedBy(copyTask)
+                    }
+                }
             }
         }
     }
@@ -52,4 +108,12 @@ subprojects {
             }
         }
     }
+}
+
+tasks.register('cleanMirrlyJunk', Exec) {
+    group = 'cleanup'
+    description = 'Prunes stale Cargo debug artifacts and duplicate native Gradle intermediates inside MirrlyGram V2.'
+    workingDir = project.layout.projectDirectory.asFile
+    onlyIf { System.getProperty('os.name').toLowerCase().contains('windows') }
+    commandLine 'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "${project.layout.projectDirectory.asFile}/Tools/clean_mirrlygram.ps1", '-Auto', '-AfterBuild'
 }

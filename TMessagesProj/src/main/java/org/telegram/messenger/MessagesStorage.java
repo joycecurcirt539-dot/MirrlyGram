@@ -12132,6 +12132,28 @@ public class MessagesStorage extends BaseController {
                     if (message.local_id != 0) {
                         messageId = message.local_id;
                     }
+                    if (org.telegram.messenger.mirrly.MirrlyConfig.saveEditHistory && message.edit_date != 0 && !TextUtils.isEmpty(message.message)) {
+                        SQLiteCursor prevCursor = null;
+                        try {
+                            prevCursor = database.queryFinalized(String.format(Locale.US, "SELECT data FROM messages_v2 WHERE mid = %d AND uid = %d", messageId, message.dialog_id));
+                            if (prevCursor.next()) {
+                                NativeByteBuffer prevData = prevCursor.byteBufferValue(0);
+                                if (prevData != null) {
+                                    TLRPC.Message prevMsg = TLRPC.Message.TLdeserialize(prevData, prevData.readInt32(false), false);
+                                    prevData.reuse();
+                                    if (prevMsg != null && !TextUtils.isEmpty(prevMsg.message) && !TextUtils.equals(prevMsg.message, message.message)) {
+                                        int prevTime = prevMsg.edit_date != 0 ? prevMsg.edit_date : prevMsg.date;
+                                        org.telegram.messenger.mirrly.MirrlyVaultStorage.recordEdit(message.dialog_id, messageId, prevMsg.message, prevTime);
+                                    }
+                                }
+                            }
+                        } catch (Throwable ignore) {
+                        } finally {
+                            if (prevCursor != null) {
+                                prevCursor.dispose();
+                            }
+                        }
+                    }
                     MessageObject.normalizeFlags(message);
                     NativeByteBuffer data = new NativeByteBuffer(message.getObjectSize());
                     message.serializeToStream(data);
@@ -12196,6 +12218,28 @@ public class MessagesStorage extends BaseController {
                     if (message.local_id != 0) {
                         messageId = message.local_id;
                     }
+                    if (org.telegram.messenger.mirrly.MirrlyConfig.saveEditHistory && message.edit_date != 0 && !TextUtils.isEmpty(message.message)) {
+                        SQLiteCursor prevCursor = null;
+                        try {
+                            prevCursor = database.queryFinalized(String.format(Locale.US, "SELECT data FROM messages_v2 WHERE mid = %d AND uid = %d", messageId, message.dialog_id));
+                            if (prevCursor.next()) {
+                                NativeByteBuffer prevData = prevCursor.byteBufferValue(0);
+                                if (prevData != null) {
+                                    TLRPC.Message prevMsg = TLRPC.Message.TLdeserialize(prevData, prevData.readInt32(false), false);
+                                    prevData.reuse();
+                                    if (prevMsg != null && !TextUtils.isEmpty(prevMsg.message) && !TextUtils.equals(prevMsg.message, message.message)) {
+                                        int prevTime = prevMsg.edit_date != 0 ? prevMsg.edit_date : prevMsg.date;
+                                        org.telegram.messenger.mirrly.MirrlyVaultStorage.recordEdit(message.dialog_id, messageId, prevMsg.message, prevTime);
+                                    }
+                                }
+                            }
+                        } catch (Throwable ignore) {
+                        } finally {
+                            if (prevCursor != null) {
+                                prevCursor.dispose();
+                            }
+                        }
+                    }
                     MessageObject.normalizeFlags(message);
                     NativeByteBuffer data = new NativeByteBuffer(message.getObjectSize());
                     message.serializeToStream(data);
@@ -12256,6 +12300,28 @@ public class MessagesStorage extends BaseController {
                     int messageId = message.id;
                     if (message.local_id != 0) {
                         messageId = message.local_id;
+                    }
+                    if (org.telegram.messenger.mirrly.MirrlyConfig.saveEditHistory && message.edit_date != 0 && !TextUtils.isEmpty(message.message)) {
+                        SQLiteCursor prevCursor = null;
+                        try {
+                            prevCursor = database.queryFinalized(String.format(Locale.US, "SELECT data FROM messages_v2 WHERE mid = %d AND uid = %d", messageId, message.dialog_id));
+                            if (prevCursor.next()) {
+                                NativeByteBuffer prevData = prevCursor.byteBufferValue(0);
+                                if (prevData != null) {
+                                    TLRPC.Message prevMsg = TLRPC.Message.TLdeserialize(prevData, prevData.readInt32(false), false);
+                                    prevData.reuse();
+                                    if (prevMsg != null && !TextUtils.isEmpty(prevMsg.message) && !TextUtils.equals(prevMsg.message, message.message)) {
+                                        int prevTime = prevMsg.edit_date != 0 ? prevMsg.edit_date : prevMsg.date;
+                                        org.telegram.messenger.mirrly.MirrlyVaultStorage.recordEdit(message.dialog_id, messageId, prevMsg.message, prevTime);
+                                    }
+                                }
+                            }
+                        } catch (Throwable ignore) {
+                        } finally {
+                            if (prevCursor != null) {
+                                prevCursor.dispose();
+                            }
+                        }
                     }
                     MessageObject.normalizeFlags(message);
                     NativeByteBuffer data = new NativeByteBuffer(message.getObjectSize());
@@ -12767,6 +12833,28 @@ public class MessagesStorage extends BaseController {
                     int messageId = message.id;
                     if (message.local_id != 0) {
                         messageId = message.local_id;
+                    }
+                    if (org.telegram.messenger.mirrly.MirrlyConfig.saveEditHistory && message.edit_date != 0 && !TextUtils.isEmpty(message.message)) {
+                        SQLiteCursor prevCursor = null;
+                        try {
+                            prevCursor = database.queryFinalized(String.format(Locale.US, "SELECT data FROM messages_v2 WHERE mid = %d AND uid = %d", messageId, message.dialog_id));
+                            if (prevCursor.next()) {
+                                NativeByteBuffer prevData = prevCursor.byteBufferValue(0);
+                                if (prevData != null) {
+                                    TLRPC.Message prevMsg = TLRPC.Message.TLdeserialize(prevData, prevData.readInt32(false), false);
+                                    prevData.reuse();
+                                    if (prevMsg != null && !TextUtils.isEmpty(prevMsg.message) && !TextUtils.equals(prevMsg.message, message.message)) {
+                                        int prevTime = prevMsg.edit_date != 0 ? prevMsg.edit_date : prevMsg.date;
+                                        org.telegram.messenger.mirrly.MirrlyVaultStorage.recordEdit(message.dialog_id, messageId, prevMsg.message, prevTime);
+                                    }
+                                }
+                            }
+                        } catch (Throwable ignore) {
+                        } finally {
+                            if (prevCursor != null) {
+                                prevCursor.dispose();
+                            }
+                        }
                     }
                     MessageObject.normalizeFlags(message);
                     NativeByteBuffer data = new NativeByteBuffer(message.getObjectSize());

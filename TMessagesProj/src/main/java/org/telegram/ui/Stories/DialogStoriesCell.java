@@ -159,7 +159,7 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
     LinearLayoutManager layoutManager;
     AnimatedTextView titleView;
     ActionBarAnimatedSubtitleOverlayContainer subtitleOverlayContainer;
-    ImageView telegramLogoView;
+    SimpleTextView telegramLogoView;
     ImageView emojiStatusView;
     AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable statusDrawable;
     boolean drawCircleForce;
@@ -333,14 +333,17 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
         titleView.setFocusableInTouchMode(true);
         addView(titleView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        telegramLogoView = new ImageView(context);
-        telegramLogoView.setContentDescription(getString(R.string.AppName));
-        telegramLogoView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        telegramLogoView.setImageResource(R.drawable.telegram_logo_2);
-        telegramLogoView.setColorFilter(getTextLogoColor(), PorterDuff.Mode.MULTIPLY);
+        telegramLogoView = new SimpleTextView(context);
+        telegramLogoView.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
+        telegramLogoView.setTextColor(getTextLogoColor());
+        telegramLogoView.setTypeface(AndroidUtilities.bold());
+        telegramLogoView.setPadding(0, dp(8), 0, dp(8));
+        telegramLogoView.setTextSize(!AndroidUtilities.isTablet() && getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE ? 18 : 20);
+        telegramLogoView.setText("MirrlyGram");
+        telegramLogoView.setContentDescription("MirrlyGram");
         telegramLogoView.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         telegramLogoView.setFocusableInTouchMode(true);
-        addView(telegramLogoView, LayoutHelper.createFrame(90, 22));
+        addView(telegramLogoView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT));
 
         statusDrawable = new AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable(null, dp(26));
         statusDrawable.center = true;
@@ -943,10 +946,11 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
             titleView.setTranslationX(lastViewRight);
             titleView.getDrawable().setRightPadding(lastViewRight - dp(12) + actionBar.menu.getVisibleItemsMeasuredWidthWithAlpha() * progress);
 
-            telegramLogoView.setTranslationX(titleView.getTranslationX() + dp(1));
-            telegramLogoView.setTranslationY(bottomY - barOffset + dp(14 + FAKE_TOP_PADDING + 4.333f) + translationOffset /*titleView.getTranslationY() + dpf2(37.33f)*/);
+            float logoOffset = (telegramLogoView.getMeasuredHeight() - telegramLogoView.getTextHeight()) / 2f;
+            telegramLogoView.setTranslationX(titleView.getTranslationX());
+            telegramLogoView.setTranslationY(bottomY - barOffset + dp(14) - logoOffset + dp(FAKE_TOP_PADDING) + translationOffset);
 
-            emojiStatusView.setTranslationX(titleView.getTranslationX() - dpf2(3.33f) + telegramLogoView.getMeasuredWidth());
+            emojiStatusView.setTranslationX(titleView.getTranslationX() + dp(4) + telegramLogoView.getTextWidth());
             emojiStatusView.setTranslationY(bottomY - barOffset + dp(14 - 11 + FAKE_TOP_PADDING + 4.333f) + translationOffset);
 
             subtitleOverlayContainer.setTranslationX(titleView.getTranslationX());
@@ -1012,7 +1016,9 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        titleView.setTextSize(dp(!AndroidUtilities.isTablet() && getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE ? 18 : 20));
+        int titleTextSize = !AndroidUtilities.isTablet() && getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE ? 18 : 20;
+        titleView.setTextSize(dp(titleTextSize));
+        telegramLogoView.setTextSize(titleTextSize);
         currentCellWidth = dp(ITEM_WIDTH);
         AndroidUtilities.rectTmp.set(0, 0, getMeasuredWidth(), getMeasuredHeight());
         super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(dp(85 + FAKE_TOP_PADDING), MeasureSpec.EXACTLY));
@@ -1158,7 +1164,7 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
         if (subtitleOverlayContainer != null) {
             subtitleOverlayContainer.updateColors();
         }
-        telegramLogoView.setColorFilter(getTextLogoColor(), PorterDuff.Mode.MULTIPLY);
+        telegramLogoView.setTextColor(getTextLogoColor());
         AndroidUtilities.forEachViews(recyclerListView, view -> {
             StoryCell cell = (StoryCell) view;
             cell.invalidate();

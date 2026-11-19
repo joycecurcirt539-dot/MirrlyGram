@@ -69,6 +69,14 @@
 -keep class com.huawei.updatesdk.**{ *; }
 -keep class com.huawei.hms.**{ *; }
 
+# Yandex MapKit SDK
+-keep class com.yandex.mapkit.** { *; }
+-keep class com.yandex.runtime.** { *; }
+-keep class com.yandex.android.mapkit.** { *; }
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+
 # Don't warn about checkerframework and Kotlin annotations
 -dontwarn org.checkerframework.**
 -dontwarn javax.annotation.**
@@ -76,6 +84,7 @@
 -keep class io.nano.tex.** {*;}
 
 -keep class org.telegram.tgnet.** { *; }
+-keep class org.telegram.messenger.mirrly.** { *; }
 
 # JLatexMath: macro/atom classes are loaded reflectively by Class.forName
 -keep class org.scilab.forge.jlatexmath.** { *; }

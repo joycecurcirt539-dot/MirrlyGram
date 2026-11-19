@@ -46,19 +46,54 @@ android {
         localeFilters += ["zz"]
     }
 
+    def localSigningProps = new Properties()
+    def localPropsFile = rootProject.file('local.properties')
+    if (localPropsFile.exists()) {
+        localPropsFile.withInputStream { localSigningProps.load(it) }
+    }
+    def resolveSigningProp = { String propName, String envName, String fallback ->
+        def fromLocal = localSigningProps.getProperty(propName)?.trim()
+        if (fromLocal) return fromLocal
+        def fromEnv = System.getenv(envName)?.trim()
+        if (fromEnv) return fromEnv
+        def fromGradle = project.hasProperty(propName) ? project.property(propName)?.toString()?.trim() : ""
+        if (fromGradle) return fromGradle
+        return fallback
+    }
+    def resolveStoreFile = { String path ->
+        if (!path) return null
+        def modFile = file(path)
+        if (modFile.exists()) return modFile
+        def rootFile = rootProject.file(path)
+        if (rootFile.exists()) return rootFile
+        return null
+    }
+    def requestedStorePath = resolveSigningProp("RELEASE_STORE_FILE", "MIRRLY_RELEASE_STORE_FILE", "../TMessagesProj/config/mirrly-release.jks")
+    def signingStoreFile = resolveStoreFile(requestedStorePath) ?: file("../TMessagesProj/config/release.keystore")
+    def usingFallbackKeystore = (signingStoreFile.name == "release.keystore")
+    def signingStorePassword = usingFallbackKeystore ? RELEASE_STORE_PASSWORD : resolveSigningProp("RELEASE_STORE_PASSWORD", "MIRRLY_RELEASE_STORE_PASSWORD", RELEASE_STORE_PASSWORD)
+    def signingKeyAlias = usingFallbackKeystore ? RELEASE_KEY_ALIAS : resolveSigningProp("RELEASE_KEY_ALIAS", "MIRRLY_RELEASE_KEY_ALIAS", RELEASE_KEY_ALIAS)
+    def signingKeyPassword = usingFallbackKeystore ? RELEASE_KEY_PASSWORD : resolveSigningProp("RELEASE_KEY_PASSWORD", "MIRRLY_RELEASE_KEY_PASSWORD", RELEASE_KEY_PASSWORD)
+
     signingConfigs {
         debug {
-            storeFile file("../TMessagesProj/config/release.keystore")
-            storePassword RELEASE_STORE_PASSWORD
-            keyAlias RELEASE_KEY_ALIAS
-            keyPassword RELEASE_KEY_PASSWORD
+            storeFile signingStoreFile
+            storePassword signingStorePassword
+            keyAlias signingKeyAlias
+            keyPassword signingKeyPassword
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
 
         release {
-            storeFile file("../TMessagesProj/config/release.keystore")
-            storePassword RELEASE_STORE_PASSWORD
-            keyAlias RELEASE_KEY_ALIAS
-            keyPassword RELEASE_KEY_PASSWORD
+            storeFile signingStoreFile
+            storePassword signingStorePassword
+            keyAlias signingKeyAlias
+            keyPassword signingKeyPassword
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
         }
     }
 
@@ -78,7 +113,7 @@ android {
             shrinkResources false
             multiDexEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), '../TMessagesProj/proguard-rules.pro'
-            ndk.debugSymbolLevel = 'FULL'
+            ndk.debugSymbolLevel = rootProject.ext.mirrlyNativeDebugSymbolLevel
         }
 
         standalone {
@@ -90,7 +125,7 @@ android {
             shrinkResources true
             multiDexEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), '../TMessagesProj/proguard-rules.pro'
-            ndk.debugSymbolLevel = 'FULL'
+            ndk.debugSymbolLevel = rootProject.ext.mirrlyNativeDebugSymbolLevel
         }
 
         release {
@@ -101,7 +136,7 @@ android {
             shrinkResources true
             multiDexEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), '../TMessagesProj/proguard-rules.pro'
-            ndk.debugSymbolLevel = 'FULL'
+            ndk.debugSymbolLevel = rootProject.ext.mirrlyNativeDebugSymbolLevel
         }
     }
 
@@ -131,7 +166,7 @@ android {
         }
         afat {
             ndk {
-                abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
+                abiFilters.addAll(rootProject.ext.mirrlyAfatAbis)
             }
             sourceSets.debug {
                 manifest.srcFile '../TMessagesProj/config/debug/AndroidManifest_SDK23.xml'

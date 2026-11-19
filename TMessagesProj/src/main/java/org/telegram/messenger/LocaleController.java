@@ -36,6 +36,7 @@ import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 import androidx.annotation.StringRes;
 
+import org.telegram.messenger.mirrly.MirrlyBrandFormatter;
 import org.telegram.utils.localization.Localization;
 import org.telegram.localization.LocalizationUtils;
 import org.telegram.messenger.time.FastDateFormat;
@@ -1470,6 +1471,9 @@ public class LocaleController {
     }
 
     private String getStringInternal(String key, String fallback, int res) {
+        if (res == R.string.AppName || res == R.string.AppNameBeta || "AppName".equals(key) || "AppNameBeta".equals(key)) {
+            return MirrlyBrandFormatter.BRAND_NAME;
+        }
         final String value = getStringV2(key, res, fallback);
         if (value == null) {
             return "LOC_ERR:" + key;
@@ -1482,7 +1486,7 @@ public class LocaleController {
         if (value == null) {
             value = getInstance().getLocalizedString(key);
         }
-        return value;
+        return formatBrandString(key, 0, value);
     }
 
     public static String getString(@StringRes int res) {
@@ -1602,8 +1606,11 @@ public class LocaleController {
             if (value == null) {
                 value = getInstance().getLocalizedString(key + "_other");
             }
-            value = value.replace("%d", "%1$s");
-            value = value.replace("%1$d", "%1$s");
+            value = formatBrandString(key, 0, value);
+            if (value != null) {
+                value = value.replace("%d", "%1$s");
+                value = value.replace("%1$d", "%1$s");
+            }
 
             Object[] a = new Object[(args == null ? 0 : args.length) + 1];
             for (int i = 0; i < a.length; ++i) {
@@ -1667,7 +1674,7 @@ public class LocaleController {
             if (res != 0) {
                 // a broken language pack string (bad placeholders): show the built-in one instead of LOC_ERR
                 try {
-                    return String.format(ApplicationLoader.applicationContext.getString(res), args);
+                    return String.format(formatBrandString(key, res, ApplicationLoader.applicationContext.getString(res)), args);
                 } catch (Exception ignore) {}
             }
             return "LOC_ERR: " + key;
@@ -4781,6 +4788,11 @@ public class LocaleController {
 
     @Nullable
     private String getStringV2(String key, @StringRes int stringRes, String fallback) {
+        return formatBrandString(key, stringRes, getRawStringV2(key, stringRes, fallback));
+    }
+
+    @Nullable
+    private String getRawStringV2(String key, @StringRes int stringRes, String fallback) {
         final Context context = ApplicationLoader.applicationContext;
         String value;
 
@@ -4803,6 +4815,47 @@ public class LocaleController {
         }
 
         return localizationInternal.getByResName(fallback);
+    }
+
+    private static String formatBrandString(String key, @StringRes int stringRes, String value) {
+        if (value == null || isExcludedStringRes(stringRes)) {
+            return value;
+        }
+        return MirrlyBrandFormatter.format(key, value);
+    }
+
+    private static boolean isExcludedStringRes(@StringRes int res) {
+        if (res == 0) {
+            return false;
+        }
+        return res == R.string.AppName
+                || res == R.string.AppNameBeta
+                || res == R.string.AppIconMirrly
+                || res == R.string.TelegramFAQ
+                || res == R.string.TelegramFaq
+                || res == R.string.TelegramFeatures
+                || res == R.string.TelegramPremium
+                || res == R.string.TelegramPremiumShort
+                || res == R.string.TelegramStars
+                || res == R.string.TelegramBusiness
+                || res == R.string.TelegramPassport
+                || res == R.string.TelegramPassportDelete
+                || res == R.string.TelegramPassportDeleteTitle
+                || res == R.string.TelegramPassportCreatePassword
+                || res == R.string.TelegramFaqUrl
+                || res == R.string.TelegramFeaturesUrl
+                || res == R.string.PrivacyPolicyUrl
+                || res == R.string.TermsOfServiceUrl
+                || res == R.string.WebAppDisclaimerUrl
+                || res == R.string.EncryptionKeyLink
+                || res == R.string.EmojiSuggestionsUrl
+                || res == R.string.PassportInfoUrl
+                || res == R.string.CheckPhoneNumberLearnMoreUrl
+                || res == R.string.SponsoredMessageAlertLearnMoreUrl
+                || res == R.string.PromoteUrl
+                || res == R.string.BotWebViewToSLink
+                || res == R.string.BotDefaultPrivacyPolicy
+                || res == R.string.StarsTOSLink;
     }
 
 

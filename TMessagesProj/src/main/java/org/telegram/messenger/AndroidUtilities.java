@@ -20,6 +20,7 @@ import android.app.Activity;
 import android.app.AppOpsManager;
 import android.app.Dialog;
 import android.app.KeyguardManager;
+import android.app.PendingIntent;
 import android.app.PictureInPictureParams;
 import android.content.ContentResolver;
 import android.content.ContentUris;
@@ -30,6 +31,7 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageInstaller;
 import android.content.pm.PackageManager;
 import android.content.pm.Signature;
 import android.content.res.AssetFileDescriptor;
@@ -169,6 +171,7 @@ import org.telegram.ui.ChatBackgroundDrawable;
 import org.telegram.ui.Components.AlertsCreator;
 import org.telegram.ui.Components.BackgroundGradientDrawable;
 import org.telegram.ui.Components.Bulletin;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.ButtonSpan;
 import org.telegram.ui.Components.ColoredImageSpan;
 import org.telegram.ui.Components.CubicBezierInterpolator;
@@ -240,6 +243,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.GZIPOutputStream;
+import java.util.zip.ZipFile;
 
 import me.vkryl.core.BitwiseUtils;
 
@@ -1863,6 +1867,9 @@ public class AndroidUtilities {
 
     public static boolean isMapsInstalled(BaseFragment fragment) {
         String pkg = ApplicationLoader.getMapsProvider().getMapsAppPackageName();
+        if (TextUtils.isEmpty(pkg)) {
+            return true;
+        }
         try {
             ApplicationLoader.applicationContext.getPackageManager().getApplicationInfo(pkg, 0);
             return true;
@@ -4270,8 +4277,387 @@ public class AndroidUtilities {
         return key_hash;
     }
 
+    private static boolean isApkFileName(String name) {
+        return name != null && name.trim().toLowerCase(Locale.US).endsWith(".apk");
+    }
+
+    private static boolean isGenericOrZipMimeType(String mimeType) {
+        return TextUtils.isEmpty(mimeType)
+                || "application/octet-stream".equalsIgnoreCase(mimeType)
+                || "application/zip".equalsIgnoreCase(mimeType)
+                || "application/x-zip-compressed".equalsIgnoreCase(mimeType);
+    }
+
+    private static boolean hasApkMagicAndManifest(File f) {
+        if (f == null || !f.exists() || !f.isFile() || f.length() < 22) {
+            return false;
+        }
+        try (FileInputStream fis = new FileInputStream(f)) {
+            byte[] header = new byte[4];
+            if (fis.read(header) != 4 || header[0] != 0x50 || header[1] != 0x4B || (header[2] != 0x03 && header[2] != 0x05)) {
+                return false;
+            }
+        } catch (Throwable ignore) {
+            return false;
+        }
+        try (ZipFile zip = new ZipFile(f)) {
+            return zip.getEntry("AndroidManifest.xml") != null;
+        } catch (Throwable ignore) {
+            return false;
+        }
+    }
+
+    public static boolean isApkDocument(MessageObject message) {
+        if (message == null || message.getDocument() == null) {
+            return false;
+        }
+        String name = message.getDocumentName();
+        String mime = message.getMimeType();
+        if (isApkFileName(name) || "application/vnd.android.package-archive".equalsIgnoreCase(mime)) {
+            return true;
+        }
+        File f = null;
+        if (!TextUtils.isEmpty(message.messageOwner.attachPath)) {
+            File candidate = new File(message.messageOwner.attachPath);
+            if (candidate.exists()) {
+                f = candidate;
+            }
+        }
+        if (f == null) {
+            File candidate = FileLoader.getInstance(message.currentAccount).getPathToMessage(message.messageOwner);
+            if (candidate != null && candidate.exists()) {
+                f = candidate;
+            }
+        }
+        return "application/vnd.android.package-archive".equalsIgnoreCase(resolveDocumentMimeType(f, name, mime));
+    }
+
+    private static String resolveDocumentMimeType(File f, String fileName, String mimeType) {
+        if (isApkFileName(fileName)
+                || (f != null && isApkFileName(f.getName()))
+                || "application/vnd.android.package-archive".equalsIgnoreCase(mimeType)
+                || (isGenericOrZipMimeType(mimeType) && hasApkMagicAndManifest(f))) {
+            return "application/vnd.android.package-archive";
+        }
+        String nameForExt = fileName;
+        int idx = nameForExt == null ? -1 : nameForExt.lastIndexOf('.');
+        if (idx == -1 && f != null) {
+            nameForExt = f.getName();
+            idx = nameForExt == null ? -1 : nameForExt.lastIndexOf('.');
+        }
+        if (idx != -1) {
+            String ext = nameForExt.substring(idx + 1);
+            String resolved = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.toLowerCase(Locale.US));
+            if (resolved == null) {
+                resolved = mimeType;
+            }
+            if (resolved != null && !resolved.isEmpty()) {
+                return resolved;
+            }
+        }
+        return null;
+    }
+
+    private static Uri getFileProviderUri(Context context, File f) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            return FileProvider.getUriForFile(context, ApplicationLoader.getApplicationId() + ".provider", f);
+        }
+        return Uri.fromFile(f);
+    }
+
+    private static final String APK_MIME_TYPE = "application/vnd.android.package-archive";
+    private static final String APK_STAGE_DIR = "apk_install";
+
+    public static void cleanupStagedApkFilesAsync() {
+        Utilities.globalQueue.postRunnable(() -> cleanupStagedApkFiles(ApplicationLoader.applicationContext, null));
+    }
+
+    private static void cleanupStagedApkFiles(Context context, File keepFile) {
+        if (context == null) {
+            return;
+        }
+        try {
+            File stageDir = new File(context.getCacheDir(), APK_STAGE_DIR);
+            File[] files = stageDir.listFiles();
+            if (files == null) {
+                return;
+            }
+            for (File file : files) {
+                if (file != null && file.isFile() && (keepFile == null || !file.equals(keepFile))) {
+                    //noinspection ResultOfMethodCallIgnored
+                    file.delete();
+                }
+            }
+        } catch (Throwable ignore) {
+        }
+    }
+
+    private static File stageApkFile(Context context, File source) throws IOException {
+        File stageDir = new File(context.getCacheDir(), APK_STAGE_DIR);
+        if (!stageDir.exists() && !stageDir.mkdirs() && !stageDir.isDirectory()) {
+            throw new IOException("Cannot create apk staging dir");
+        }
+        String rawName = source.getName();
+        if (rawName == null) {
+            rawName = "package.apk";
+        }
+        int slash = Math.max(rawName.lastIndexOf('/'), rawName.lastIndexOf('\\'));
+        if (slash >= 0) {
+            rawName = rawName.substring(slash + 1);
+        }
+        String sanitized = rawName.replaceAll("[^a-zA-Z0-9._-]", "_");
+        while (sanitized.contains("..")) {
+            sanitized = sanitized.replace("..", "_");
+        }
+        if (sanitized.isEmpty() || ".".equals(sanitized)) {
+            sanitized = "package.apk";
+        }
+        if (!sanitized.toLowerCase(Locale.US).endsWith(".apk")) {
+            sanitized = sanitized + ".apk";
+        } else if (!sanitized.endsWith(".apk")) {
+            sanitized = sanitized.substring(0, sanitized.length() - 4) + ".apk";
+        }
+
+        File target = new File(stageDir, sanitized);
+        String canonicalDir = stageDir.getCanonicalPath() + File.separator;
+        String canonicalTarget = target.getCanonicalPath();
+        if (!canonicalTarget.startsWith(canonicalDir)) {
+            throw new IOException("Invalid apk stage path");
+        }
+
+        cleanupStagedApkFiles(context, target);
+        if (target.exists() && target.length() == source.length() && target.lastModified() >= source.lastModified()) {
+            return target;
+        }
+
+        byte[] buffer = new byte[64 * 1024];
+        try (FileInputStream in = new FileInputStream(source);
+             FileOutputStream out = new FileOutputStream(target)) {
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                out.write(buffer, 0, read);
+            }
+            out.flush();
+        }
+        return target;
+    }
+
+    private static boolean startInstallerIntent(Intent intent, Activity activity, Context ctx) {
+        try {
+            if (activity != null && !activity.isFinishing() && !activity.isDestroyed()) {
+                activity.startActivityForResult(intent, 500);
+            } else {
+                Intent taskIntent = new Intent(intent);
+                taskIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                ctx.startActivity(taskIntent);
+            }
+            return true;
+        } catch (Throwable t) {
+            FileLog.e(t);
+            return false;
+        }
+    }
+
+    private static boolean launchExternalApkInstallerIntents(Uri uri, Activity activity, Context ctx) {
+        if (uri == null) {
+            return false;
+        }
+        Intent viewIntent = new Intent(Intent.ACTION_VIEW);
+        viewIntent.setDataAndType(uri, APK_MIME_TYPE);
+        viewIntent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        if (startInstallerIntent(viewIntent, activity, ctx)) {
+            return true;
+        }
+
+        Intent installTyped = new Intent(Intent.ACTION_INSTALL_PACKAGE);
+        installTyped.setDataAndType(uri, APK_MIME_TYPE);
+        installTyped.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        if (startInstallerIntent(installTyped, activity, ctx)) {
+            return true;
+        }
+
+        Intent installPlain = new Intent(Intent.ACTION_INSTALL_PACKAGE);
+        installPlain.setData(uri);
+        installPlain.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        return startInstallerIntent(installPlain, activity, ctx);
+    }
+
+    private static void installViaPackageInstallerSession(File apkFile, Context ctx, AtomicBoolean cancelled) throws IOException {
+        if (apkFile == null || !apkFile.exists()) {
+            throw new FileNotFoundException("APK file missing");
+        }
+        PackageInstaller packageInstaller = ctx.getPackageManager().getPackageInstaller();
+        PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+        long sizeBytes = apkFile.length();
+        if (sizeBytes > 0) {
+            params.setSize(sizeBytes);
+        }
+        int sessionId = packageInstaller.createSession(params);
+        PackageInstaller.Session session = null;
+        boolean committed = false;
+        try {
+            session = packageInstaller.openSession(sessionId);
+            byte[] buffer = new byte[64 * 1024];
+            try (FileInputStream in = new FileInputStream(apkFile);
+                 OutputStream out = session.openWrite("base.apk", 0, sizeBytes > 0 ? sizeBytes : -1)) {
+                int read;
+                while ((read = in.read(buffer)) != -1) {
+                    if (cancelled != null && cancelled.get()) {
+                        return;
+                    }
+                    out.write(buffer, 0, read);
+                }
+                session.fsync(out);
+            }
+            if (cancelled != null && cancelled.get()) {
+                return;
+            }
+            Intent statusIntent = new Intent(ctx, ApkInstallStatusReceiver.class);
+            statusIntent.setAction(ApkInstallStatusReceiver.ACTION_INSTALL_STATUS);
+            statusIntent.setPackage(ctx.getPackageName());
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                flags |= PendingIntent.FLAG_MUTABLE;
+            }
+            PendingIntent pendingIntent = PendingIntent.getBroadcast(ctx, sessionId, statusIntent, flags);
+            session.commit(pendingIntent.getIntentSender());
+            committed = true;
+        } finally {
+            if (session != null) {
+                if (!committed) {
+                    try {
+                        session.abandon();
+                    } catch (Throwable ignore) {
+                    }
+                }
+                try {
+                    session.close();
+                } catch (Throwable ignore) {
+                }
+            }
+        }
+    }
+
+    private static void showApkInstallFailed() {
+        runOnUIThread(() -> {
+            try {
+                BulletinFactory.global().createSimpleBulletin(R.raw.error, LocaleController.getString(R.string.ApkInstallFailed)).show(false);
+            } catch (Throwable t) {
+                FileLog.e(t);
+            }
+        });
+    }
+
+    public static boolean launchApkInstaller(final File f, final Activity activity, final Theme.ResourcesProvider resourcesProvider) {
+        if (f == null || !f.exists()) {
+            return false;
+        }
+        final Context ctx = activity != null ? activity : ApplicationLoader.applicationContext;
+        if (ctx == null) {
+            return false;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !ctx.getPackageManager().canRequestPackageInstalls()) {
+            Activity dialogActivity = activity != null ? activity : LaunchActivity.instance;
+            if (dialogActivity != null && !dialogActivity.isFinishing() && !dialogActivity.isDestroyed()) {
+                AlertsCreator.createApkRestrictedDialog(dialogActivity, resourcesProvider).show();
+                return true;
+            }
+            return false;
+        }
+
+        Uri directUri = null;
+        boolean hasLowerApkSuffix = f.getName() != null && f.getName().endsWith(".apk");
+        if (hasLowerApkSuffix) {
+            try {
+                directUri = getFileProviderUri(ctx, f);
+            } catch (Throwable t) {
+                FileLog.e(t);
+            }
+            if (directUri != null && launchExternalApkInstallerIntents(directUri, activity, ctx)) {
+                return true;
+            }
+        }
+
+        final boolean needStage = !hasLowerApkSuffix || directUri == null;
+        final AtomicBoolean cancelled = new AtomicBoolean(false);
+        final AlertDialog progressDialog = activity != null && !activity.isFinishing() && !activity.isDestroyed()
+                ? new AlertDialog(activity, AlertDialog.ALERT_TYPE_SPINNER, resourcesProvider)
+                : null;
+        if (progressDialog != null) {
+            progressDialog.setCanCancel(true);
+            progressDialog.setOnCancelListener(d -> cancelled.set(true));
+            progressDialog.showDelayed(150);
+        }
+
+        Utilities.globalQueue.postRunnable(() -> {
+            try {
+                File installFile = needStage ? stageApkFile(ctx, f) : f;
+                if (cancelled.get()) {
+                    return;
+                }
+                if (needStage) {
+                    Uri stagedUri = null;
+                    try {
+                        stagedUri = getFileProviderUri(ctx, installFile);
+                    } catch (Throwable t) {
+                        FileLog.e(t);
+                    }
+                    if (stagedUri != null) {
+                        final Uri finalStagedUri = stagedUri;
+                        final File finalInstallFile = installFile;
+                        runOnUIThread(() -> {
+                            if (progressDialog != null) {
+                                try {
+                                    progressDialog.dismiss();
+                                } catch (Throwable ignore) {
+                                }
+                            }
+                            if (cancelled.get()) {
+                                return;
+                            }
+                            if (!launchExternalApkInstallerIntents(finalStagedUri, activity, ctx)) {
+                                Utilities.globalQueue.postRunnable(() -> {
+                                    try {
+                                        installViaPackageInstallerSession(finalInstallFile, ctx, cancelled);
+                                    } catch (Throwable t) {
+                                        FileLog.e(t);
+                                        showApkInstallFailed();
+                                    }
+                                });
+                            }
+                        });
+                        return;
+                    }
+                }
+                installViaPackageInstallerSession(installFile, ctx, cancelled);
+                runOnUIThread(() -> {
+                    if (progressDialog != null) {
+                        try {
+                            progressDialog.dismiss();
+                        } catch (Throwable ignore) {
+                        }
+                    }
+                });
+            } catch (Throwable t) {
+                FileLog.e(t);
+                runOnUIThread(() -> {
+                    if (progressDialog != null) {
+                        try {
+                            progressDialog.dismiss();
+                        } catch (Throwable ignore) {
+                        }
+                    }
+                });
+                if (!cancelled.get()) {
+                    showApkInstallFailed();
+                }
+            }
+        });
+        return true;
+    }
+
     public static void openDocument(MessageObject message, Activity activity, BaseFragment parentFragment) {
-        if (message == null) {
+        if (message == null || activity == null) {
             return;
         }
         TLRPC.Document document = message.getDocument();
@@ -4280,10 +4666,14 @@ public class AndroidUtilities {
         }
         File f = null;
         String fileName = message.messageOwner.media != null ? FileLoader.getAttachFileName(document) : "";
+        String docName = message.getDocumentName();
+        if (!isApkFileName(fileName) && isApkFileName(docName)) {
+            fileName = docName;
+        }
         if (message.messageOwner.attachPath != null && message.messageOwner.attachPath.length() != 0) {
             f = new File(message.messageOwner.attachPath);
         }
-        if (f == null || f != null && !f.exists()) {
+        if (f == null || !f.exists()) {
             f = FileLoader.getInstance(UserConfig.selectedAccount).getPathToMessage(message.messageOwner);
         }
         if (f != null && f.exists()) {
@@ -4303,53 +4693,39 @@ public class AndroidUtilities {
                     parentFragment.showDialog(builder.create());
                 }
             } else {
-                String realMimeType = null;
+                Theme.ResourcesProvider resourcesProvider = parentFragment != null ? parentFragment.getResourceProvider() : null;
                 try {
+                    String realMimeType = resolveDocumentMimeType(f, fileName, document.mime_type);
+                    if ("application/vnd.android.package-archive".equals(realMimeType)) {
+                        launchApkInstaller(f, activity, resourcesProvider);
+                        return;
+                    }
                     Intent intent = new Intent(Intent.ACTION_VIEW);
                     intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    MimeTypeMap myMime = MimeTypeMap.getSingleton();
-                    int idx = fileName.lastIndexOf('.');
-                    if (idx != -1) {
-                        String ext = fileName.substring(idx + 1);
-                        realMimeType = myMime.getMimeTypeFromExtension(ext.toLowerCase());
-                        if (realMimeType == null) {
-                            realMimeType = document.mime_type;
-                            if (realMimeType == null || realMimeType.length() == 0) {
-                                realMimeType = null;
-                            }
-                        }
-                    }
-                    if (Build.VERSION.SDK_INT >= 24) {
-                        intent.setDataAndType(FileProvider.getUriForFile(activity, ApplicationLoader.getApplicationId() + ".provider", f), realMimeType != null ? realMimeType : "text/plain");
-                    } else {
-                        intent.setDataAndType(Uri.fromFile(f), realMimeType != null ? realMimeType : "text/plain");
-                    }
+                    intent.setDataAndType(getFileProviderUri(activity, f), realMimeType != null ? realMimeType : "text/plain");
                     if (realMimeType != null) {
                         try {
                             activity.startActivityForResult(intent, 500);
                         } catch (Exception e) {
-                            if (Build.VERSION.SDK_INT >= 24) {
-                                intent.setDataAndType(FileProvider.getUriForFile(activity, ApplicationLoader.getApplicationId() + ".provider", f), "text/plain");
-                            } else {
-                                intent.setDataAndType(Uri.fromFile(f), "text/plain");
-                            }
+                            intent.setDataAndType(getFileProviderUri(activity, f), "text/plain");
                             activity.startActivityForResult(intent, 500);
                         }
                     } else {
                         activity.startActivityForResult(intent, 500);
                     }
                 } catch (Exception e) {
-                    if (activity == null) {
-                        return;
-                    }
-                    AlertDialog.Builder builder = new AlertDialog.Builder(activity);
+                    FileLog.e(e);
+                    AlertDialog.Builder builder = new AlertDialog.Builder(activity, resourcesProvider);
+                    int topBgColor = parentFragment != null ? parentFragment.getThemedColor(Theme.key_dialogTopBackground) : Theme.getColor(Theme.key_dialogTopBackground, resourcesProvider);
                     Map<String, Integer> colorsReplacement = new HashMap<>();
-                    colorsReplacement.put("info1", parentFragment.getThemedColor(Theme.key_dialogTopBackground));
-                    colorsReplacement.put("info2", parentFragment.getThemedColor(Theme.key_dialogTopBackground));
-                    builder.setTopAnimation(R.raw.not_available, AlertsCreator.NEW_DENY_DIALOG_TOP_ICON_SIZE, false, parentFragment.getThemedColor(Theme.key_dialogTopBackground), colorsReplacement);
+                    colorsReplacement.put("info1", topBgColor);
+                    colorsReplacement.put("info2", topBgColor);
+                    builder.setTopAnimation(R.raw.not_available, AlertsCreator.NEW_DENY_DIALOG_TOP_ICON_SIZE, false, topBgColor, colorsReplacement);
                     builder.setTopAnimationIsNew(true);
                     builder.setPositiveButton(getString(R.string.OK), null);
-                    builder.setMessage(LocaleController.formatString("NoHandleAppInstalled", R.string.NoHandleAppInstalled, message.getDocument().mime_type));
+                    builder.setMessage(isApkDocument(message)
+                            ? LocaleController.getString(R.string.ApkInstallFailed)
+                            : LocaleController.formatString("NoHandleAppInstalled", R.string.NoHandleAppInstalled, message.getDocument().mime_type));
                     if (parentFragment != null) {
                         parentFragment.showDialog(builder.create());
                     } else {
@@ -4361,46 +4737,27 @@ public class AndroidUtilities {
     }
 
     public static boolean openForView(File f, String fileName, String mimeType, final Activity activity, Theme.ResourcesProvider resourcesProvider, boolean restrict) {
-        if (f != null && f.exists()) {
-            String realMimeType = null;
-            Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            MimeTypeMap myMime = MimeTypeMap.getSingleton();
+        if (f != null && f.exists() && activity != null) {
             int idx = fileName == null ? -1 : fileName.lastIndexOf('.');
             if (idx != -1) {
                 String ext = fileName.substring(idx + 1);
                 if (restrict && MessageObject.isV(ext)) {
                     return true;
                 }
-                realMimeType = myMime.getMimeTypeFromExtension(ext.toLowerCase());
-                if (realMimeType == null) {
-                    realMimeType = mimeType;
-                    if (realMimeType == null || realMimeType.length() == 0) {
-                        realMimeType = null;
-                    }
-                }
             }
-            if (realMimeType != null && realMimeType.equals("application/vnd.android.package-archive")) {
+            String realMimeType = resolveDocumentMimeType(f, fileName, mimeType);
+            if ("application/vnd.android.package-archive".equals(realMimeType)) {
                 if (restrict) return true;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !ApplicationLoader.applicationContext.getPackageManager().canRequestPackageInstalls()) {
-                    AlertsCreator.createApkRestrictedDialog(activity, resourcesProvider).show();
-                    return true;
-                }
+                return launchApkInstaller(f, activity, resourcesProvider);
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                intent.setDataAndType(FileProvider.getUriForFile(activity, ApplicationLoader.getApplicationId() + ".provider", f), realMimeType != null ? realMimeType : "text/plain");
-            } else {
-                intent.setDataAndType(Uri.fromFile(f), realMimeType != null ? realMimeType : "text/plain");
-            }
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.setDataAndType(getFileProviderUri(activity, f), realMimeType != null ? realMimeType : "text/plain");
             if (realMimeType != null) {
                 try {
                     activity.startActivityForResult(intent, 500);
                 } catch (Exception e) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                        intent.setDataAndType(FileProvider.getUriForFile(activity, ApplicationLoader.getApplicationId() + ".provider", f), "text/plain");
-                    } else {
-                        intent.setDataAndType(Uri.fromFile(f), "text/plain");
-                    }
+                    intent.setDataAndType(getFileProviderUri(activity, f), "text/plain");
                     activity.startActivityForResult(intent, 500);
                 }
             } else {
@@ -4412,6 +4769,9 @@ public class AndroidUtilities {
     }
 
     public static boolean openForView(MessageObject message, Activity activity, Theme.ResourcesProvider resourcesProvider, boolean restrict) {
+        if (message == null) {
+            return false;
+        }
         File f = null;
         if (message.messageOwner.attachPath != null && message.messageOwner.attachPath.length() != 0) {
             f = new File(message.messageOwner.attachPath);
@@ -4419,8 +4779,13 @@ public class AndroidUtilities {
         if (f == null || !f.exists()) {
             f = FileLoader.getInstance(message.currentAccount).getPathToMessage(message.messageOwner);
         }
+        String fileName = message.getFileName();
+        String docName = message.getDocumentName();
+        if (!isApkFileName(fileName) && isApkFileName(docName)) {
+            fileName = docName;
+        }
         String mimeType = message.type == MessageObject.TYPE_FILE || message.type == MessageObject.TYPE_TEXT ? message.getMimeType() : null;
-        return openForView(f, message.getFileName(), mimeType, activity, resourcesProvider, restrict);
+        return openForView(f, fileName, mimeType, activity, resourcesProvider, restrict);
     }
 
     public static boolean openForView(TLRPC.Document document, boolean forceCache, Activity activity) {
@@ -4532,37 +4897,19 @@ public class AndroidUtilities {
         String fileName = FileLoader.getAttachFileName(media);
         File f = FileLoader.getInstance(UserConfig.selectedAccount).getPathToAttach(media, true);
         if (f != null && f.exists()) {
-            String realMimeType = null;
+            String mimeType = media instanceof TLRPC.TL_document ? ((TLRPC.TL_document) media).mime_type : null;
+            String realMimeType = resolveDocumentMimeType(f, fileName, mimeType);
+            if ("application/vnd.android.package-archive".equals(realMimeType)) {
+                return launchApkInstaller(f, activity, null);
+            }
             Intent intent = new Intent(Intent.ACTION_VIEW);
             intent.setFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            MimeTypeMap myMime = MimeTypeMap.getSingleton();
-            int idx = fileName.lastIndexOf('.');
-            if (idx != -1) {
-                String ext = fileName.substring(idx + 1);
-                realMimeType = myMime.getMimeTypeFromExtension(ext.toLowerCase());
-                if (realMimeType == null) {
-                    if (media instanceof TLRPC.TL_document) {
-                        realMimeType = ((TLRPC.TL_document) media).mime_type;
-                    }
-                    if (realMimeType == null || realMimeType.length() == 0) {
-                        realMimeType = null;
-                    }
-                }
-            }
-            if (Build.VERSION.SDK_INT >= 24) {
-                intent.setDataAndType(FileProvider.getUriForFile(activity, ApplicationLoader.getApplicationId() + ".provider", f), realMimeType != null ? realMimeType : "text/plain");
-            } else {
-                intent.setDataAndType(Uri.fromFile(f), realMimeType != null ? realMimeType : "text/plain");
-            }
+            intent.setDataAndType(getFileProviderUri(activity, f), realMimeType != null ? realMimeType : "text/plain");
             if (realMimeType != null) {
                 try {
                     activity.startActivityForResult(intent, 500);
                 } catch (Exception e) {
-                    if (Build.VERSION.SDK_INT >= 24) {
-                        intent.setDataAndType(FileProvider.getUriForFile(activity, ApplicationLoader.getApplicationId() + ".provider", f), "text/plain");
-                    } else {
-                        intent.setDataAndType(Uri.fromFile(f), "text/plain");
-                    }
+                    intent.setDataAndType(getFileProviderUri(activity, f), "text/plain");
                     activity.startActivityForResult(intent, 500);
                 }
             } else {

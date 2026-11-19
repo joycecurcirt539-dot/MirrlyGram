@@ -44,12 +44,23 @@ public class ChatScrimPopupContainerLayout extends LinearLayout {
             popupLayoutLeftOffset = 0;
             super.onMeasure(widthMeasureSpec, heightMeasureSpec);
 
-            int maxWidth = reactionsLayout.getMeasuredWidth();
-            if (popupWindowLayout.getSwipeBack() != null && popupWindowLayout.getSwipeBack().getMeasuredWidth() > maxWidth) {
-                maxWidth = popupWindowLayout.getSwipeBack().getMeasuredWidth();
+            int popupHorizontalMargins = 0;
+            if (popupWindowLayout.getLayoutParams() instanceof MarginLayoutParams) {
+                MarginLayoutParams mlp = (MarginLayoutParams) popupWindowLayout.getLayoutParams();
+                popupHorizontalMargins = Math.max(0, mlp.leftMargin) + Math.max(0, mlp.rightMargin);
             }
-            if (popupWindowLayout.getMeasuredWidth() > maxWidth) {
-                maxWidth = popupWindowLayout.getMeasuredWidth();
+            int maxWidth = reactionsLayout.getMeasuredWidth();
+            if (popupWindowLayout.getSwipeBack() != null && popupWindowLayout.getSwipeBack().getMeasuredWidth() + popupHorizontalMargins > maxWidth) {
+                maxWidth = popupWindowLayout.getSwipeBack().getMeasuredWidth() + popupHorizontalMargins;
+            }
+            if (popupWindowLayout.getMeasuredWidth() + popupHorizontalMargins > maxWidth) {
+                maxWidth = popupWindowLayout.getMeasuredWidth() + popupHorizontalMargins;
+            }
+            if (MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED) {
+                int availableWidth = MeasureSpec.getSize(widthMeasureSpec);
+                if (availableWidth > 0 && maxWidth > availableWidth) {
+                    maxWidth = availableWidth;
+                }
             }
             if (reactionsLayout.showCustomEmojiReaction()) {
                 widthMeasureSpec = MeasureSpec.makeMeasureSpec(maxWidth, MeasureSpec.EXACTLY);

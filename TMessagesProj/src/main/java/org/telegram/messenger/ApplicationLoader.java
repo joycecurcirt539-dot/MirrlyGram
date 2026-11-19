@@ -76,6 +76,8 @@ public class ApplicationLoader extends Application {
 
     private static PushListenerController.IPushListenerServiceProvider pushProvider;
     private static IMapsProvider mapsProvider;
+    private static IMapsProvider googleMapsProvider;
+    private static IMapsProvider yandexMapsProvider;
     private static ILocationServiceProvider locationServiceProvider;
 
     @Override
@@ -96,10 +98,25 @@ public class ApplicationLoader extends Application {
     }
 
     public static IMapsProvider getMapsProvider() {
-        if (mapsProvider == null) {
-            mapsProvider = applicationLoaderInstance.onCreateMapsProvider();
+        org.telegram.messenger.mirrly.MirrlyConfig.load();
+        if (YandexMapsProvider.isSupportedOnDevice()) {
+            if (yandexMapsProvider == null) {
+                yandexMapsProvider = new YandexMapsProvider();
+            }
+            return yandexMapsProvider;
         }
-        return mapsProvider;
+        if (applicationLoaderInstance != null && applicationLoaderInstance.isHuaweiBuild()) {
+            if (mapsProvider == null) {
+                mapsProvider = applicationLoaderInstance.onCreateMapsProvider();
+            }
+            return mapsProvider;
+        }
+        if (googleMapsProvider == null) {
+            googleMapsProvider = applicationLoaderInstance != null
+                    ? applicationLoaderInstance.onCreateMapsProvider()
+                    : new GoogleMapsProvider();
+        }
+        return googleMapsProvider;
     }
 
     protected IMapsProvider onCreateMapsProvider() {
@@ -335,6 +352,8 @@ public class ApplicationLoader extends Application {
         }
 
         NativeLoader.initNativeLibs(ApplicationLoader.applicationContext);
+        org.telegram.messenger.mirrly.MirrlyEngineController.ensureDefaultProxyPreconfigured();
+        SharedConfig.loadProxyList();
 
         try {
             ConnectionsManager.native_setJava(false);
@@ -348,6 +367,8 @@ public class ApplicationLoader extends Application {
                 super.onActivityStarted(activity);
                 if (wasInBackground) {
                     ensureCurrentNetworkGet(true);
+                    org.telegram.messenger.mirrly.MirrlyEngineController.notifyScreenWake();
+                    AndroidUtilities.runOnUIThread(ApplicationLoader::startPushService);
                 }
             }
         };
@@ -376,21 +397,33 @@ public class ApplicationLoader extends Application {
     });
 
     public static void startPushService() {
-        SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();
-        boolean enabled;
-        if (preferences.contains("pushService")) {
-            enabled = preferences.getBoolean("pushService", true);
-        } else {
-            enabled = MessagesController.getMainSettings(UserConfig.selectedAccount).getBoolean("keepAliveService", false);
+        if (applicationContext == null) {
+            return;
         }
+        SharedPreferences preferences = MessagesController.getGlobalNotificationsSettings();
+        boolean enabled = preferences.getBoolean("pushService", true);
+        Intent intent = new Intent(applicationContext, NotificationsService.class);
         if (enabled) {
             try {
-                applicationContext.startService(new Intent(applicationContext, NotificationsService.class));
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    applicationContext.startForegroundService(intent);
+                } else {
+                    applicationContext.startService(intent);
+                }
+            } catch (Throwable t) {
+                FileLog.e(t);
+                try {
+                    applicationContext.startService(intent);
+                } catch (Throwable ignore) {
+
+                }
+            }
+        } else {
+            try {
+                applicationContext.stopService(intent);
             } catch (Throwable ignore) {
 
             }
-        } else {
-            applicationContext.stopService(new Intent(applicationContext, NotificationsService.class));
         }
     }
 
@@ -451,6 +484,13 @@ public class ApplicationLoader extends Application {
                             @Override
                             public void onAvailable(@NonNull Network network) {
                                 lastKnownNetworkType = -1;
+                                scheduleNetworkStateRefresh();
+                            }
+
+                            @Override
+                            public void onLost(@NonNull Network network) {
+                                lastKnownNetworkType = -1;
+                                scheduleNetworkStateRefresh();
                             }
 
                             @Override
@@ -465,6 +505,27 @@ public class ApplicationLoader extends Application {
 
             }
         }
+    }
+
+    private static final Runnable networkStateRefreshRunnable = () -> {
+        try {
+            org.telegram.messenger.mirrly.MirrlyEngineController.notifyNetworkState();
+            if (!applicationInited) {
+                return;
+            }
+            for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+                if (UserConfig.getInstance(a).isClientActivated()) {
+                    ConnectionsManager.getInstance(a).checkConnection();
+                }
+            }
+        } catch (Throwable t) {
+            FileLog.e(t);
+        }
+    };
+
+    private static void scheduleNetworkStateRefresh() {
+        AndroidUtilities.cancelRunOnUIThread(networkStateRefreshRunnable);
+        AndroidUtilities.runOnUIThread(networkStateRefreshRunnable, 250);
     }
 
     public static boolean isRoaming() {

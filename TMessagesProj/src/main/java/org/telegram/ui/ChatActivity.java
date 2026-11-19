@@ -1727,6 +1727,8 @@ public class ChatActivity extends BaseFragment implements
 
     private final static int chat_menu_topic_create = 73;
     private final static int chat_menu_topics_panel = 75;
+    private final static int chat_menu_chat_dossier = 76;
+    private final static int chat_menu_local_notes = 77;
 
     private final static int id_chat_compose_panel = 1000;
 
@@ -3746,6 +3748,10 @@ public class ChatActivity extends BaseFragment implements
                         getMessagesController().getTopicsController().toggleViewForumAsMessages(-dialog_id, false);
                         TopicsFragment.prepareToSwitchAnimation(ChatActivity.this);
                     }
+                } else if (id == chat_menu_chat_dossier) {
+                    MirrlyVaultSheets.showDossierSheet(ChatActivity.this, getDialogId(), 0, null, ChatActivity.this::updateVisibleRows);
+                } else if (id == chat_menu_local_notes) {
+                    presentFragment(new MirrlyNotesChatActivity());
                 } else if (id == copy) {
                     SpannableStringBuilder str = new SpannableStringBuilder();
                     long previousUid = 0;
@@ -4421,6 +4427,10 @@ public class ChatActivity extends BaseFragment implements
             }
             if (currentUser != null && currentUser.self && getDialogId() != UserObject.VERIFY) {
                 headerItem.lazilyAddSubItem(add_shortcut, R.drawable.msg_home, LocaleController.getString(R.string.AddShortcut));
+            }
+            if (getDialogId() != 0 && getDialogId() != UserObject.VERIFY) {
+                headerItem.lazilyAddSubItem(chat_menu_chat_dossier, R.drawable.msg_edit, LocaleController.getString(R.string.MirrlyNotesChatNoteTitle));
+                headerItem.lazilyAddSubItem(chat_menu_local_notes, R.drawable.outline_saved_24, LocaleController.getString(R.string.MirrlyNotesTitle));
             }
             if (!isTopic && !ChatObject.isMonoForum(currentChat)) {
                 clearHistoryItem = headerItem.lazilyAddSubItem(clear_history, R.drawable.msg_clear,
@@ -33342,11 +33352,11 @@ public class ChatActivity extends BaseFragment implements
                 scrimPopupWindow.setAnimationStyle(0);
             }
             scrimPopupWindow.setFocusable(true);
+            popupLayout.setFitItems(true);
             scrimPopupContainerLayout.measure(View.MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(1000), View.MeasureSpec.AT_MOST), View.MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(1000), View.MeasureSpec.AT_MOST));
             scrimPopupWindow.setInputMethodMode(ActionBarPopupWindow.INPUT_METHOD_NOT_NEEDED);
             scrimPopupWindow.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING);
             scrimPopupWindow.getContentView().setFocusableInTouchMode(true);
-            popupLayout.setFitItems(true);
 
             ItemOptions.setGapBackgroundColor(popupLayout, Theme.multAlpha(getThemedColor(Theme.key_actionBarDefaultSubmenuItem), 0.06f));
 
@@ -34293,6 +34303,19 @@ public class ChatActivity extends BaseFragment implements
         }
         boolean preserveDim = false;
         switch (option) {
+            case 9991: {
+                final MessageObject targetObj = selectedObject;
+                CharSequence currentTxt = targetObj.messageText != null ? targetObj.messageText : (targetObj.messageOwner != null ? targetObj.messageOwner.message : "");
+                MirrlyVaultSheets.showEditHistorySheet(this, targetObj.getDialogId(), targetObj.getId(), currentTxt);
+                break;
+            }
+            case 9992: {
+                final MessageObject targetObj = selectedObject;
+                MirrlyVaultSheets.showDossierSheet(this, targetObj, () -> {
+                    updateVisibleRows();
+                });
+                break;
+            }
             case OPTION_RETRY: {
                 final MessageObject object = selectedObject;
                 final MessageObject.GroupedMessages group = selectedObjectGroup;
@@ -36038,6 +36061,8 @@ public class ChatActivity extends BaseFragment implements
         builder.setPositiveButton(LocaleController.getString(R.string.OK), null);
         if (message.type == MessageObject.TYPE_VIDEO) {
             builder.setMessage(LocaleController.getString(R.string.NoPlayerInstalled));
+        } else if (AndroidUtilities.isApkDocument(message)) {
+            builder.setMessage(LocaleController.getString(R.string.ApkInstallFailed));
         } else {
             builder.setMessage(LocaleController.formatString("NoHandleAppInstalled", R.string.NoHandleAppInstalled, message.getDocument().mime_type));
         }
@@ -40463,6 +40488,13 @@ public class ChatActivity extends BaseFragment implements
 
         @Override
         public void didPressTime(ChatMessageCell cell) {
+            if (cell != null && cell.getMessageObject() != null && !cell.getMessageObject().isImportedForward()) {
+                MessageObject msg = cell.getMessageObject();
+                if (org.telegram.messenger.mirrly.MirrlyVaultStorage.hasDossierNote(msg.getDialogId(), msg.getId())) {
+                    MirrlyVaultSheets.showDossierSheet(ChatActivity.this, msg, ChatActivity.this::updateVisibleRows);
+                    return;
+                }
+            }
             createUndoView();
             if (undoView == null) {
                 return;
@@ -47108,6 +47140,19 @@ public class ChatActivity extends BaseFragment implements
             items.add(getString(R.string.WelcomeMessageRevert));
             options.add(OPTION_WELCOME_REVERT);
             icons.add(R.drawable.outline_revert_24);
+        }
+
+        if (selectedObject != null && selectedObject.messageOwner != null) {
+            if (org.telegram.messenger.mirrly.MirrlyVaultStorage.hasEditHistory(selectedObject.getDialogId(), selectedObject.getId())
+                    || (selectedObject.messageOwner.flags & TLRPC.MESSAGE_FLAG_EDITED) != 0) {
+                items.add(LocaleController.getString(R.string.MirrlyChatMenuEditHistory));
+                options.add(9991);
+                icons.add(R.drawable.msg_recent);
+            }
+            boolean hasLocalNote = org.telegram.messenger.mirrly.MirrlyVaultStorage.hasDossierNote(selectedObject.getDialogId(), selectedObject.getId());
+            items.add(LocaleController.getString(hasLocalNote ? R.string.MirrlyChatMenuOpenNote : R.string.MirrlyChatMenuAddNote));
+            options.add(9992);
+            icons.add(hasLocalNote ? R.drawable.outline_saved_24 : R.drawable.msg_edit);
         }
     }
 

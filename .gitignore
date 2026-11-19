@@ -14,3 +14,44 @@ TMessagesProj_AppHockeyApp/afat/
 TMessagesProj_AppStandalone/afat/
 TMessagesProj_AppHuawei/afat/
 TMessagesProj/jni/ffmpeg/build_android
+mirrlyengine/target/
+*.apk
+current_screen.png
+mirrly_settings.png
+mirrlygram_screen.png
+telegram_*.png
+/release/
+
+# Build caches, outputs, and crash dumps
+**/.cxx/
+**/.kotlin/
+buildSrc/.gradle/
+buildSrc/.kotlin/
+*.aab
+*.apks
+*.log
+hs_err_pid*.log
+*.hprof
+*.rs.bk
+
+# Private release signing keystores
+TMessagesProj/config/mirrly-release.jks
+*.jks
+*.p12
+*.pk8
+
+# Local IDE/agent/promo artifacts
+.agents/
+.agent/
+GEMINI.md
+AGENTS.md
+CLAUDE.md
+/Assets/
+/scratch/
+/brag-output/
+/brag-output*/
+/*.wav
+/*.mp3
+/*.mp4
+/*.webm
+/test_*.wav

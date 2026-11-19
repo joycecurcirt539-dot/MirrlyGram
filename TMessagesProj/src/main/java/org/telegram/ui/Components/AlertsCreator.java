@@ -1687,10 +1687,6 @@ public class AlertsCreator {
             arrayList.add(LocaleController.getString(R.string.MapPreviewProviderTelegram));
             types.add(0);
         }
-        if ((providers & 2) != 0) {
-            arrayList.add(LocaleController.getString(R.string.MapPreviewProviderGoogle));
-            types.add(1);
-        }
         if ((providers & 4) != 0) {
             arrayList.add(LocaleController.getString(R.string.MapPreviewProviderYandex));
             types.add(3);

@@ -15,10 +15,14 @@ import android.content.Intent;
 public class AppStartReceiver extends BroadcastReceiver {
 
     public void onReceive(Context context, Intent intent) {
-        if (intent != null && Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
+        String action = intent != null ? intent.getAction() : null;
+        boolean isBoot = Intent.ACTION_BOOT_COMPLETED.equals(action);
+        boolean isRestart = "org.telegram.start".equals(action);
+        if (isBoot || isRestart) {
             AndroidUtilities.runOnUIThread(() -> {
+                ApplicationLoader.postInitApplication();
                 SharedConfig.loadConfig();
-                if (SharedConfig.passcodeHash.length() > 0) {
+                if (isBoot && SharedConfig.passcodeHash.length() > 0) {
                     SharedConfig.appLocked = true;
                     SharedConfig.saveConfig();
                 }
