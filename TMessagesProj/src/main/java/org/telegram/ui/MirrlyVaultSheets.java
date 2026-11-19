@@ -57,11 +57,9 @@ public final class MirrlyVaultSheets {
         Theme.ResourcesProvider resourcesProvider = fragment.getResourceProvider();
         List<MirrlyVaultStorage.EditRevision> history = MirrlyVaultStorage.getEditHistory(dialogId, msgId);
 
-        BottomSheet.Builder builder = new BottomSheet.Builder(context, false, resourcesProvider);
-
         LinearLayout root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(0, dp(8), 0, dp(16));
+        root.setPadding(0, dp(14), 0, dp(16));
 
         HeaderCell headerCell = new HeaderCell(context, resourcesProvider);
         headerCell.setText(LocaleController.getString(R.string.MirrlyEditHistorySheetTitle));
@@ -101,8 +99,7 @@ public final class MirrlyVaultSheets {
         closeBtn.setText(LocaleController.getString(R.string.Close));
         root.addView(closeBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, 16, 12, 16, 0));
 
-        builder.setCustomView(root);
-        BottomSheet sheet = builder.create();
+        BottomSheet sheet = MirrlyUiKit.createFrostedBottomSheet(context, false, resourcesProvider, root);
         closeBtn.setOnClickListener(v -> sheet.dismiss());
         fragment.showDialog(sheet);
     }
@@ -188,17 +185,15 @@ public final class MirrlyVaultSheets {
         final String finalAuthorName = resolvedAuthorName;
         final String finalQuotePreview = resolvedQuotePreview;
 
-        BottomSheet.Builder builder = new BottomSheet.Builder(context, true, resourcesProvider);
-
         LinearLayout root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(0, dp(10), 0, dp(16));
+        root.setPadding(0, dp(16), 0, dp(16));
 
         int blueAccent = Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4, resourcesProvider);
         int textPrimary = Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider);
         int textSecondary = Theme.getColor(Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider);
 
-        // Top bar: Title + "All notes" jump button
+        // Top bar: Title + "Open in notes chat" jump button
         FrameLayout headerRow = new FrameLayout(context);
         headerRow.setPadding(dp(20), dp(6), dp(14), dp(8));
 
@@ -214,9 +209,9 @@ public final class MirrlyVaultSheets {
                         LayoutHelper.WRAP_CONTENT,
                         LayoutHelper.WRAP_CONTENT,
                         (LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.CENTER_VERTICAL,
-                        LocaleController.isRTL ? 120 : 0,
+                        LocaleController.isRTL ? 136 : 0,
                         0,
-                        LocaleController.isRTL ? 0 : 120,
+                        LocaleController.isRTL ? 0 : 136,
                         0
                 )
         );
@@ -225,9 +220,12 @@ public final class MirrlyVaultSheets {
         openAllBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
         openAllBtn.setTypeface(AndroidUtilities.bold());
         openAllBtn.setTextColor(blueAccent);
-        openAllBtn.setText(LocaleController.getString(R.string.MirrlyNotesFilterAll));
+        openAllBtn.setText(LocaleController.getString(R.string.MirrlyNotesOpenInNotesChat));
         openAllBtn.setPadding(dp(10), dp(6), dp(10), dp(6));
-        openAllBtn.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(8), Theme.multAlpha(blueAccent, 0.10f), Theme.multAlpha(blueAccent, 0.22f)));
+        openAllBtn.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(8), Theme.multAlpha(blueAccent, 0.12f), Theme.multAlpha(blueAccent, 0.24f)));
+        if (fragment instanceof MirrlyNotesChatActivity) {
+            openAllBtn.setVisibility(View.GONE);
+        }
         headerRow.addView(openAllBtn, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, (LocaleController.isRTL ? Gravity.LEFT : Gravity.RIGHT) | Gravity.CENTER_VERTICAL));
 
         root.addView(headerRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
@@ -306,12 +304,24 @@ public final class MirrlyVaultSheets {
         noteReadCard.setPadding(dp(14), dp(12), dp(14), dp(12));
         noteReadCard.setBackground(Theme.createRoundRectDrawable(dp(12), Theme.multAlpha(textPrimary, 0.05f)));
 
+        if (existing != null && existing.hasMedia()) {
+            TextView mediaTagView = new TextView(context);
+            mediaTagView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+            mediaTagView.setTypeface(AndroidUtilities.bold());
+            mediaTagView.setTextColor(blueAccent);
+            String label = resolveMediaBadgeLabel(existing);
+            mediaTagView.setText(label);
+            mediaTagView.setPadding(dp(8), dp(4), dp(8), dp(4));
+            mediaTagView.setBackground(Theme.createRoundRectDrawable(dp(6), Theme.multAlpha(blueAccent, 0.12f)));
+            noteReadCard.addView(mediaTagView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT, 0, 0, 0, 6));
+        }
+
         SpoilersTextView noteReadText = new SpoilersTextView(context, true, resourcesProvider);
         noteReadText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
         noteReadText.setTextColor(textPrimary);
         noteReadText.setTextIsSelectable(true);
         noteReadText.setGravity(LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT);
-        if (existing != null) {
+        if (existing != null && !TextUtils.isEmpty(existing.text)) {
             if (existing.spoiler) {
                 SpannableStringBuilder ssb = new SpannableStringBuilder(existing.text);
                 TextStyleSpan.TextStyleRun run = new TextStyleSpan.TextStyleRun();
@@ -321,6 +331,8 @@ public final class MirrlyVaultSheets {
             } else {
                 noteReadText.setText(existing.text);
             }
+        } else {
+            noteReadText.setVisibility(View.GONE);
         }
         noteReadCard.addView(noteReadText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -450,14 +462,13 @@ public final class MirrlyVaultSheets {
         root.addView(viewPanel, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         root.addView(editPanel, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        builder.setCustomView(root);
-        BottomSheet sheet = builder.create();
+        BottomSheet sheet = MirrlyUiKit.createFrostedBottomSheet(context, true, resourcesProvider, root);
 
         openAllBtn.setOnClickListener(v -> {
             AndroidUtilities.hideKeyboard(editText);
             sheet.dismiss();
             if (!(fragment instanceof MirrlyNotesChatActivity)) {
-                fragment.presentFragment(new MirrlyNotesChatActivity());
+                fragment.presentFragment(new MirrlyNotesChatActivity(existing != null ? existing.id : null));
             }
         });
 
@@ -620,5 +631,51 @@ public final class MirrlyVaultSheets {
             return LocaleController.getString(R.string.Poll);
         }
         return "";
+    }
+
+    private static String resolveMediaBadgeLabel(MirrlyVaultStorage.DossierNote note) {
+        if (note == null || !note.hasMedia()) {
+            return "";
+        }
+        String base;
+        switch (note.mediaKind) {
+            case MirrlyVaultStorage.MEDIA_PHOTO:
+                base = LocaleController.getString(R.string.MirrlyNotesMediaPhotoLabel);
+                break;
+            case MirrlyVaultStorage.MEDIA_VIDEO:
+                base = LocaleController.getString(R.string.MirrlyNotesMediaVideoLabel);
+                break;
+            case MirrlyVaultStorage.MEDIA_ROUND:
+                base = LocaleController.getString(R.string.MirrlyNotesMediaRoundLabel);
+                break;
+            case MirrlyVaultStorage.MEDIA_VOICE:
+                base = LocaleController.getString(R.string.MirrlyNotesMediaVoiceLabel);
+                break;
+            case MirrlyVaultStorage.MEDIA_AUDIO:
+                base = LocaleController.getString(R.string.MirrlyNotesMediaAudioLabel);
+                break;
+            case MirrlyVaultStorage.MEDIA_STICKER:
+                base = LocaleController.getString(R.string.MirrlyNotesMediaStickerLabel);
+                break;
+            case MirrlyVaultStorage.MEDIA_GIF:
+                base = LocaleController.getString(R.string.MirrlyNotesMediaGifLabel);
+                break;
+            case MirrlyVaultStorage.MEDIA_GEO:
+                base = LocaleController.getString(R.string.MirrlyNotesMediaGeoLabel);
+                break;
+            case MirrlyVaultStorage.MEDIA_CONTACT:
+                base = LocaleController.getString(R.string.MirrlyNotesMediaContactLabel);
+                break;
+            case MirrlyVaultStorage.MEDIA_POLL:
+                base = LocaleController.getString(R.string.MirrlyNotesMediaPollLabel);
+                break;
+            default:
+                base = LocaleController.getString(R.string.MirrlyNotesMediaFileLabel);
+                break;
+        }
+        if (!TextUtils.isEmpty(note.fileName)) {
+            return base + " • " + note.fileName;
+        }
+        return base;
     }
 }

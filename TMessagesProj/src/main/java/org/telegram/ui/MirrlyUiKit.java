@@ -5,18 +5,26 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.pm.PackageInfo;
+import android.graphics.Bitmap;
+import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.ColorFilter;
+import android.graphics.ColorMatrix;
 import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.RadialGradient;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
+import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -71,6 +79,7 @@ import org.telegram.ui.Stories.recorder.ButtonWithCounterView;
 
 import java.lang.ref.WeakReference;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Objects;
@@ -111,6 +120,209 @@ public final class MirrlyUiKit {
                     ? BulletinFactory.of(sheet.getContainer(), resourcesProvider)
                     : (fragment != null ? BulletinFactory.of(fragment) : BulletinFactory.global());
             factory.createSimpleBulletin(R.raw.copy, toastMessage).show();
+        }
+    }
+
+    public static BottomSheet createFrostedBottomSheet(
+            Context context,
+            boolean needFocus,
+            @Nullable Theme.ResourcesProvider resourcesProvider,
+            View customView
+    ) {
+        FrostedBottomSheet sheet = new FrostedBottomSheet(context, needFocus, resourcesProvider);
+        sheet.setCustomView(customView);
+        return sheet;
+    }
+
+    /**
+     * Native frosted blurred glass bottom sheet capturing the dimmed window behind it
+     * via Telegram's stack blur and updating shader alignment dynamically while sliding.
+     */
+    public static class FrostedBottomSheet extends BottomSheet {
+        private static final float BLUR_DOWNSCALE = 8f;
+
+        private final Theme.ResourcesProvider frostedProvider;
+        private Bitmap blurBitmap;
+        private BitmapShader blurShader;
+        private Matrix blurMatrix;
+        private final Paint blurPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+        private final Paint tintPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint sheenPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint shadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint handlePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final int[] screenLocation = new int[2];
+
+        public FrostedBottomSheet(
+                Context context,
+                boolean needFocus,
+                @Nullable Theme.ResourcesProvider resourcesProvider
+        ) {
+            super(context, needFocus, false, resourcesProvider);
+            this.frostedProvider = resourcesProvider;
+            int dialogBg = getThemedColor(Theme.key_dialogBackground);
+            boolean isDark = AndroidUtilities.computePerceivedBrightness(dialogBg) < 0.5f;
+            useLightNavBar = !isDark;
+            fixNavigationBar(Color.TRANSPARENT);
+            behindKeyboardColorKey = -1;
+            behindKeyboardColor = Color.TRANSPARENT;
+            setDimBehindAlpha(isDark ? 88 : 58);
+        }
+
+        @Override
+        protected void onCreate(Bundle savedInstanceState) {
+            super.onCreate(savedInstanceState);
+            if (containerView != null) {
+                containerView.setBackground(new FrostedSheetDrawable());
+            }
+            if (SharedConfig.chatBlurEnabled()) {
+                AndroidUtilities.makeGlobalBlurBitmap(bitmap -> {
+                    if (bitmap == null) {
+                        return;
+                    }
+                    int dialogBg = Theme.getColor(Theme.key_dialogBackground, frostedProvider);
+                    boolean isDark = AndroidUtilities.computePerceivedBrightness(dialogBg) < 0.5f;
+                    ColorMatrix cm = new ColorMatrix();
+                    AndroidUtilities.adjustSaturationColorMatrix(cm, isDark ? 0.10f : 0.24f);
+                    Bitmap styled = AndroidUtilities.applyColorMatrix(bitmap, cm);
+                    if (styled != null) {
+                        bitmap.recycle();
+                        blurBitmap = styled;
+                    } else {
+                        blurBitmap = bitmap;
+                    }
+                    blurShader = new BitmapShader(blurBitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+                    blurMatrix = new Matrix();
+                    blurPaint.setShader(blurShader);
+                    if (containerView != null) {
+                        containerView.invalidate();
+                    }
+                }, BLUR_DOWNSCALE, 12, null, container != null ? Collections.singletonList(container) : null);
+            }
+        }
+
+        @Override
+        protected void onContainerTranslationYChanged(float translationY) {
+            super.onContainerTranslationYChanged(translationY);
+            if (containerView != null) {
+                containerView.invalidate();
+            }
+        }
+
+        @Override
+        public void dismissInternal() {
+            super.dismissInternal();
+            if (blurBitmap != null && !blurBitmap.isRecycled()) {
+                blurBitmap.recycle();
+                blurBitmap = null;
+            }
+            blurShader = null;
+        }
+
+        private final class FrostedSheetDrawable extends Drawable {
+            private final Path glassPath = new Path();
+            private final RectF cardRect = new RectF();
+            private final RectF shadowRect = new RectF();
+            private final RectF handleRect = new RectF();
+            private final float[] topRadii = new float[8];
+            private int lastSheenTop = Integer.MIN_VALUE;
+            private boolean lastSheenDark;
+
+            @Override
+            public void draw(@NonNull Canvas canvas) {
+                Rect bounds = getBounds();
+                if (bounds.isEmpty()) {
+                    return;
+                }
+                float l = bounds.left + backgroundPaddingLeft;
+                float t = bounds.top + backgroundPaddingTop;
+                float r = bounds.right - backgroundPaddingLeft;
+                float b = bounds.bottom + dp(220);
+                if (r <= l || b <= t) {
+                    return;
+                }
+
+                int dialogBg = Theme.getColor(Theme.key_dialogBackground, frostedProvider);
+                boolean isDark = AndroidUtilities.computePerceivedBrightness(dialogBg) < 0.5f;
+                float rad = dp(20);
+                topRadii[0] = topRadii[1] = rad;
+                topRadii[2] = topRadii[3] = rad;
+                topRadii[4] = topRadii[5] = 0f;
+                topRadii[6] = topRadii[7] = 0f;
+
+                shadowRect.set(l - dp(1.5f), t - dp(2.5f), r + dp(1.5f), bounds.bottom);
+                shadowPaint.setStyle(Paint.Style.STROKE);
+                shadowPaint.setStrokeWidth(dp(4));
+                shadowPaint.setColor(isDark ? 0x36000000 : 0x1A000000);
+                canvas.drawRoundRect(shadowRect, rad + dp(2), rad + dp(2), shadowPaint);
+
+                cardRect.set(l, t, r, b);
+                glassPath.rewind();
+                glassPath.addRoundRect(cardRect, topRadii, Path.Direction.CW);
+
+                canvas.save();
+                canvas.clipPath(glassPath);
+
+                if (blurShader != null && blurMatrix != null && containerView != null) {
+                    containerView.getLocationOnScreen(screenLocation);
+                    blurMatrix.reset();
+                    blurMatrix.postScale(BLUR_DOWNSCALE, BLUR_DOWNSCALE);
+                    blurMatrix.postTranslate(-screenLocation[0], -screenLocation[1]);
+                    blurShader.setLocalMatrix(blurMatrix);
+                    canvas.drawRect(cardRect, blurPaint);
+                }
+
+                int overlayAlpha = blurShader != null ? (isDark ? 0xBD : 0xCA) : 0xF5;
+                tintPaint.setColor(ColorUtils.setAlphaComponent(dialogBg, overlayAlpha));
+                canvas.drawRect(cardRect, tintPaint);
+
+                int sheenTopInt = Math.round(t);
+                if (lastSheenTop != sheenTopInt || lastSheenDark != isDark) {
+                    lastSheenTop = sheenTopInt;
+                    lastSheenDark = isDark;
+                    sheenPaint.setShader(new LinearGradient(
+                            0f,
+                            t,
+                            0f,
+                            t + dp(56),
+                            isDark ? 0x18FFFFFF : 0x44FFFFFF,
+                            0x00FFFFFF,
+                            Shader.TileMode.CLAMP
+                    ));
+                }
+                canvas.drawRect(l, t, r, t + dp(56), sheenPaint);
+                canvas.restore();
+
+                borderPaint.setStyle(Paint.Style.STROKE);
+                borderPaint.setStrokeWidth(dp(0.8f));
+                borderPaint.setColor(isDark ? 0x2BFFFFFF : 0x72FFFFFF);
+                cardRect.inset(dp(0.4f), dp(0.4f));
+                glassPath.rewind();
+                glassPath.addRoundRect(cardRect, topRadii, Path.Direction.CW);
+                canvas.drawPath(glassPath, borderPaint);
+
+                float handleW = dp(36);
+                float handleH = dp(4);
+                float handleCx = (l + r) * 0.5f;
+                float handleTop = t + dp(7);
+                handleRect.set(handleCx - handleW * 0.5f, handleTop, handleCx + handleW * 0.5f, handleTop + handleH);
+                int mutedColor = Theme.getColor(Theme.key_windowBackgroundWhiteGrayText, frostedProvider);
+                handlePaint.setColor(ColorUtils.setAlphaComponent(mutedColor, isDark ? 0x66 : 0x55));
+                canvas.drawRoundRect(handleRect, handleH * 0.5f, handleH * 0.5f, handlePaint);
+            }
+
+            @Override
+            public void setAlpha(int alpha) {
+            }
+
+            @Override
+            public void setColorFilter(@Nullable ColorFilter colorFilter) {
+            }
+
+            @Override
+            public int getOpacity() {
+                return PixelFormat.TRANSLUCENT;
+            }
         }
     }
 
@@ -240,11 +452,10 @@ public final class MirrlyUiKit {
             return;
         }
         Context context = fragment.getParentActivity();
-        BottomSheet.Builder builder = new BottomSheet.Builder(context, false, resourcesProvider);
 
         LinearLayout root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(10), dp(20), dp(18));
+        root.setPadding(dp(20), dp(14), dp(20), dp(18));
 
         FrameLayout headerBox = new FrameLayout(context);
         headerBox.setClipChildren(false);
@@ -354,8 +565,7 @@ public final class MirrlyUiKit {
         ));
         root.addView(copyBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, 0, 0, 0, 0));
 
-        builder.setCustomView(root);
-        BottomSheet sheet = builder.create();
+        BottomSheet sheet = createFrostedBottomSheet(context, false, resourcesProvider, root);
         sheetHolder[0] = sheet;
 
         bindDiagSnapshot(

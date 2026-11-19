@@ -2972,7 +2972,8 @@ public class ChatActivity extends BaseFragment implements
             .addGlobal(NotificationCenter.invalidateMotionBackground)
             .addGlobal(NotificationCenter.didSetNewWallpapper)
             .addGlobal(NotificationCenter.didApplyNewTheme)
-            .addGlobal(NotificationCenter.goingToPreviewTheme);
+            .addGlobal(NotificationCenter.goingToPreviewTheme)
+            .addGlobal(NotificationCenter.mirrlyNotesDidUpdate);
 
         if (chatMode == MODE_EDIT_BUSINESS_LINK) {
             observersGroup.add(NotificationCenter.businessLinksUpdated);
@@ -24893,7 +24894,15 @@ public class ChatActivity extends BaseFragment implements
     }
 
     private void didReceivedNotification7(int id, int account, final Object... args) {
-        if (id == NotificationCenter.goingToPreviewTheme) {
+        if (id == NotificationCenter.mirrlyNotesDidUpdate) {
+            if (chatListView != null) {
+                AndroidUtilities.forEachViews(chatListView, view -> {
+                    if (view instanceof ChatMessageCell) {
+                        ((ChatMessageCell) view).updateMirrlyNoteState();
+                    }
+                });
+            }
+        } else if (id == NotificationCenter.goingToPreviewTheme) {
             isPauseOnThemePreview = true;
             if (chatLayoutManager != null) {
                 scrollToPositionOnRecreate = chatLayoutManager.findFirstVisibleItemPosition();

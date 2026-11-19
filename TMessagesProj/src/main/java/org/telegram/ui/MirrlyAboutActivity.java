@@ -729,11 +729,10 @@ public class MirrlyAboutActivity extends BaseFragment implements NotificationCen
             return;
         }
         Context context = getParentActivity();
-        BottomSheet.Builder builder = new BottomSheet.Builder(context, false, resourceProvider);
 
         LinearLayout root = new LinearLayout(context);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(10), dp(20), dp(18));
+        root.setPadding(dp(20), dp(14), dp(20), dp(18));
 
         FrameLayout headerBox = new FrameLayout(context);
         headerBox.setClipChildren(false);
@@ -805,8 +804,7 @@ public class MirrlyAboutActivity extends BaseFragment implements NotificationCen
         copyBtn.setOnClickListener(v -> copyUrlWithBulletin(targetUrl, sheetHolder[0]));
         root.addView(copyBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, 0, 0, 0, 0));
 
-        builder.setCustomView(root);
-        BottomSheet sheet = builder.create();
+        BottomSheet sheet = MirrlyUiKit.createFrostedBottomSheet(context, false, resourceProvider, root);
         sheetHolder[0] = sheet;
         showDialog(sheet);
     }

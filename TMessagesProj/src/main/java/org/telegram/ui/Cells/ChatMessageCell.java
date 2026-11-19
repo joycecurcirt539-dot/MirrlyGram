@@ -3234,16 +3234,18 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         int x = (int) getEventX(event);
         int y = (int) getEventY(event);
         int slop = hasNote ? dp(6) : 0;
+        float hitLeft = Math.min(timeX, drawTimeX) - slop;
+        float hitRight = Math.max(drawTimeX + Math.max(timeTextWidth, dp(16)), timeX + timeWidth) + slop;
 
         boolean result = false;
         if (event.getAction() == MotionEvent.ACTION_DOWN) {
-            if (x >= drawTimeX - slop && x <= drawTimeX + timeWidth + slop && y >= drawTimeY - slop && y <= drawTimeY + dp(20) + slop) {
+            if (x >= hitLeft && x <= hitRight && y >= drawTimeY - slop && y <= drawTimeY + dp(20) + slop) {
                 timePressed = true;
                 result = true;
                 invalidate();
             }
         } else if (event.getAction() == MotionEvent.ACTION_MOVE) {
-            if (timePressed && (x < drawTimeX - slop || x > drawTimeX + timeWidth + slop || y < drawTimeY - slop || y > drawTimeY + dp(20) + slop)) {
+            if (timePressed && (x < hitLeft || x > hitRight || y < drawTimeY - slop || y > drawTimeY + dp(20) + slop)) {
                 timePressed = false;
                 invalidate();
             }
@@ -15570,16 +15572,51 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
      * time it is (an album's), `editDate` the latest edit. Also a widget's estimate of the corner its time takes
      * before a cell lays it out (RichWidgetBlock#estimateSafeArea).
      */
+    private boolean hasMirrlyNote;
+    private Drawable mirrlyNoteDrawable;
+    private int mirrlyNoteLastColor;
+
+    public void updateMirrlyNoteState() {
+        if (currentMessageObject == null) {
+            return;
+        }
+        boolean nextHasNote = computeHasMirrlyNote(currentMessageObject);
+        if (nextHasNote != hasMirrlyNote) {
+            measureTime(currentMessageObject);
+            relayout();
+            requestLayout();
+            invalidate();
+        }
+    }
+
+    private boolean computeHasMirrlyNote(MessageObject messageObject) {
+        return messageObject != null
+                && !messageObject.suppressMirrlyNoteBadge
+                && !messageObject.isSponsored()
+                && !messageObject.isQuickReply()
+                && !messageObject.isWelcomeMessage()
+                && !messageObject.notime
+                && !messageObject.isImportedForward()
+                && !messageObject.isDateObject
+                && org.telegram.messenger.mirrly.MirrlyVaultStorage.hasDossierNote(messageObject.getDialogId(), messageObject.getId());
+    }
+
+    @Nullable
+    private Drawable getMirrlyNoteDrawable() {
+        if (mirrlyNoteDrawable == null && getContext() != null) {
+            try {
+                Drawable raw = getContext().getResources().getDrawable(R.drawable.mirrly_note_badge);
+                if (raw != null) {
+                    mirrlyNoteDrawable = raw.mutate();
+                }
+            } catch (Throwable ignore) {
+            }
+        }
+        return mirrlyNoteDrawable;
+    }
+
     public static String timeString(MessageObject current, MessageObject message, boolean edited, int editDate) {
-        String base = timeStringInternal(current, message, edited, editDate);
-        if (android.text.TextUtils.isEmpty(base) || current == null) {
-            return base;
-        }
-        StringBuilder prefix = new StringBuilder();
-        if (org.telegram.messenger.mirrly.MirrlyVaultStorage.hasDossierNote(current.getDialogId(), current.getId())) {
-            prefix.append(LocaleController.getString(R.string.MirrlyMessageNotePrefix)).append(" • ");
-        }
-        return prefix.length() > 0 ? (prefix.toString() + base) : base;
+        return timeStringInternal(current, message, edited, editDate);
     }
 
     private static String timeStringInternal(MessageObject current, MessageObject message, boolean edited, int editDate) {
@@ -15745,6 +15782,11 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
             timeWidth += repliesTextWidth + drawableWidth + dp(10);
         } else {
             currentRepliesString = null;
+        }
+        hasMirrlyNote = computeHasMirrlyNote(messageObject);
+        if (hasMirrlyNote) {
+            float noteSize = Math.max(dp(11), Theme.chat_timePaint.getTextSize() - dp(0.5f));
+            timeWidth += noteSize + dp(4);
         }
         if (isPinned) {
             timeWidth += Theme.chat_msgInPinnedDrawable.getIntrinsicWidth() + dp(3);
@@ -21545,7 +21587,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                 reactionsLayoutInBubble.draw(canvas, transitionParams.animateChangeProgress, null);
             }
 
-            if (ChatObject.isChannel(currentChat) && !currentChat.megagroup || (currentMessageObject.messageOwner.flags & TLRPC.MESSAGE_FLAG_HAS_VIEWS) != 0 || repliesLayout != null || isPinned) {
+            if (ChatObject.isChannel(currentChat) && !currentChat.megagroup || (currentMessageObject.messageOwner.flags & TLRPC.MESSAGE_FLAG_HAS_VIEWS) != 0 || repliesLayout != null || isPinned || hasMirrlyNote) {
                 additionalX += this.timeWidth - timeLayout.getLineWidth(0);
                 if (reactionsLayoutInBubble.isSmall && !reactionsLayoutInBubble.isEmpty) {
                     additionalX -= reactionsLayoutInBubble.width;
@@ -21616,7 +21658,7 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
                 reactionsLayoutInBubble.setScrimProgress(0, false);
                 reactionsLayoutInBubble.draw(canvas, transitionParams.animateChangeProgress, null);
             }
-            if (ChatObject.isChannel(currentChat) && !currentChat.megagroup || (currentMessageObject.messageOwner.flags & TLRPC.MESSAGE_FLAG_HAS_VIEWS) != 0 || (repliesLayout != null || transitionParams.animateReplies) || (isPinned || transitionParams.animatePinned)) {
+            if (ChatObject.isChannel(currentChat) && !currentChat.megagroup || (currentMessageObject.messageOwner.flags & TLRPC.MESSAGE_FLAG_HAS_VIEWS) != 0 || (repliesLayout != null || transitionParams.animateReplies) || (isPinned || transitionParams.animatePinned) || hasMirrlyNote) {
                 additionalX += timeWidth - timeLayout.getLineWidth(0);
                 if (reactionsLayoutInBubble.isSmall && !reactionsLayoutInBubble.isEmpty) {
                     additionalX -= reactionsLayoutInBubble.width;
@@ -21970,6 +22012,50 @@ public class ChatMessageCell extends BaseCell implements SeekBar.SeekBarDelegate
         float offsetX = reactionsLayoutInBubble.isSmall ? reactionsLayoutInBubble.getCurrentWidth(1f) : 0;
         int timeAlpha = Theme.chat_timePaint.getAlpha();
         float timeY = getTimeY(timeYOffset);
+        if (hasMirrlyNote) {
+            Drawable noteDrawable = getMirrlyNoteDrawable();
+            if (noteDrawable != null) {
+                float noteX = (transitionParams.shouldAnimateTimeX ? this.timeX : timeX) + offsetX;
+                if (currentMessagesGroup != null && currentMessagesGroup.transitionParams.backgroundChangeBounds) {
+                    noteX += currentMessagesGroup.transitionParams.offsetRight;
+                }
+                if (transitionParams.animateBackgroundBoundsInner) {
+                    noteX += animationOffsetX;
+                }
+                int noteColor;
+                if (shouldDrawTimeOnMedia()) {
+                    noteColor = getThemedColor(currentMessageObject.shouldDrawWithoutBackground()
+                            ? Theme.key_chat_serviceText
+                            : Theme.key_chat_mediaViews);
+                } else if (!currentMessageObject.isOutOwner()) {
+                    noteColor = getThemedColor(drawSelectionBackground
+                            ? Theme.key_chat_inViewsSelected
+                            : Theme.key_chat_inViews);
+                } else {
+                    noteColor = getThemedColor(drawSelectionBackground
+                            ? Theme.key_chat_outViewsSelected
+                            : Theme.key_chat_outViews);
+                }
+                if (mirrlyNoteLastColor != noteColor) {
+                    mirrlyNoteLastColor = noteColor;
+                    noteDrawable.setColorFilter(new PorterDuffColorFilter(noteColor, PorterDuff.Mode.SRC_IN));
+                }
+                float noteSize = Math.max(dp(11), Theme.chat_timePaint.getTextSize() - dp(0.5f));
+                float noteTop = timeY + (timeLayout != null ? Math.max(0f, (timeLayout.getHeight() - noteSize) * 0.5f) : dp(0.5f));
+                float w = setDrawableBounds(noteDrawable, noteX, noteTop, noteSize);
+                if (useScale) {
+                    canvas.save();
+                    canvas.scale(scale, scale, noteX + w / 2f, noteDrawable.getBounds().centerY());
+                }
+                noteDrawable.setAlpha((int) (255 * alpha));
+                noteDrawable.draw(canvas);
+                noteDrawable.setAlpha(255);
+                if (useScale) {
+                    canvas.restore();
+                }
+                offsetX += w + dp(4);
+            }
+        }
         if (repliesLayout != null || transitionParams.animateReplies) {
             float repliesX = (transitionParams.shouldAnimateTimeX ? this.timeX : timeX) + offsetX;
             boolean inAnimation = transitionParams.animateReplies && transitionParams.animateRepliesLayout == null && repliesLayout != null;

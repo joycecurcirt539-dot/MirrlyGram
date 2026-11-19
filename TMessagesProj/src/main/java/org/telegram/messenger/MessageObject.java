@@ -266,6 +266,7 @@ public class MessageObject {
     public HashSet<Integer> expandedQuotes;
     public boolean expandedExplanation;
     public boolean forceShowPollResults;
+    public boolean suppressMirrlyNoteBadge;
 
     public boolean isSpoilersRevealed;
     public boolean isMediaSpoilersRevealed;

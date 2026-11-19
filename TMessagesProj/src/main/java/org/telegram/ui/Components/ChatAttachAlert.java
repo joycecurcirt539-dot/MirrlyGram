@@ -258,6 +258,9 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
     public boolean allowEnterCaption;
     private ChatAttachAlertDocumentLayout.DocumentSelectActivityDelegate documentsDelegate;
     private ChatAttachAlertAudioLayout.AudioSelectDelegate audioSelectDelegate;
+    private ChatAttachAlertContactsLayout.PhonebookShareAlertDelegate contactsDelegate;
+    private ChatAttachAlertPollLayout.PollCreateActivityDelegate pollDelegate;
+    private ChatAttachAlertPollLayout.PollCreateActivityDelegate todoDelegate;
     public long dialogId;
     private boolean overrideBackgroundColor;
     private BlurredBackgroundWithFadeDrawable bottomFadeDrawable;
@@ -717,6 +720,10 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
         }
 
         default void sendAudio(ArrayList<MessageObject> audios, CharSequence caption, boolean notify, int scheduleDate, int scheduleRepeatPeriod, long effectId, boolean invertMedia, long payStars) {
+
+        }
+
+        default void didSelectSearchPhotos(ArrayList<SendMessagesHelper.SendingMediaInfo> photos, boolean notify, int scheduleDate) {
 
         }
     }
@@ -2325,7 +2332,7 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
                 }
                 final HashMap<Object, Object> photos = new HashMap<>();
                 final ArrayList<Object> order = new ArrayList<>();
-                PhotoPickerSearchActivity fragment = new PhotoPickerSearchActivity(photos, order, 0, true, (ChatActivity) baseFragment);
+                PhotoPickerSearchActivity fragment = new PhotoPickerSearchActivity(photos, order, 0, true, baseFragment instanceof ChatActivity ? (ChatActivity) baseFragment : null);
                 fragment.setDelegate(new PhotoPickerActivity.PhotoPickerActivityDelegate() {
 
                     private boolean sendPressed;
@@ -2369,7 +2376,11 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
 
                             searchImage.date = (int) (System.currentTimeMillis() / 1000);
                         }
-                        ((ChatActivity) baseFragment).didSelectSearchPhotos(media, notify, scheduleDate);
+                        if (baseFragment instanceof ChatActivity) {
+                            ((ChatActivity) baseFragment).didSelectSearchPhotos(media, notify, scheduleDate);
+                        } else if (delegate != null) {
+                            delegate.didSelectSearchPhotos(media, notify, scheduleDate);
+                        }
                     }
 
                     @Override
@@ -2860,9 +2871,13 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
                     } else {
                         if (todoLayout == null) {
                             layouts[1] = todoLayout = new ChatAttachAlertPollLayout(this, getContext(), true, resourcesProvider, null);
-                            todoLayout.setDelegate((poll, caption, media, params, notify, scheduleDate, payStars) ->
-                                ((ChatActivity) baseFragment).sendTodo((TLRPC.TL_messageMediaToDo) poll, notify, scheduleDate, payStars)
-                            );
+                            todoLayout.setDelegate((poll, caption, media, params, notify, scheduleDate, payStars) -> {
+                                if (todoDelegate != null) {
+                                    todoDelegate.sendPoll(poll, caption, media, params, notify, scheduleDate, payStars);
+                                } else if (baseFragment instanceof ChatActivity) {
+                                    ((ChatActivity) baseFragment).sendTodo((TLRPC.TL_messageMediaToDo) poll, notify, scheduleDate, payStars);
+                                }
+                            });
                         }
                         showLayout(todoLayout);
                     }
@@ -4588,9 +4603,13 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
     private void showPollLayout(boolean animated, Boolean quiz) {
         if (pollLayout == null) {
             layouts[1] = pollLayout = new ChatAttachAlertPollLayout(this, getContext(), false, resourcesProvider, quiz);
-            pollLayout.setDelegate((poll, caption, media, params, notify, scheduleDate, payStars) ->
-                ((ChatActivity) baseFragment).sendPoll((TLRPC.TL_messageMediaPoll) poll, caption, media, params, notify, scheduleDate, payStars)
-            );
+            pollLayout.setDelegate((poll, caption, media, params, notify, scheduleDate, payStars) -> {
+                if (pollDelegate != null) {
+                    pollDelegate.sendPoll(poll, caption, media, params, notify, scheduleDate, payStars);
+                } else if (baseFragment instanceof ChatActivity) {
+                    ((ChatActivity) baseFragment).sendPoll((TLRPC.TL_messageMediaPoll) poll, caption, media, params, notify, scheduleDate, payStars);
+                }
+            });
         }
         showLayout(pollLayout, LAYOUT_TYPE_POLL, animated);
     }
@@ -4929,12 +4948,20 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
             contactsLayout.setDelegate(new ChatAttachAlertContactsLayout.PhonebookShareAlertDelegate() {
                 @Override
                 public void didSelectContact(TLRPC.User user, boolean notify, int scheduleDate, long effectId, boolean invertMedia, long payStars) {
-                    ((ChatActivity) baseFragment).sendContact(user, notify, scheduleDate, effectId, invertMedia, payStars);
+                    if (contactsDelegate != null) {
+                        contactsDelegate.didSelectContact(user, notify, scheduleDate, effectId, invertMedia, payStars);
+                    } else if (baseFragment instanceof ChatActivity) {
+                        ((ChatActivity) baseFragment).sendContact(user, notify, scheduleDate, effectId, invertMedia, payStars);
+                    }
                 }
 
                 @Override
                 public void didSelectContacts(ArrayList<TLRPC.User> users, String caption, boolean notify, int scheduleDate, long effectId, boolean invertMedia, long payStars) {
-                    ((ChatActivity) baseFragment).sendContacts(users, caption, notify, scheduleDate, effectId, invertMedia, 0);
+                    if (contactsDelegate != null) {
+                        contactsDelegate.didSelectContacts(users, caption, notify, scheduleDate, effectId, invertMedia, payStars);
+                    } else if (baseFragment instanceof ChatActivity) {
+                        ((ChatActivity) baseFragment).sendContacts(users, caption, notify, scheduleDate, effectId, invertMedia, 0);
+                    }
                 }
             });
         }
@@ -7147,6 +7174,18 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
 
     public void setDocumentsDelegate(ChatAttachAlertDocumentLayout.DocumentSelectActivityDelegate documentsDelegate) {
         this.documentsDelegate = documentsDelegate;
+    }
+
+    public void setContactsDelegate(ChatAttachAlertContactsLayout.PhonebookShareAlertDelegate contactsDelegate) {
+        this.contactsDelegate = contactsDelegate;
+    }
+
+    public void setPollDelegate(ChatAttachAlertPollLayout.PollCreateActivityDelegate pollDelegate) {
+        this.pollDelegate = pollDelegate;
+    }
+
+    public void setTodoDelegate(ChatAttachAlertPollLayout.PollCreateActivityDelegate todoDelegate) {
+        this.todoDelegate = todoDelegate;
     }
 
     private void replaceWithText(int start, int len, CharSequence text, boolean parseEmoji) {

@@ -4781,31 +4781,40 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
         );
 
         if (sendAfterDone == 1) {
-            SendMessagesHelper.SendMessageParams params = SendMessagesHelper.SendMessageParams.of(
-                    recordingAudio,
-                    null,
-                    file.getAbsolutePath(),
-                    recordDialogId,
-                    recordReplyingMsg,
-                    recordReplyingTopMsg,
-                    null,
-                    null,
-                    null,
-                    null,
-                    sendAfterDoneNotify,
-                    sendAfterDoneScheduleDate,
-                    0,
-                    sendAfterDoneOnce ? 0x7FFFFFFF : 0,
-                    null,
-                    null,
-                    false
-            );
-            params.monoForumPeer = recordMonoForumPeerId;
-            params.suggestionParams = recordMonoForumSuggestionParams;
-            params.replyToStoryItem = recordReplyingStory;
-            params.sendMessageChatArguments = recordSendMessageChatArguments;
-            params.payStars = sendAfterDonePayStars;
-            SendMessagesHelper.getInstance(recordingCurrentAccount).sendMessage(params);
+            if (recordDialogId == 0L) {
+                NotificationCenter.getInstance(recordingCurrentAccount).postNotificationName(
+                        NotificationCenter.mirrlyLocalVoiceRecorded,
+                        recordingGuid,
+                        recordingAudio,
+                        file.getAbsolutePath()
+                );
+            } else {
+                SendMessagesHelper.SendMessageParams params = SendMessagesHelper.SendMessageParams.of(
+                        recordingAudio,
+                        null,
+                        file.getAbsolutePath(),
+                        recordDialogId,
+                        recordReplyingMsg,
+                        recordReplyingTopMsg,
+                        null,
+                        null,
+                        null,
+                        null,
+                        sendAfterDoneNotify,
+                        sendAfterDoneScheduleDate,
+                        0,
+                        sendAfterDoneOnce ? 0x7FFFFFFF : 0,
+                        null,
+                        null,
+                        false
+                );
+                params.monoForumPeer = recordMonoForumPeerId;
+                params.suggestionParams = recordMonoForumSuggestionParams;
+                params.replyToStoryItem = recordReplyingStory;
+                params.sendMessageChatArguments = recordSendMessageChatArguments;
+                params.payStars = sendAfterDonePayStars;
+                SendMessagesHelper.getInstance(recordingCurrentAccount).sendMessage(params);
+            }
         }
         NotificationCenter.getInstance(recordingCurrentAccount).postNotificationName(
                 NotificationCenter.audioDidSent,
@@ -5528,13 +5537,22 @@ public class MediaController implements AudioManager.OnAudioFocusChangeListener,
                     audioToSend.attributes.add(attributeAudio);
                     if (duration > 700) {
                         if (send == 1) {
-                            SendMessagesHelper.SendMessageParams params = SendMessagesHelper.SendMessageParams.of(audioToSend, null, recordingAudioFileToSend.getAbsolutePath(), recordDialogId, recordReplyingMsg, recordReplyingTopMsg, null, null, null, null, notify, scheduleDate, 0, once ? 0x7FFFFFFF : 0, null, null, false);
-                            params.monoForumPeer = recordMonoForumPeerId;
-                            params.suggestionParams = recordMonoForumSuggestionParams;
-                            params.replyToStoryItem = recordReplyingStory;
-                            params.sendMessageChatArguments = recordSendMessageChatArguments;
-                            params.payStars = payStars;
-                            SendMessagesHelper.getInstance(recordingCurrentAccount).sendMessage(params);
+                            if (recordDialogId == 0L) {
+                                NotificationCenter.getInstance(recordingCurrentAccount).postNotificationName(
+                                        NotificationCenter.mirrlyLocalVoiceRecorded,
+                                        recordingGuid,
+                                        audioToSend,
+                                        recordingAudioFileToSend.getAbsolutePath()
+                                );
+                            } else {
+                                SendMessagesHelper.SendMessageParams params = SendMessagesHelper.SendMessageParams.of(audioToSend, null, recordingAudioFileToSend.getAbsolutePath(), recordDialogId, recordReplyingMsg, recordReplyingTopMsg, null, null, null, null, notify, scheduleDate, 0, once ? 0x7FFFFFFF : 0, null, null, false);
+                                params.monoForumPeer = recordMonoForumPeerId;
+                                params.suggestionParams = recordMonoForumSuggestionParams;
+                                params.replyToStoryItem = recordReplyingStory;
+                                params.sendMessageChatArguments = recordSendMessageChatArguments;
+                                params.payStars = payStars;
+                                SendMessagesHelper.getInstance(recordingCurrentAccount).sendMessage(params);
+                            }
                         }
                         NotificationCenter.getInstance(recordingCurrentAccount).postNotificationName(NotificationCenter.audioDidSent, recordingGuid, send == 2 ? audioToSend : null, send == 2 ? recordingAudioFileToSend.getAbsolutePath() : null);
                     } else {

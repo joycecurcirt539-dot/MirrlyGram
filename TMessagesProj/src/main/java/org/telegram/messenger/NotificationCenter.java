@@ -386,6 +386,7 @@ public class NotificationCenter {
     public static final int communityPendingRequestsUpdate = totalEvents++;
     public static final int communitySwitchedCollapsed = totalEvents++;
     public static final int mirrlyNotesDidUpdate = totalEvents++;
+    public static final int mirrlyLocalVoiceRecorded = totalEvents++;
 
     public static boolean alreadyLogged;
 

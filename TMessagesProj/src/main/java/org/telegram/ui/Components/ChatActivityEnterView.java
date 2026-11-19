@@ -428,6 +428,15 @@ public class ChatActivityEnterView extends FrameLayout implements
         }
     }
 
+    public interface LocalSendInterceptor {
+        void onSendText(CharSequence text, ArrayList<TLRPC.MessageEntity> entities);
+        void onSendVoice(TLRPC.TL_document audio, String path);
+        void onSendSticker(TLRPC.Document sticker, Object parent);
+        void onSendGif(Object gif, Object parent, @Nullable MediaController.PhotoEntry entry);
+        void onSendMediaInfos(ArrayList<SendMessagesHelper.SendingMediaInfo> photos);
+        void onSendCommittedContent(Uri uri, @Nullable String mimeType);
+    }
+
     public final static int RECORD_STATE_ENTER = 0;
     public final static int RECORD_STATE_SENDING = 1;
     public final static int RECORD_STATE_CANCEL = 2;
@@ -759,6 +768,9 @@ public class ChatActivityEnterView extends FrameLayout implements
     private TLRPC.WebPage messageWebPage;
     private boolean messageWebPageSearch = true;
     private ChatActivityEnterViewDelegate delegate;
+    private LocalSendInterceptor localSendInterceptor;
+    private BaseFragment hostFragment;
+    private CharSequence customFieldHint;
     private TrendingStickersAlert trendingStickersAlert;
 
     private TLRPC.TL_document audioToSend;
@@ -5406,7 +5418,10 @@ public class ChatActivityEnterView extends FrameLayout implements
                 return;
             }
             ClipDescription description = inputContentInfo.getDescription();
-            if (description.hasMimeType("image/gif")) {
+            if (localSendInterceptor != null) {
+                String mime = description != null && description.getMimeTypeCount() > 0 ? description.getMimeType(0) : null;
+                localSendInterceptor.onSendCommittedContent(inputContentInfo.getContentUri(), mime);
+            } else if (description.hasMimeType("image/gif")) {
                 SendMessagesHelper.prepareSendingDocument(accountInstance, null, null, inputContentInfo.getContentUri(), null, "image/gif", dialog_id, replyingMessageObject, getThreadMessage(), null, replyingQuote, null, notify, 0, inputContentInfo, parentFragment != null ? parentFragment.getMessageChatSendParams() : null, false);
             } else {
                 SendMessagesHelper.prepareSendingPhoto(accountInstance, null, inputContentInfo.getContentUri(), dialog_id, replyingMessageObject, getThreadMessage(), replyingQuote, null, null, null, inputContentInfo, 0, null, notify, 0, parentFragment == null ? 0 : parentFragment.getChatMode(), parentFragment != null ? parentFragment.getMessageChatSendParams() : null);
@@ -5638,7 +5653,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                 return;
             }
 
-            PhotoViewer.getInstance().setParentActivity(parentFragment, resourcesProvider);
+            PhotoViewer.getInstance().setParentActivity(parentFragment != null ? parentFragment : hostFragment, resourcesProvider);
             PhotoViewer.getInstance().openPhotoForSelect(entries, 0, 2, false, new PhotoViewer.EmptyPhotoViewerProvider() {
                 boolean sending;
                 @Override
@@ -5669,8 +5684,12 @@ public class ChatActivityEnterView extends FrameLayout implements
                     photos.add(info);
                     photoEntry.reset();
                     sending = true;
-                    boolean updateStickersOrder = SendMessagesHelper.checkUpdateStickersOrder(info.caption);
-                    SendMessagesHelper.prepareSendingMedia(accountInstance, photos, dialog_id, replyingMessageObject, getThreadMessage(), null, replyingQuote, false, false, editingMessageObject, notify, scheduleDate, scheduleRepeatPeriod, parentFragment == null ? 0 : parentFragment.getChatMode(), updateStickersOrder, null, parentFragment != null ? parentFragment.getMessageChatSendParams() : null, 0, false, 0, getSendMonoForumPeerId(), parentFragment != null ? parentFragment.messageSuggestionParams : null);
+                    if (localSendInterceptor != null) {
+                        localSendInterceptor.onSendMediaInfos(photos);
+                    } else {
+                        boolean updateStickersOrder = SendMessagesHelper.checkUpdateStickersOrder(info.caption);
+                        SendMessagesHelper.prepareSendingMedia(accountInstance, photos, dialog_id, replyingMessageObject, getThreadMessage(), null, replyingQuote, false, false, editingMessageObject, notify, scheduleDate, scheduleRepeatPeriod, parentFragment == null ? 0 : parentFragment.getChatMode(), updateStickersOrder, null, parentFragment != null ? parentFragment.getMessageChatSendParams() : null, 0, false, 0, getSendMonoForumPeerId(), parentFragment != null ? parentFragment.messageSuggestionParams : null);
+                    }
                     if (delegate != null) {
                         delegate.onMessageSend(null, true, scheduleDate, scheduleRepeatPeriod, 0);
                     }
@@ -7004,7 +7023,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                         messageEditText.setHintText(getString("ChannelBroadcast", R.string.ChannelBroadcast), animated);
                     }
                 } else {
-                    messageEditText.setHintText(getString(R.string.TypeMessage));
+                    messageEditText.setHintText(!TextUtils.isEmpty(customFieldHint) ? customFieldHint : getString(R.string.TypeMessage));
                 }
             }
         }
@@ -7456,20 +7475,25 @@ public class ChatActivityEnterView extends FrameLayout implements
                         }
                     }
                 }
-                SendMessagesHelper.SendMessageParams params = SendMessagesHelper.SendMessageParams.of(audioToSend, null, audioToSendPath, dialog_id, replyingMessageObject, getThreadMessage(), null, null, null, null, notify, scheduleDate, 0, voiceOnce ? 0x7FFFFFFF : 0, null, null, false);
-                params.sendMessageChatArguments = parentFragment != null ? parentFragment.getMessageChatSendParams() : null;
-                params.effect_id = effectId;
-                params.payStars = payStars;
-                params.monoForumPeer = getSendMonoForumPeerId();
-                params.suggestionParams = getSendMessageSuggestionParams();
-                sendButton.setEffect(effectId = 0);
-                if (!delegate.hasForwardingMessages()) {
-                    MessageObject.SendAnimationData sendAnimationData = new MessageObject.SendAnimationData();
-                    sendAnimationData.fromPreview = System.currentTimeMillis() - sentFromPreview < 200;
-                    params.sendAnimationData = sendAnimationData;
+                if (localSendInterceptor != null) {
+                    sendButton.setEffect(effectId = 0);
+                    localSendInterceptor.onSendVoice(audioToSend, audioToSendPath);
+                } else {
+                    SendMessagesHelper.SendMessageParams params = SendMessagesHelper.SendMessageParams.of(audioToSend, null, audioToSendPath, dialog_id, replyingMessageObject, getThreadMessage(), null, null, null, null, notify, scheduleDate, 0, voiceOnce ? 0x7FFFFFFF : 0, null, null, false);
+                    params.sendMessageChatArguments = parentFragment != null ? parentFragment.getMessageChatSendParams() : null;
+                    params.effect_id = effectId;
+                    params.payStars = payStars;
+                    params.monoForumPeer = getSendMonoForumPeerId();
+                    params.suggestionParams = getSendMessageSuggestionParams();
+                    sendButton.setEffect(effectId = 0);
+                    if (!delegate.hasForwardingMessages()) {
+                        MessageObject.SendAnimationData sendAnimationData = new MessageObject.SendAnimationData();
+                        sendAnimationData.fromPreview = System.currentTimeMillis() - sentFromPreview < 200;
+                        params.sendAnimationData = sendAnimationData;
+                    }
+                    applyStoryToSendMessageParams(params);
+                    SendMessagesHelper.getInstance(currentAccount).sendMessage(params);
                 }
-                applyStoryToSendMessageParams(params);
-                SendMessagesHelper.getInstance(currentAccount).sendMessage(params);
                 if (delegate != null) {
                     delegate.onMessageSend(null, notify, scheduleDate, scheduleRepeatPeriod, payStars);
                 }
@@ -7888,6 +7912,16 @@ public class ChatActivityEnterView extends FrameLayout implements
             text = AndroidUtilities.getTrimmedString(text);
         }
         boolean supportsNewEntities = supportsSendingNewEntities();
+        if (localSendInterceptor != null) {
+            if (text.length() != 0) {
+                CharSequence[] message = new CharSequence[]{ text };
+                ArrayList<TLRPC.MessageEntity> entities = MediaDataController.getInstance(currentAccount).getEntities(message, supportsNewEntities);
+                sendButton.setEffect(effectId = 0);
+                localSendInterceptor.onSendText(message[0], entities);
+                return true;
+            }
+            return false;
+        }
         int maxLength = accountInstance.getMessagesController().getMaxMessageLength();
         if (text.length() != 0) {
             if (delegate != null && parentFragment != null && (scheduleDate != 0) == parentFragment.isInScheduleMode()) {
@@ -9895,6 +9929,22 @@ public class ChatActivityEnterView extends FrameLayout implements
 
     public void setDelegate(ChatActivityEnterViewDelegate chatActivityEnterViewDelegate) {
         delegate = chatActivityEnterViewDelegate;
+    }
+
+    public void setLocalSendInterceptor(@Nullable LocalSendInterceptor localSendInterceptor) {
+        this.localSendInterceptor = localSendInterceptor;
+    }
+
+    public void setHostFragment(@Nullable BaseFragment hostFragment) {
+        this.hostFragment = hostFragment;
+        if (hostFragment != null && recordingGuid == 0) {
+            recordingGuid = hostFragment.getClassGuid();
+        }
+    }
+
+    public void setCustomFieldHint(@Nullable CharSequence customFieldHint) {
+        this.customFieldHint = customFieldHint;
+        updateFieldHint(false);
     }
 
     public void setCommand(MessageObject messageObject, String command, boolean longPress, boolean username) {
@@ -12153,15 +12203,17 @@ public class ChatActivityEnterView extends FrameLayout implements
 
             @Override
             public void onStickersSettingsClick() {
-                if (parentFragment != null) {
-                    parentFragment.presentFragment(new StickersActivity(MediaDataController.TYPE_IMAGE, null));
+                BaseFragment host = parentFragment != null ? parentFragment : hostFragment;
+                if (host != null) {
+                    host.presentFragment(new StickersActivity(MediaDataController.TYPE_IMAGE, null));
                 }
             }
 
             @Override
             public void onEmojiSettingsClick(ArrayList<TLRPC.TL_messages_stickerSet> frozenEmojiPacks) {
-                if (parentFragment != null) {
-                    parentFragment.presentFragment(new StickersActivity(MediaDataController.TYPE_EMOJIPACKS, frozenEmojiPacks));
+                BaseFragment host = parentFragment != null ? parentFragment : hostFragment;
+                if (host != null) {
+                    host.presentFragment(new StickersActivity(MediaDataController.TYPE_EMOJIPACKS, frozenEmojiPacks));
                 }
             }
 
@@ -12485,11 +12537,19 @@ public class ChatActivityEnterView extends FrameLayout implements
                                     photos.add(info);
                                     entry.reset();
 
-                                    SendMessagesHelper.prepareSendingMedia(AccountInstance.getInstance(currentAccount), photos, dialog_id, replyingMessageObject, getThreadMessage(), null, replyingQuote, false, false, editingMessageObject, notify, scheduleDate, scheduleRepeatPeriod, 0, false, null, parentFragment != null ? parentFragment.getMessageChatSendParams() : null, effectId, invertMedia, stars, getSendMonoForumPeerId(),  getSendMessageSuggestionParams());
+                                    if (localSendInterceptor != null) {
+                                        localSendInterceptor.onSendMediaInfos(photos);
+                                    } else {
+                                        SendMessagesHelper.prepareSendingMedia(AccountInstance.getInstance(currentAccount), photos, dialog_id, replyingMessageObject, getThreadMessage(), null, replyingQuote, false, false, editingMessageObject, notify, scheduleDate, scheduleRepeatPeriod, 0, false, null, parentFragment != null ? parentFragment.getMessageChatSendParams() : null, effectId, invertMedia, stars, getSendMonoForumPeerId(),  getSendMessageSuggestionParams());
+                                    }
                                 } else {
-                                    SendMessagesHelper.getInstance(currentAccount).sendSticker(document, query, dialog_id, entry != null ? entry.caption : null, videoEditedInfo, replyingMessageObject, getThreadMessage(), storyItem, replyingQuote, null, notify, scheduleDate, scheduleRepeatPeriod, false, parent, parentFragment != null ? parentFragment.getMessageChatSendParams() : null, stars, getSendMonoForumPeerId(), getSendMessageSuggestionParams(), invertMedia);
+                                    if (localSendInterceptor != null) {
+                                        localSendInterceptor.onSendGif(document, parent, entry);
+                                    } else {
+                                        SendMessagesHelper.getInstance(currentAccount).sendSticker(document, query, dialog_id, entry != null ? entry.caption : null, videoEditedInfo, replyingMessageObject, getThreadMessage(), storyItem, replyingQuote, null, notify, scheduleDate, scheduleRepeatPeriod, false, parent, parentFragment != null ? parentFragment.getMessageChatSendParams() : null, stars, getSendMonoForumPeerId(), getSendMessageSuggestionParams(), invertMedia);
+                                    }
                                     MediaDataController.getInstance(currentAccount).addRecentGif(document, (int) (System.currentTimeMillis() / 1000), true);
-                                    if (DialogObject.isEncryptedDialog(dialog_id)) {
+                                    if (localSendInterceptor == null && DialogObject.isEncryptedDialog(dialog_id)) {
                                         accountInstance.getMessagesController().saveGif(parent, document);
                                     }
                                 }
@@ -12498,22 +12558,26 @@ public class ChatActivityEnterView extends FrameLayout implements
 
                                 if (result.document != null) {
                                     MediaDataController.getInstance(currentAccount).addRecentGif(result.document, (int) (System.currentTimeMillis() / 1000), false);
-                                    if (DialogObject.isEncryptedDialog(dialog_id)) {
+                                    if (localSendInterceptor == null && DialogObject.isEncryptedDialog(dialog_id)) {
                                         accountInstance.getMessagesController().saveGif(parent, result.document);
                                     }
                                 }
 
-                                TLRPC.User bot = (TLRPC.User) parent;
-
-                                HashMap<String, String> params = new HashMap<>();
-                                params.put("id", result.id);
-                                params.put("query_id", "" + result.query_id);
-                                params.put("force_gif", "1");
-
-                                if (storyItem == null) {
-                                    SendMessagesHelper.prepareSendingBotContextResult(parentFragment, accountInstance, result, params, dialog_id, replyingMessageObject, getThreadMessage(), null, replyingQuote, notify, scheduleDate, 0, parentFragment != null ? parentFragment.getMessageChatSendParams() : null, stars, getSendMonoForumPeerId());
+                                if (localSendInterceptor != null) {
+                                    localSendInterceptor.onSendGif(result, parent, entry);
                                 } else {
-                                    SendMessagesHelper.getInstance(currentAccount).sendSticker(result.document, query, dialog_id, replyingMessageObject, getThreadMessage(), storyItem, replyingQuote, null, notify, scheduleDate, scheduleRepeatPeriod, false, parent, parentFragment != null ? parentFragment.getMessageChatSendParams() : null, stars, getSendMonoForumPeerId(), getSendMessageSuggestionParams());
+                                    TLRPC.User bot = (TLRPC.User) parent;
+
+                                    HashMap<String, String> params = new HashMap<>();
+                                    params.put("id", result.id);
+                                    params.put("query_id", "" + result.query_id);
+                                    params.put("force_gif", "1");
+
+                                    if (storyItem == null) {
+                                        SendMessagesHelper.prepareSendingBotContextResult(parentFragment, accountInstance, result, params, dialog_id, replyingMessageObject, getThreadMessage(), null, replyingQuote, notify, scheduleDate, 0, parentFragment != null ? parentFragment.getMessageChatSendParams() : null, stars, getSendMonoForumPeerId());
+                                    } else {
+                                        SendMessagesHelper.getInstance(currentAccount).sendSticker(result.document, query, dialog_id, replyingMessageObject, getThreadMessage(), storyItem, replyingQuote, null, notify, scheduleDate, scheduleRepeatPeriod, false, parent, parentFragment != null ? parentFragment.getMessageChatSendParams() : null, stars, getSendMonoForumPeerId(), getSendMessageSuggestionParams());
+                                    }
                                 }
                                 if (searchingType != 0) {
                                     setSearchingTypeInternal(0, true);
@@ -12790,7 +12854,11 @@ public class ChatActivityEnterView extends FrameLayout implements
                     }
                     setStickersExpanded(false, true, false);
                     final TL_stories.StoryItem storyItem = delegate != null ? delegate.getReplyToStory() : null;
-                    SendMessagesHelper.getInstance(currentAccount).sendSticker(sticker, query, dialog_id, replyingMessageObject, getThreadMessage(), storyItem, replyingQuote, sendAnimationData, notify, scheduleDate, scheduleRepeatPeriod, parent instanceof TLRPC.TL_messages_stickerSet, parent, parentFragment != null ? parentFragment.getMessageChatSendParams() : null, stars, getSendMonoForumPeerId(), getSendMessageSuggestionParams());
+                    if (localSendInterceptor != null) {
+                        localSendInterceptor.onSendSticker(sticker, parent);
+                    } else {
+                        SendMessagesHelper.getInstance(currentAccount).sendSticker(sticker, query, dialog_id, replyingMessageObject, getThreadMessage(), storyItem, replyingQuote, sendAnimationData, notify, scheduleDate, scheduleRepeatPeriod, parent instanceof TLRPC.TL_messages_stickerSet, parent, parentFragment != null ? parentFragment.getMessageChatSendParams() : null, stars, getSendMonoForumPeerId(), getSendMessageSuggestionParams());
+                    }
                     if (delegate != null) {
                         delegate.onMessageSend(null, true, scheduleDate, 0, 0);
                     }
@@ -12799,7 +12867,7 @@ public class ChatActivityEnterView extends FrameLayout implements
                     }
                     MediaDataController.getInstance(currentAccount).addRecentSticker(MediaDataController.TYPE_IMAGE, parent, sticker, (int) (System.currentTimeMillis() / 1000), false);
                 };
-                if (org.telegram.messenger.mirrly.MirrlyConfig.confirmMediaSend && parentActivity != null) {
+                if (localSendInterceptor == null && org.telegram.messenger.mirrly.MirrlyConfig.confirmMediaSend && parentActivity != null) {
                     new org.telegram.ui.ActionBar.AlertDialog.Builder(parentActivity, resourcesProvider)
                             .setTitle(LocaleController.getString(R.string.MirrlyStickerConfirmTitle))
                             .setMessage(LocaleController.getString(R.string.MirrlyStickerConfirmMessage))
