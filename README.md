@@ -53,13 +53,14 @@
 10. [Динамика звезд репозитория](#10-динамика-звезд-репозитория)
 11. [Хронология и релизы](#11-хронология-и-релизы)
 12. [Безопасность, приватность и лицензия](#12-безопасность-приватность-и-лицензия)
-13. [Благодарности и ссылки](#13-благодарности-и-ссылки)
+13. [Поддержать разработку](#13-поддержать-разработку)
+14. [Благодарности и ссылки](#14-благодарности-и-ссылки)
 
 ---
 
 ## 1. Что такое Mirrlygram
 
-**Mirrlygram** (`com.mirrly.gram`) является модифицированным клиентом на базе открытого исходного кода [Telegram для Android](https://github.com/DrKLO/Telegram) (`13.2.2`, `7303`) от автора [Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy) (`MirrlyDev / R1Xern`).
+**Mirrlygram** (`com.mirrly.gram`) является модифицированным клиентом на базе открытого исходного кода [Telegram для Android](https://github.com/DrKLO/Telegram) (`13.2.2`, `7303`) со встроенным прокси-ядром из проекта [Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy).
 
 В отличие от связки из стандартного мессенджера и отдельного прокси-клиента, **Mirrlygram** запускает нативное Rust-ядро `mirrlyengine` прямо внутри процесса приложения (`libmirrlyengine.so` через JNI). При первом запуске клиент поднимает локальный прокси-контур и синхронизирует профиль подключения без ручного ввода адресов и без создания системного `VpnService`.
 
@@ -326,17 +327,38 @@ MirrlyGram V2/
 ## 12. Безопасность, приватность и лицензия
 
 * **Локальное хранение данных**: история правок, локальные заметки и прикреплённые офлайн-медиа из `MirrlyVaultStorage` хранятся исключительно на устройстве и не передаются на внешние серверы.
-* **Отсутствие трекеров разработчика**: в модификации Mirrlygram нет рекламных SDK или сторонней аналитики от автора форка.
+* **Отсутствие сторонних трекеров**: в модификации Mirrlygram нет рекламных SDK или телеметрии.
 * **Верификация сборок**: к каждому релизу на GitHub прилагаются контрольные отпечатки `SHA-256` всех установочных APK и официальный отпечаток ключа подписи (`00:32:69:CB:70:12:DF:37:61:E7:D3:92:79:5C:C3:55:02:43:39:A4:B2:1B:3F:B5:75:A4:C9:2B:CC:DD:25:16`).
 * **Лицензия**: проект распространяется на условиях [GNU General Public License v3 (GNU GPLv3)](LICENSE) (исходная база [Telegram для Android](https://github.com/DrKLO/Telegram) под [GNU GPLv2+](https://github.com/DrKLO/Telegram/blob/master/LICENSE), встроенное ядро `mirrlyengine` под GNU GPLv3).
 
 ---
 
-## 13. Благодарности и ссылки
+## 13. Поддержать разработку
+
+<div align="center">
+
+Mirrlygram распространяется бесплатно, без рекламы и платных подписок. Поддержка помогает оплачивать тестовые устройства, инфраструктуру и дальнейшее развитие кода.
+
+<br/>
+
+[![CloudTips](https://img.shields.io/badge/CloudTips-Карты_РФ_%7C_СБП-1E293B?style=for-the-badge&labelColor=4277D4)](https://pay.cloudtips.ru/p/e8c24aee)
+&nbsp;
+[![Яндекс Чаевые](https://img.shields.io/badge/Яндекс_Чаевые-Яндекс_Пэй_%7C_СБП-1E293B?style=for-the-badge&logo=yandex&logoColor=FFFFFF&labelColor=D9AE00)](https://tips.yandex.ru/guest/payment/3754149)
+&nbsp;
+[![DaLink](https://img.shields.io/badge/DaLink-Карты_%7C_Кошельки-1E293B?style=for-the-badge&labelColor=E86A05)](https://dalink.to/cartneyzix)
+
+<br/>
+
+<sub>При переводе через CloudTips можно снять галочку комиссии сервиса. Также проект можно поддержать звездой на <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a>.</sub>
+
+</div>
+
+---
+
+## 14. Благодарности и ссылки
 
 * **[Telegram для Android (DrKLO)](https://github.com/DrKLO/Telegram)**: открытая кодовая база клиента `13.2.2` (`7303`), на основе которой собран Mirrlygram.
-* **[Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy)**: родственный проект автора, откуда перенесено нативное Rust-ядро `mirrlyengine`.
+* **[Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy)**: родственный проект экосистемы Mirrly, откуда перенесено нативное Rust-ядро `mirrlyengine`.
 * **[Flowseal](https://github.com/Flowseal)**: автор концепции маршрутизации трафика Telegram через Anycast CDN и WebSocket-сессии Cloudflare (`tg-ws-proxy`).
-* **Официальный Telegram-канал**: [@WhyOKyHb](https://t.me/WhyOKyHb) (анонсы релизов и новости экосистемы Mirrly).
-* **Профиль разработчика**: [MirrlyDev (R1Xern)](https://github.com/joycecurcirt539-dot).
+* **Официальный Telegram-канал**: [@WhyOKyHb](https://t.me/WhyOKyHb) (анонсы релизов и новости проекта).
 * **Страница релизов**: [GitHub Releases](https://github.com/joycecurcirt539-dot/MirrlyGram/releases).

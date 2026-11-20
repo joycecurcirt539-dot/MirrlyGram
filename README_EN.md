@@ -53,13 +53,14 @@
 10. [Star History](#10-star-history)
 11. [Release History](#11-release-history)
 12. [Security, Privacy & License](#12-security-privacy--license)
-13. [Acknowledgements & Links](#13-acknowledgements--links)
+13. [Support Development](#13-support-development)
+14. [Acknowledgements & Links](#14-acknowledgements--links)
 
 ---
 
 ## 1. About Mirrlygram
 
-**Mirrlygram** (`com.mirrly.gram`) is a modified Android client built on the open-source [Telegram for Android](https://github.com/DrKLO/Telegram) codebase (`13.2.2`, `7303`) by the author of [Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy) (`MirrlyDev / R1Xern`).
+**Mirrlygram** (`com.mirrly.gram`) is a modified Android client built on the open-source [Telegram for Android](https://github.com/DrKLO/Telegram) codebase (`13.2.2`, `7303`) with the embedded proxy core from [Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy).
 
 Instead of pairing a standard messenger with a standalone proxy app, **Mirrlygram** runs the native Rust core `mirrlyengine` directly inside the application process (`libmirrlyengine.so` via JNI). On first launch, the client starts the local proxy loop and configures the active profile automatically without manual port entry or a system `VpnService`.
 
@@ -326,17 +327,38 @@ MirrlyGram V2/
 ## 12. Security, Privacy & License
 
 * **On-Device Storage**: message edit history, local notes, and offline media attachments in `MirrlyVaultStorage` stay exclusively on the device and are never uploaded to external servers.
-* **No Developer Trackers**: Mirrlygram includes no ad SDKs or developer telemetry.
+* **No Tracking**: Mirrlygram includes no ad SDKs or telemetry.
 * **Build Verification**: every GitHub release lists `SHA-256` checksums for all APKs alongside the official release signing certificate digest (`00:32:69:CB:70:12:DF:37:61:E7:D3:92:79:5C:C3:55:02:43:39:A4:B2:1B:3F:B5:75:A4:C9:2B:CC:DD:25:16`).
 * **License**: distributed under [GNU General Public License v3 (GNU GPLv3)](LICENSE) (upstream [Telegram for Android](https://github.com/DrKLO/Telegram) under [GNU GPLv2+](https://github.com/DrKLO/Telegram/blob/master/LICENSE), embedded `mirrlyengine` core under GNU GPLv3).
 
 ---
 
-## 13. Acknowledgements & Links
+## 13. Support Development
+
+<div align="center">
+
+Mirrlygram is free with no ads or paywalls. Contributions help cover test devices, infrastructure, and ongoing code maintenance.
+
+<br/>
+
+[![CloudTips](https://img.shields.io/badge/CloudTips-RU_Cards_%7C_SBP-1E293B?style=for-the-badge&labelColor=4277D4)](https://pay.cloudtips.ru/p/e8c24aee)
+&nbsp;
+[![Yandex Tips](https://img.shields.io/badge/Yandex_Tips-Yandex_Pay_%7C_SBP-1E293B?style=for-the-badge&logo=yandex&logoColor=FFFFFF&labelColor=D9AE00)](https://tips.yandex.ru/guest/payment/3754149)
+&nbsp;
+[![DaLink](https://img.shields.io/badge/DaLink-Cards_%7C_Wallets-1E293B?style=for-the-badge&labelColor=E86A05)](https://dalink.to/cartneyzix)
+
+<br/>
+
+<sub>On CloudTips checkout, you can uncheck the optional service fee. You can also support the project by starring the repository on <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a>.</sub>
+
+</div>
+
+---
+
+## 14. Acknowledgements & Links
 
 * **[Telegram for Android (DrKLO)](https://github.com/DrKLO/Telegram)**: open-source client base (`13.2.2`, `7303`) on which Mirrlygram is built.
-* **[Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy)**: companion project providing the native `mirrlyengine` Rust core.
+* **[Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy)**: companion project in the Mirrly ecosystem providing the native `mirrlyengine` Rust core.
 * **[Flowseal](https://github.com/Flowseal)**: author of the Anycast CDN and Cloudflare WebSocket Telegram routing concept (`tg-ws-proxy`).
-* **Official Telegram Channel**: [@WhyOKyHb](https://t.me/WhyOKyHb) (releases and updates across the Mirrly ecosystem).
-* **Developer**: [MirrlyDev (R1Xern)](https://github.com/joycecurcirt539-dot).
+* **Official Telegram Channel**: [@WhyOKyHb](https://t.me/WhyOKyHb) (release announcements and project updates).
 * **Releases**: [GitHub Releases](https://github.com/joycecurcirt539-dot/MirrlyGram/releases).

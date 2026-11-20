@@ -53,13 +53,14 @@
 10. [تاریخچه ستاره‌های ریپازیتوری](#10-تاریخچه-ستارههای-ریپازیتوری)
 11. [تاریخچه نسخه‌ها و انتشارها](#11-تاریخچه-نسخهها-و-انتشارها)
 12. [امنیت، حریم خصوصی و مجوز](#12-امنیت-حریم-خصوصی-و-مجوز)
-13. [قدردانی و لینک‌ها](#13-قدردانی-و-لینکها)
+13. [حمایت از توسعه](#13-حمایت-از-توسعه)
+14. [قدردانی و لینک‌ها](#14-قدردانی-و-لینکها)
 
 ---
 
 ## 1. Mirrlygram چیست
 
-**Mirrlygram** (`com.mirrly.gram`) یک کلاینت اندروید تغییریافته بر پایه سورس‌کد متن‌باز [تلگرام برای اندروید](https://github.com/DrKLO/Telegram) (`13.2.2`, `7303`) از سازنده [Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy) (`MirrlyDev / R1Xern`) است.
+**Mirrlygram** (`com.mirrly.gram`) یک کلاینت اندروید تغییریافته بر پایه سورس‌کد متن‌باز [تلگرام برای اندروید](https://github.com/DrKLO/Telegram) (`13.2.2`, `7303`) همراه با هسته پروکسی داخلی از پروژه [Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy) است.
 
 برخلاف ترکیب پیام‌رسان استاندارد و یک برنامه پروکسی جداگانه، **Mirrlygram** هسته بومی Rust به نام `mirrlyengine` را مستقیماً در داخل پردازش برنامه (`libmirrlyengine.so` از طریق JNI) اجرا می‌کند. در اولین اجرا، کلاینت بدون نیاز به وارد کردن دستی پورت یا ایجاد `VpnService` سیستمی، مدار پروکسی محلی را راه‌اندازی و پروفایل اتصال را همگام‌سازی می‌کند.
 
@@ -326,17 +327,38 @@ MirrlyGram V2/
 ## 12. امنیت، حریم خصوصی و مجوز
 
 * **ذخیره‌سازی فقط روی دستگاه**: تاریخچه ویرایش، یادداشت‌های محلی و رسانه‌های آفلاین در `MirrlyVaultStorage` منحصراً روی دستگاه کاربر ذخیره می‌شوند و به هیچ سرور خارجی ارسال نمی‌گردند.
-* **بدون ردیاب توسعه‌دهنده**: در Mirrlygram هیچ SDK تبلیغاتی یا تله‌متری از سوی توسعه‌دهنده وجود ندارد.
+* **بدون ردیاب و تبلیغات**: در Mirrlygram هیچ SDK تبلیغاتی یا تله‌متری وجود ندارد.
 * **اعتبارسنجی بیلدها**: در کنار هر انتشار در گیت‌هاب، هش `SHA-256` تمامی فایل‌های APK و اثر انگشت گواهی امضای رسمی (`00:32:69:CB:70:12:DF:37:61:E7:D3:92:79:5C:C3:55:02:43:39:A4:B2:1B:3F:B5:75:A4:C9:2B:CC:DD:25:16`) منتشر می‌شود.
 * **مجوز**: پروژه تحت شرایط [GNU General Public License v3 (GNU GPLv3)](LICENSE) منتشر شده است (پایه [تلگرام برای اندروید](https://github.com/DrKLO/Telegram) تحت [GNU GPLv2+](https://github.com/DrKLO/Telegram/blob/master/LICENSE) و هسته داخلی `mirrlyengine` تحت GNU GPLv3).
 
 ---
 
-## 13. قدردانی و لینک‌ها
+## 13. حمایت از توسعه
+
+<div align="center">
+
+برنامه Mirrlygram رایگان و بدون تبلیغات یا اشتراک پولی است. کمک‌های شما صرف دستگاه‌های تست، زیرساخت و نگهداری کد می‌شود.
+
+<br/>
+
+[![CloudTips](https://img.shields.io/badge/CloudTips-RU_Cards_%7C_SBP-1E293B?style=for-the-badge&labelColor=4277D4)](https://pay.cloudtips.ru/p/e8c24aee)
+&nbsp;
+[![Yandex Tips](https://img.shields.io/badge/Yandex_Tips-Yandex_Pay_%7C_SBP-1E293B?style=for-the-badge&logo=yandex&logoColor=FFFFFF&labelColor=D9AE00)](https://tips.yandex.ru/guest/payment/3754149)
+&nbsp;
+[![DaLink](https://img.shields.io/badge/DaLink-Cards_%7C_Wallets-1E293B?style=for-the-badge&labelColor=E86A05)](https://dalink.to/cartneyzix)
+
+<br/>
+
+<sub>در درگاه CloudTips می‌توانید تیک کارمزد اختیاری سرویس را بردارید. همچنین با دادن ستاره در <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a> می‌توانید از پروژه حمایت کنید.</sub>
+
+</div>
+
+---
+
+## 14. قدردانی و لینک‌ها
 
 * **[Telegram for Android (DrKLO)](https://github.com/DrKLO/Telegram)**: سورس‌کد متن‌باز کلاینت (`13.2.2`، `7303`) که Mirrlygram بر پایه آن ساخته شده است.
-* **[Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy)**: پروژه همکار و منبع هسته بومی Rust به نام `mirrlyengine`.
+* **[Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy)**: پروژه همکار در اکوسیستم Mirrly و منبع هسته بومی Rust به نام `mirrlyengine`.
 * **[Flowseal](https://github.com/Flowseal)**: طراح ایده مسیریابی ترافیک تلگرام از طریق Anycast CDN و نشست‌های WebSocket کلودفلر (`tg-ws-proxy`).
-* **کانال رسمی تلگرام**: [@WhyOKyHb](https://t.me/WhyOKyHb) (اطلاعیه‌های انتشار و اخبار اکوسیستم Mirrly).
-* **پروفایل توسعه‌دهنده**: [MirrlyDev (R1Xern)](https://github.com/joycecurcirt539-dot).
+* **کانال رسمی تلگرام**: [@WhyOKyHb](https://t.me/WhyOKyHb) (اطلاعیه‌های انتشار و اخبار پروژه).
 * **صفحه انتشارها**: [GitHub Releases](https://github.com/joycecurcirt539-dot/MirrlyGram/releases).
