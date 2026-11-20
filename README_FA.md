@@ -37,25 +37,21 @@
 
 ---
 
-</div>
+<h3>حمایت از توسعه</h3>
 
-<div align="center">
+Mirrlygram یک برنامه رایگان و متن‌باز است. می‌توانید از ادامه توسعه پروژه با کارت بانکی، SBP، Mir Pay یا Yandex Pay حمایت کنید:
 
-### حمایت از توسعه
+<br/>
 
-برنامه Mirrlygram رایگان و بدون تبلیغات یا اشتراک پولی است. حمایت اختیاری شما به توسعه و انتشار به‌روزرسانی‌های آینده کمک می‌کند.
-
-[![CloudTips](https://img.shields.io/badge/CloudTips-RU_Cards,_SBP-1D4ED8?style=for-the-badge&labelColor=1E293B)](https://pay.cloudtips.ru/p/e8c24aee)
+[![CloudTips](https://img.shields.io/badge/CloudTips-SBP_%C2%B7_Mir_Pay-1E293B?style=for-the-badge&labelColor=0F172A&logo=contactlesspayment&logoColor=00E676)](https://pay.cloudtips.ru/p/e8c24aee)
 &nbsp;
-[![Yandex Tips](https://img.shields.io/badge/Yandex_Tips-SBP,_Yandex_Pay-FACC15?style=for-the-badge&logo=yandex&logoColor=FFCC00&labelColor=1E293B)](https://tips.yandex.ru/guest/payment/3754149)
+[![Yandex Tips](https://img.shields.io/badge/Yandex_Tips-SBP_%C2%B7_Yandex_Pay-1E293B?style=for-the-badge&labelColor=0F172A&logo=lightning&logoColor=FFCC00)](https://tips.yandex.ru/guest/payment/3754149)
 &nbsp;
-[![DaLink](https://img.shields.io/badge/DaLink-Cards,_Wallets-C2410C?style=for-the-badge&labelColor=1E293B)](https://dalink.to/cartneyzix)
-
-<sub>همچنین با دادن ستاره در <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a> می‌توانید از پروژه حمایت کنید.</sub>
-
-</div>
+[![DaLink](https://img.shields.io/badge/DaLink-Cards_%C2%B7_Wallets-1E293B?style=for-the-badge&labelColor=0F172A&logo=githubsponsors&logoColor=26A5E4)](https://dalink.to/cartneyzix)
 
 ---
+
+</div>
 
 ## فهرست مطالب
 

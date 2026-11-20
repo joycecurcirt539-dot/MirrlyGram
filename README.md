@@ -37,25 +37,21 @@
 
 ---
 
-</div>
+<h3>Поддержать разработку</h3>
 
-<div align="center">
+Mirrlygram является бесплатным приложением с открытым исходным кодом. Поддержать дальнейшее развитие проекта можно банковской картой, через СБП, Mir Pay или Яндекс Пэй:
 
-### Поддержать разработку
+<br/>
 
-Mirrlygram распространяется бесплатно, без рекламы и платных подписок. Поддержка помогает развивать проект и выпускать новые обновления.
-
-[![CloudTips](https://img.shields.io/badge/CloudTips-%D0%9A%D0%B0%D1%80%D1%82%D1%8B_%D0%A0%D0%A4,_%D0%A1%D0%91%D0%9F-1D4ED8?style=for-the-badge&labelColor=1E293B)](https://pay.cloudtips.ru/p/e8c24aee)
+[![CloudTips](https://img.shields.io/badge/CloudTips-СБП_%C2%B7_Mir_Pay-1E293B?style=for-the-badge&labelColor=0F172A&logo=contactlesspayment&logoColor=00E676)](https://pay.cloudtips.ru/p/e8c24aee)
 &nbsp;
-[![Яндекс Чаевые](https://img.shields.io/badge/%D0%AF%D0%BD%D0%B4%D0%B5%D0%BA%D1%81_%D0%A7%D0%B0%D0%B5%D0%B2%D1%8B%D0%B5-%D0%A1%D0%91%D0%9F,_%D0%AF%D0%BD%D0%B4%D0%B5%D0%BA%D1%81_%D0%9F%D1%8D%D0%B9-FACC15?style=for-the-badge&logo=yandex&logoColor=FFCC00&labelColor=1E293B)](https://tips.yandex.ru/guest/payment/3754149)
+[![Яндекс Чаевые](https://img.shields.io/badge/Яндекс_Чаевые-СБП_%C2%B7_Яндекс_Пэй-1E293B?style=for-the-badge&labelColor=0F172A&logo=lightning&logoColor=FFCC00)](https://tips.yandex.ru/guest/payment/3754149)
 &nbsp;
-[![DaLink](https://img.shields.io/badge/DaLink-%D0%9A%D0%B0%D1%80%D1%82%D1%8B,_%D0%BA%D0%BE%D1%88%D0%B5%D0%BB%D1%8C%D0%BA%D0%B8-C2410C?style=for-the-badge&labelColor=1E293B)](https://dalink.to/cartneyzix)
-
-<sub>Также поддержать проект можно звездой на <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a>.</sub>
-
-</div>
+[![DaLink](https://img.shields.io/badge/DaLink-Карты_%C2%B7_Кошельки-1E293B?style=for-the-badge&labelColor=0F172A&logo=githubsponsors&logoColor=26A5E4)](https://dalink.to/cartneyzix)
 
 ---
+
+</div>
 
 ## Оглавление
 
