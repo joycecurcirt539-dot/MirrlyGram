@@ -337,19 +337,19 @@ MirrlyGram V2/
 
 <div align="center">
 
-برنامه Mirrlygram رایگان و بدون تبلیغات یا اشتراک پولی است. کمک‌های شما صرف دستگاه‌های تست، زیرساخت و نگهداری کد می‌شود.
+برنامه Mirrlygram رایگان و بدون تبلیغات یا اشتراک پولی است. حمایت اختیاری شما به توسعه و انتشار به‌روزرسانی‌های آینده کمک می‌کند.
 
 <br/>
 
-[![CloudTips](https://img.shields.io/badge/CloudTips-RU_Cards_%7C_SBP-1E293B?style=for-the-badge&labelColor=4277D4)](https://pay.cloudtips.ru/p/e8c24aee)
+[![CloudTips](https://img.shields.io/badge/CloudTips-RU_Cards,_SBP-1D4ED8?style=for-the-badge&labelColor=1E293B)](https://pay.cloudtips.ru/p/e8c24aee)
 &nbsp;
-[![Yandex Tips](https://img.shields.io/badge/Yandex_Tips-Yandex_Pay_%7C_SBP-1E293B?style=for-the-badge&logo=yandex&logoColor=FFFFFF&labelColor=D9AE00)](https://tips.yandex.ru/guest/payment/3754149)
+[![Yandex Tips](https://img.shields.io/badge/Yandex_Tips-SBP,_Yandex_Pay-FACC15?style=for-the-badge&logo=yandex&logoColor=FFCC00&labelColor=1E293B)](https://tips.yandex.ru/guest/payment/3754149)
 &nbsp;
-[![DaLink](https://img.shields.io/badge/DaLink-Cards_%7C_Wallets-1E293B?style=for-the-badge&labelColor=E86A05)](https://dalink.to/cartneyzix)
+[![DaLink](https://img.shields.io/badge/DaLink-Cards,_Wallets-C2410C?style=for-the-badge&labelColor=1E293B)](https://dalink.to/cartneyzix)
 
 <br/>
 
-<sub>در درگاه CloudTips می‌توانید تیک کارمزد اختیاری سرویس را بردارید. همچنین با دادن ستاره در <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a> می‌توانید از پروژه حمایت کنید.</sub>
+<sub>همچنین با دادن ستاره در <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a> می‌توانید از پروژه حمایت کنید.</sub>
 
 </div>
 

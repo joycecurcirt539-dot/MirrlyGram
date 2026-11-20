@@ -337,19 +337,19 @@ MirrlyGram V2/
 
 <div align="center">
 
-Mirrlygram распространяется бесплатно, без рекламы и платных подписок. Поддержка помогает оплачивать тестовые устройства, инфраструктуру и дальнейшее развитие кода.
+Mirrlygram распространяется бесплатно, без рекламы и платных подписок. Поддержка помогает развивать проект и выпускать новые обновления.
 
 <br/>
 
-[![CloudTips](https://img.shields.io/badge/CloudTips-Карты_РФ_%7C_СБП-1E293B?style=for-the-badge&labelColor=4277D4)](https://pay.cloudtips.ru/p/e8c24aee)
+[![CloudTips](https://img.shields.io/badge/CloudTips-%D0%9A%D0%B0%D1%80%D1%82%D1%8B_%D0%A0%D0%A4,_%D0%A1%D0%91%D0%9F-1D4ED8?style=for-the-badge&labelColor=1E293B)](https://pay.cloudtips.ru/p/e8c24aee)
 &nbsp;
-[![Яндекс Чаевые](https://img.shields.io/badge/Яндекс_Чаевые-Яндекс_Пэй_%7C_СБП-1E293B?style=for-the-badge&logo=yandex&logoColor=FFFFFF&labelColor=D9AE00)](https://tips.yandex.ru/guest/payment/3754149)
+[![Яндекс Чаевые](https://img.shields.io/badge/%D0%AF%D0%BD%D0%B4%D0%B5%D0%BA%D1%81_%D0%A7%D0%B0%D0%B5%D0%B2%D1%8B%D0%B5-%D0%A1%D0%91%D0%9F,_%D0%AF%D0%BD%D0%B4%D0%B5%D0%BA%D1%81_%D0%9F%D1%8D%D0%B9-FACC15?style=for-the-badge&logo=yandex&logoColor=FFCC00&labelColor=1E293B)](https://tips.yandex.ru/guest/payment/3754149)
 &nbsp;
-[![DaLink](https://img.shields.io/badge/DaLink-Карты_%7C_Кошельки-1E293B?style=for-the-badge&labelColor=E86A05)](https://dalink.to/cartneyzix)
+[![DaLink](https://img.shields.io/badge/DaLink-%D0%9A%D0%B0%D1%80%D1%82%D1%8B,_%D0%BA%D0%BE%D1%88%D0%B5%D0%BB%D1%8C%D0%BA%D0%B8-C2410C?style=for-the-badge&labelColor=1E293B)](https://dalink.to/cartneyzix)
 
 <br/>
 
-<sub>При переводе через CloudTips можно снять галочку комиссии сервиса. Также проект можно поддержать звездой на <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a>.</sub>
+<sub>Также поддержать проект можно звездой на <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a>.</sub>
 
 </div>
 
