@@ -39,6 +39,24 @@
 
 </div>
 
+<div align="center">
+
+### Поддержать разработку
+
+Mirrlygram распространяется бесплатно, без рекламы и платных подписок. Поддержка помогает развивать проект и выпускать новые обновления.
+
+[![CloudTips](https://img.shields.io/badge/CloudTips-%D0%9A%D0%B0%D1%80%D1%82%D1%8B_%D0%A0%D0%A4,_%D0%A1%D0%91%D0%9F-1D4ED8?style=for-the-badge&labelColor=1E293B)](https://pay.cloudtips.ru/p/e8c24aee)
+&nbsp;
+[![Яндекс Чаевые](https://img.shields.io/badge/%D0%AF%D0%BD%D0%B4%D0%B5%D0%BA%D1%81_%D0%A7%D0%B0%D0%B5%D0%B2%D1%8B%D0%B5-%D0%A1%D0%91%D0%9F,_%D0%AF%D0%BD%D0%B4%D0%B5%D0%BA%D1%81_%D0%9F%D1%8D%D0%B9-FACC15?style=for-the-badge&logo=yandex&logoColor=FFCC00&labelColor=1E293B)](https://tips.yandex.ru/guest/payment/3754149)
+&nbsp;
+[![DaLink](https://img.shields.io/badge/DaLink-%D0%9A%D0%B0%D1%80%D1%82%D1%8B,_%D0%BA%D0%BE%D1%88%D0%B5%D0%BB%D1%8C%D0%BA%D0%B8-C2410C?style=for-the-badge&labelColor=1E293B)](https://dalink.to/cartneyzix)
+
+<sub>Также поддержать проект можно звездой на <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a>.</sub>
+
+</div>
+
+---
+
 ## Оглавление
 
 1. [Что такое Mirrlygram](#1-что-такое-mirrlygram)
@@ -53,8 +71,7 @@
 10. [Динамика звезд репозитория](#10-динамика-звезд-репозитория)
 11. [Хронология и релизы](#11-хронология-и-релизы)
 12. [Безопасность, приватность и лицензия](#12-безопасность-приватность-и-лицензия)
-13. [Поддержать разработку](#13-поддержать-разработку)
-14. [Благодарности и ссылки](#14-благодарности-и-ссылки)
+13. [Благодарности и ссылки](#13-благодарности-и-ссылки)
 
 ---
 
@@ -333,29 +350,7 @@ MirrlyGram V2/
 
 ---
 
-## 13. Поддержать разработку
-
-<div align="center">
-
-Mirrlygram распространяется бесплатно, без рекламы и платных подписок. Поддержка помогает развивать проект и выпускать новые обновления.
-
-<br/>
-
-[![CloudTips](https://img.shields.io/badge/CloudTips-%D0%9A%D0%B0%D1%80%D1%82%D1%8B_%D0%A0%D0%A4,_%D0%A1%D0%91%D0%9F-1D4ED8?style=for-the-badge&labelColor=1E293B)](https://pay.cloudtips.ru/p/e8c24aee)
-&nbsp;
-[![Яндекс Чаевые](https://img.shields.io/badge/%D0%AF%D0%BD%D0%B4%D0%B5%D0%BA%D1%81_%D0%A7%D0%B0%D0%B5%D0%B2%D1%8B%D0%B5-%D0%A1%D0%91%D0%9F,_%D0%AF%D0%BD%D0%B4%D0%B5%D0%BA%D1%81_%D0%9F%D1%8D%D0%B9-FACC15?style=for-the-badge&logo=yandex&logoColor=FFCC00&labelColor=1E293B)](https://tips.yandex.ru/guest/payment/3754149)
-&nbsp;
-[![DaLink](https://img.shields.io/badge/DaLink-%D0%9A%D0%B0%D1%80%D1%82%D1%8B,_%D0%BA%D0%BE%D1%88%D0%B5%D0%BB%D1%8C%D0%BA%D0%B8-C2410C?style=for-the-badge&labelColor=1E293B)](https://dalink.to/cartneyzix)
-
-<br/>
-
-<sub>Также поддержать проект можно звездой на <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a>.</sub>
-
-</div>
-
----
-
-## 14. Благодарности и ссылки
+## 13. Благодарности и ссылки
 
 * **[Telegram для Android (DrKLO)](https://github.com/DrKLO/Telegram)**: открытая кодовая база клиента `13.2.2` (`7303`), на основе которой собран Mirrlygram.
 * **[Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy)**: родственный проект экосистемы Mirrly, откуда перенесено нативное Rust-ядро `mirrlyengine`.

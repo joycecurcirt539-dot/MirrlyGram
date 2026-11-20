@@ -39,6 +39,24 @@
 
 </div>
 
+<div align="center">
+
+### حمایت از توسعه
+
+برنامه Mirrlygram رایگان و بدون تبلیغات یا اشتراک پولی است. حمایت اختیاری شما به توسعه و انتشار به‌روزرسانی‌های آینده کمک می‌کند.
+
+[![CloudTips](https://img.shields.io/badge/CloudTips-RU_Cards,_SBP-1D4ED8?style=for-the-badge&labelColor=1E293B)](https://pay.cloudtips.ru/p/e8c24aee)
+&nbsp;
+[![Yandex Tips](https://img.shields.io/badge/Yandex_Tips-SBP,_Yandex_Pay-FACC15?style=for-the-badge&logo=yandex&logoColor=FFCC00&labelColor=1E293B)](https://tips.yandex.ru/guest/payment/3754149)
+&nbsp;
+[![DaLink](https://img.shields.io/badge/DaLink-Cards,_Wallets-C2410C?style=for-the-badge&labelColor=1E293B)](https://dalink.to/cartneyzix)
+
+<sub>همچنین با دادن ستاره در <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a> می‌توانید از پروژه حمایت کنید.</sub>
+
+</div>
+
+---
+
 ## فهرست مطالب
 
 1. [Mirrlygram چیست](#1-mirrlygram-چیست)
@@ -53,8 +71,7 @@
 10. [تاریخچه ستاره‌های ریپازیتوری](#10-تاریخچه-ستارههای-ریپازیتوری)
 11. [تاریخچه نسخه‌ها و انتشارها](#11-تاریخچه-نسخهها-و-انتشارها)
 12. [امنیت، حریم خصوصی و مجوز](#12-امنیت-حریم-خصوصی-و-مجوز)
-13. [حمایت از توسعه](#13-حمایت-از-توسعه)
-14. [قدردانی و لینک‌ها](#14-قدردانی-و-لینکها)
+13. [قدردانی و لینک‌ها](#13-قدردانی-و-لینکها)
 
 ---
 
@@ -333,29 +350,7 @@ MirrlyGram V2/
 
 ---
 
-## 13. حمایت از توسعه
-
-<div align="center">
-
-برنامه Mirrlygram رایگان و بدون تبلیغات یا اشتراک پولی است. حمایت اختیاری شما به توسعه و انتشار به‌روزرسانی‌های آینده کمک می‌کند.
-
-<br/>
-
-[![CloudTips](https://img.shields.io/badge/CloudTips-RU_Cards,_SBP-1D4ED8?style=for-the-badge&labelColor=1E293B)](https://pay.cloudtips.ru/p/e8c24aee)
-&nbsp;
-[![Yandex Tips](https://img.shields.io/badge/Yandex_Tips-SBP,_Yandex_Pay-FACC15?style=for-the-badge&logo=yandex&logoColor=FFCC00&labelColor=1E293B)](https://tips.yandex.ru/guest/payment/3754149)
-&nbsp;
-[![DaLink](https://img.shields.io/badge/DaLink-Cards,_Wallets-C2410C?style=for-the-badge&labelColor=1E293B)](https://dalink.to/cartneyzix)
-
-<br/>
-
-<sub>همچنین با دادن ستاره در <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a> می‌توانید از پروژه حمایت کنید.</sub>
-
-</div>
-
----
-
-## 14. قدردانی و لینک‌ها
+## 13. قدردانی و لینک‌ها
 
 * **[Telegram for Android (DrKLO)](https://github.com/DrKLO/Telegram)**: سورس‌کد متن‌باز کلاینت (`13.2.2`، `7303`) که Mirrlygram بر پایه آن ساخته شده است.
 * **[Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy)**: پروژه همکار در اکوسیستم Mirrly و منبع هسته بومی Rust به نام `mirrlyengine`.

@@ -39,6 +39,24 @@
 
 </div>
 
+<div align="center">
+
+### Support Development
+
+Mirrlygram is free with no ads or paywalls. Contributions support ongoing development and future updates.
+
+[![CloudTips](https://img.shields.io/badge/CloudTips-RU_Cards,_SBP-1D4ED8?style=for-the-badge&labelColor=1E293B)](https://pay.cloudtips.ru/p/e8c24aee)
+&nbsp;
+[![Yandex Tips](https://img.shields.io/badge/Yandex_Tips-SBP,_Yandex_Pay-FACC15?style=for-the-badge&logo=yandex&logoColor=FFCC00&labelColor=1E293B)](https://tips.yandex.ru/guest/payment/3754149)
+&nbsp;
+[![DaLink](https://img.shields.io/badge/DaLink-Cards,_Wallets-C2410C?style=for-the-badge&labelColor=1E293B)](https://dalink.to/cartneyzix)
+
+<sub>You can also support the project by starring the repository on <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a>.</sub>
+
+</div>
+
+---
+
 ## Table of Contents
 
 1. [About Mirrlygram](#1-about-mirrlygram)
@@ -53,8 +71,7 @@
 10. [Star History](#10-star-history)
 11. [Release History](#11-release-history)
 12. [Security, Privacy & License](#12-security-privacy--license)
-13. [Support Development](#13-support-development)
-14. [Acknowledgements & Links](#14-acknowledgements--links)
+13. [Acknowledgements & Links](#13-acknowledgements--links)
 
 ---
 
@@ -333,29 +350,7 @@ MirrlyGram V2/
 
 ---
 
-## 13. Support Development
-
-<div align="center">
-
-Mirrlygram is free with no ads or paywalls. Contributions support ongoing development and future updates.
-
-<br/>
-
-[![CloudTips](https://img.shields.io/badge/CloudTips-RU_Cards,_SBP-1D4ED8?style=for-the-badge&labelColor=1E293B)](https://pay.cloudtips.ru/p/e8c24aee)
-&nbsp;
-[![Yandex Tips](https://img.shields.io/badge/Yandex_Tips-SBP,_Yandex_Pay-FACC15?style=for-the-badge&logo=yandex&logoColor=FFCC00&labelColor=1E293B)](https://tips.yandex.ru/guest/payment/3754149)
-&nbsp;
-[![DaLink](https://img.shields.io/badge/DaLink-Cards,_Wallets-C2410C?style=for-the-badge&labelColor=1E293B)](https://dalink.to/cartneyzix)
-
-<br/>
-
-<sub>You can also support the project by starring the repository on <a href="https://github.com/joycecurcirt539-dot/MirrlyGram/stargazers">GitHub</a>.</sub>
-
-</div>
-
----
-
-## 14. Acknowledgements & Links
+## 13. Acknowledgements & Links
 
 * **[Telegram for Android (DrKLO)](https://github.com/DrKLO/Telegram)**: open-source client base (`13.2.2`, `7303`) on which Mirrlygram is built.
 * **[Mirrly TG Proxy](https://github.com/joycecurcirt539-dot/Mirrly-TG-Proxy)**: companion project in the Mirrly ecosystem providing the native `mirrlyengine` Rust core.
