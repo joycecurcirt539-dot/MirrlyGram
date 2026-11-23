@@ -62,6 +62,8 @@ import org.telegram.ui.Components.AnimatedFloat;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.FolderBottomSheet;
 import org.telegram.ui.Components.ItemOptions;
+import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
+import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.ListView.AdapterWithDiffUtils;
 import org.telegram.ui.Components.LoadingDrawable;
@@ -862,7 +864,51 @@ public class FiltersSetupActivity extends BaseFragment implements NotificationCe
             return null;
         }
         if (undoView == null) {
-            ((FrameLayout) fragmentView).addView(undoView = new UndoView(getContext()), LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM | Gravity.LEFT, 8, 0, 8, 8));
+            undoView = new UndoView(getContext(), null, false, getResourceProvider()) {
+                private final BlurredBackgroundDrawable glassBackground = getBaseSimpleGlass().factory.create(this)
+                        .setColorProvider(BlurredBackgroundProviderImpl.bulletin(getResourceProvider()))
+                        .setRadius(AndroidUtilities.dp(10))
+                        .setPadding(0);
+
+                private void syncGlassBackground() {
+                    final boolean useGlass = BlurredBackgroundProviderImpl.checkBlurEnabled(currentAccount, getResourceProvider());
+                    final Drawable nativeBg = getBackground();
+                    if (nativeBg != null) {
+                        nativeBg.setAlpha(useGlass ? 0 : 255);
+                    }
+                    super.setBackground(useGlass ? glassBackground : null);
+                    if (useGlass) {
+                        glassBackground.updateColors();
+                    }
+                }
+
+                {
+                    syncGlassBackground();
+                }
+
+                @Override
+                public void updateColors() {
+                    super.updateColors();
+                    syncGlassBackground();
+                }
+
+                @Override
+                public void setColors(int background, int text) {
+                    super.setColors(background, text);
+                    syncGlassBackground();
+                }
+
+                @Override
+                protected void onDraw(Canvas canvas) {
+                    final boolean useGlass = BlurredBackgroundProviderImpl.checkBlurEnabled(currentAccount, getResourceProvider());
+                    final Drawable nativeBg = getBackground();
+                    if (nativeBg != null) {
+                        nativeBg.setAlpha(useGlass ? 0 : 255);
+                    }
+                    super.onDraw(canvas);
+                }
+            };
+            ((FrameLayout) fragmentView).addView(undoView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM | Gravity.LEFT, 8, 0, 8, 8));
             undoView.setTranslationY(-getBottomInset());
         }
         return undoView;

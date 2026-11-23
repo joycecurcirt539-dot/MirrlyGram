@@ -66,6 +66,7 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.AuthTokensHelper;
 import org.telegram.messenger.BirthdayController;
+import org.telegram.messenger.BotWebViewVibrationEffect;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.ChatThemeController;
 import org.telegram.messenger.Emoji;
@@ -89,6 +90,7 @@ import org.telegram.utils.settings.SharedSettings;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.browser.Browser;
+import org.telegram.messenger.mirrly.MirrlyPhonePrivacyManager;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
@@ -115,6 +117,7 @@ import org.telegram.ui.Components.InstantCameraView;
 import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.LinkSpanDrawable;
+import org.telegram.ui.Components.MirrlyPhoneEyeDrawable;
 import org.telegram.ui.Components.Paint.PersistColorPalette;
 import org.telegram.ui.Components.Premium.boosts.UserSelectorBottomSheet;
 import org.telegram.ui.Components.ProfileGooeyView;
@@ -182,7 +185,11 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
     private FrameLayout cameraBackground;
     private ImageView cameraImageView;
     private TextView titleView;
+    private LinearLayout subtitleContainer;
     private TextView subtitleView;
+    private ImageView subtitleEyeButton;
+    private MirrlyPhoneEyeDrawable subtitleEyeDrawable;
+    private boolean ownPhoneTempRevealed;
     private TextView versionView;
     public boolean hasMainTabs;
 
@@ -212,7 +219,8 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             .createObserversGroup(this)
             .add(NotificationCenter.updateInterfaces)
             .add(NotificationCenter.starBalanceUpdated)
-            .add(NotificationCenter.newSuggestionsAvailable);
+            .add(NotificationCenter.newSuggestionsAvailable)
+            .add(NotificationCenter.mirrlyPhonePrivacyChanged);
 
         if (arguments != null) {
             hasMainTabs = arguments.getBoolean("hasMainTabs", false);
@@ -449,12 +457,61 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         titleView.setEllipsize(TextUtils.TruncateAt.END);
         topView.addView(titleView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 16, 138.333f - 12, 16, 0));
 
+        subtitleContainer = new LinearLayout(context) {
+            @Override
+            protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                int w = MeasureSpec.getSize(widthMeasureSpec);
+                int eyeReserve = subtitleEyeButton != null && subtitleEyeButton.getVisibility() == View.VISIBLE ? dp(30) : 0;
+                if (w > 0 && subtitleView != null) {
+                    subtitleView.setMaxWidth(Math.max(dp(80), w - dp(32) - eyeReserve));
+                }
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+            }
+        };
+        subtitleContainer.setOrientation(LinearLayout.HORIZONTAL);
+        subtitleContainer.setGravity(Gravity.CENTER);
+        subtitleContainer.setPadding(dp(16), 0, dp(16), 0);
+
         subtitleView = new TextView(context);
         subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
         subtitleView.setGravity(Gravity.CENTER);
         subtitleView.setSingleLine();
         subtitleView.setEllipsize(TextUtils.TruncateAt.END);
-        topView.addView(subtitleView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 168 - 12, 0, 0));
+        subtitleView.setOnClickListener(v -> {
+            TLRPC.User user = getUserConfig().getCurrentUser();
+            MirrlyPhonePrivacyManager.ResolvedPhone resolved = MirrlyPhonePrivacyManager.resolveSelfPhone(currentAccount, user, ownPhoneTempRevealed);
+            if (resolved.canCopy) {
+                AndroidUtilities.vibrateCursor(v);
+                MirrlyUiKit.copyTextWithBulletin(this, resolved.copyValue, getString(R.string.PhoneCopied), null, resourceProvider);
+            } else if (resolved.hiddenLabel) {
+                AndroidUtilities.shakeViewSpring(subtitleContainer, 4f);
+                BotWebViewVibrationEffect.APP_ERROR.vibrate();
+            }
+        });
+
+        subtitleEyeDrawable = new MirrlyPhoneEyeDrawable(15);
+        subtitleEyeButton = new ImageView(context);
+        subtitleEyeButton.setScaleType(ImageView.ScaleType.CENTER);
+        subtitleEyeButton.setImageDrawable(subtitleEyeDrawable);
+        subtitleEyeButton.setVisibility(View.GONE);
+        ScaleStateListAnimator.apply(subtitleEyeButton, 0.08f, 1.4f);
+        subtitleEyeButton.setOnClickListener(v -> {
+            if (!MirrlyPhonePrivacyManager.isOwnHidden(currentAccount)) {
+                return;
+            }
+            AndroidUtilities.vibrateCursor(v);
+            ownPhoneTempRevealed = !ownPhoneTempRevealed;
+            setInfo(getUserConfig().getCurrentUser(), true);
+        });
+
+        if (LocaleController.isRTL) {
+            subtitleContainer.addView(subtitleEyeButton, LayoutHelper.createLinear(26, 26, Gravity.CENTER_VERTICAL, 0, 0, 4, 0));
+            subtitleContainer.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
+        } else {
+            subtitleContainer.addView(subtitleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL));
+            subtitleContainer.addView(subtitleEyeButton, LayoutHelper.createLinear(26, 26, Gravity.CENTER_VERTICAL, 4, 0, 0, 0));
+        }
+        topView.addView(subtitleContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 165 - 12, 0, 0));
 
         versionView = new TextView(context);
         versionView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
@@ -514,29 +571,79 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             if (listView != null) {
                 listView.adapter.update(true);
             }
+        } else if (id == NotificationCenter.mirrlyPhonePrivacyChanged) {
+            if (!MirrlyPhonePrivacyManager.isOwnHidden(currentAccount)) {
+                ownPhoneTempRevealed = false;
+            }
+            setInfo(getUserConfig().getCurrentUser(), true);
+            if (listView != null && listView.adapter != null) {
+                listView.adapter.update(true);
+            }
         }
     }
 
     public void setInfo() {
-        setInfo(getUserConfig().getCurrentUser());
+        setInfo(getUserConfig().getCurrentUser(), false);
     }
 
     public void setInfo(TLRPC.User user) {
+        setInfo(user, false);
+    }
+
+    public void setInfo(TLRPC.User user, boolean animated) {
         if (avatarView == null) return;
         if (avatarUploadingRequest != -1) return;
 
         avatarDrawable.setInfo(user);
         avatarView.setForUserOrChat(user, avatarDrawable);
         titleView.setText(UserObject.getUserName(user));
+
+        boolean isOwnHidden = MirrlyPhonePrivacyManager.isOwnHidden(currentAccount);
+        if (!isOwnHidden) {
+            ownPhoneTempRevealed = false;
+        }
+        MirrlyPhonePrivacyManager.ResolvedPhone resolved = MirrlyPhonePrivacyManager.resolveSelfPhone(currentAccount, user, ownPhoneTempRevealed);
         final StringBuilder sb = new StringBuilder();
         if (user != null) {
-            sb.append(PhoneFormat.getInstance().format("+" + user.phone));
+            sb.append(resolved.plainDisplayText);
         }
         final String username = UserObject.getPublicUsername(user);
         if (username != null) {
-            sb.append(" • @").append(username);
+            if (sb.length() > 0) {
+                sb.append(" • ");
+            }
+            sb.append("@").append(username);
         }
-        subtitleView.setText(sb);
+        final String nextText = sb.toString();
+        if (animated && SharedConfig.animationsEnabled() && !TextUtils.equals(subtitleView.getText(), nextText)) {
+            subtitleView.animate().cancel();
+            subtitleView.animate()
+                    .alpha(0f)
+                    .setDuration(90)
+                    .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
+                    .withEndAction(() -> {
+                        subtitleView.setText(nextText);
+                        subtitleView.animate()
+                                .alpha(1f)
+                                .setDuration(170)
+                                .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
+                                .start();
+                    })
+                    .start();
+        } else {
+            subtitleView.animate().cancel();
+            subtitleView.setAlpha(1f);
+            subtitleView.setText(nextText);
+        }
+        if (subtitleEyeButton != null && subtitleEyeDrawable != null) {
+            subtitleEyeButton.setVisibility(isOwnHidden ? View.VISIBLE : View.GONE);
+            if (isOwnHidden) {
+                subtitleEyeDrawable.setSlashed(ownPhoneTempRevealed, animated);
+                subtitleEyeButton.setContentDescription(LocaleController.getString(
+                        ownPhoneTempRevealed ? R.string.MirrlyPhoneHideDesc : R.string.MirrlyPhoneShowDesc
+                ));
+            }
+        }
 
         versionView.setText(getVersionName());
     }
@@ -547,6 +654,10 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
     public void updateColors() {
         titleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
         subtitleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText));
+        if (subtitleEyeDrawable != null && subtitleEyeButton != null) {
+            subtitleEyeDrawable.setColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText));
+            subtitleEyeButton.setBackground(Theme.createSimpleSelectorCircleDrawable(dp(26), android.graphics.Color.TRANSPARENT, getThemedColor(Theme.key_listSelector)));
+        }
         searchItem.updateColor();
 
         final int navigationBarColor = getThemedColor(Theme.key_windowBackgroundWhite);
@@ -609,8 +720,18 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
     @Override
     public void onResume() {
         super.onResume();
+        setInfo();
         if (listView.adapter != null) {
             listView.adapter.update(false);
+        }
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        if (ownPhoneTempRevealed && MirrlyPhonePrivacyManager.isAutoRehideOnLeave(currentAccount)) {
+            ownPhoneTempRevealed = false;
+            setInfo();
         }
     }
 
@@ -754,7 +875,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             items.add(UItem.asShadow(null));
         } else if (suggestions.contains("VALIDATE_PHONE_NUMBER") && getUserConfig().getCurrentUser() != null) {
             items.add(SuggestionCell.Factory.of(
-                formatString(R.string.CheckPhoneNumber, PhoneFormat.getInstance().format("+" + getUserConfig().getCurrentUser().phone)),
+                MirrlyPhonePrivacyManager.resolveCheckPhoneBannerText(currentAccount, getUserConfig().getCurrentUser()),
                 replaceSingleTag(getString(R.string.CheckPhoneNumberInfo), () -> {
                     Browser.openUrl(getContext(), getString(R.string.CheckPhoneNumberLearnMoreUrl));
                 }),
@@ -1303,6 +1424,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
         private final TextView titleView;
         private final TextView subtitleView;
         private final TextView valueView;
+        private final ImageView trailingActionView;
         private final boolean mini;
         private boolean hasBackground = true;
 
@@ -1337,7 +1459,14 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
 
             valueView = new TextView(context);
             valueView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
+
+            trailingActionView = new ImageView(context);
+            trailingActionView.setScaleType(ImageView.ScaleType.CENTER);
+            trailingActionView.setVisibility(View.GONE);
+            ScaleStateListAnimator.apply(trailingActionView, 0.08f, 1.4f);
+
             if (LocaleController.isRTL) {
+                addView(trailingActionView, LayoutHelper.createLinear(40, 40, Gravity.CENTER_VERTICAL, 10, 0, 0, 0));
                 addView(valueView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 20, 0, 0, 0));
                 addView(textLayout, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1, Gravity.CENTER_VERTICAL | Gravity.FILL_HORIZONTAL, 20, 0, mini ? 12 : 18, 0));
                 addView(iconLayout, LayoutHelper.createLinear(28, 28, Gravity.CENTER_VERTICAL | Gravity.RIGHT, 0, 0, mini ? 9 : 18, 0));
@@ -1345,6 +1474,7 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
                 addView(iconLayout, LayoutHelper.createLinear(28, 28, Gravity.CENTER_VERTICAL | Gravity.LEFT, mini ? 9 : 18, 0, 0, 0));
                 addView(textLayout, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1, Gravity.CENTER_VERTICAL | Gravity.FILL_HORIZONTAL,  mini ? 12 : 18, 0, 20, 0));
                 addView(valueView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 0, 0, 20, 0));
+                addView(trailingActionView, LayoutHelper.createLinear(40, 40, Gravity.CENTER_VERTICAL, 0, 0, 10, 0));
             }
             updateColors();
         }
@@ -1355,6 +1485,12 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             subtitleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText, resourcesProvider));
             valueView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText, resourcesProvider));
             iconBackground.setDrawBorder(hasBackground && (resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark()));
+            if (trailingActionView != null) {
+                trailingActionView.setBackground(Theme.createSimpleSelectorCircleDrawable(dp(40), android.graphics.Color.TRANSPARENT, Theme.getColor(Theme.key_listSelector, resourcesProvider)));
+                if (trailingActionView.getDrawable() instanceof MirrlyPhoneEyeDrawable) {
+                    ((MirrlyPhoneEyeDrawable) trailingActionView.getDrawable()).setColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayIcon, resourcesProvider));
+                }
+            }
         }
         @Override
         public void addColorKeys(HashSet<Integer> colors) {
@@ -1382,7 +1518,22 @@ public class SettingsActivity extends BaseFragment implements NotificationCenter
             subtitleView.setVisibility((twoLines = !TextUtils.isEmpty(subtitle)) ? View.VISIBLE : View.GONE);
             subtitleView.setText(subtitle);
             setValue(value);
+            setTrailingAction(null, null, null);
             updateColors();
+        }
+
+        public void setTrailingAction(@Nullable Drawable drawable, @Nullable View.OnClickListener listener, @Nullable CharSequence contentDescription) {
+            if (trailingActionView == null) {
+                return;
+            }
+            trailingActionView.setImageDrawable(drawable);
+            trailingActionView.setOnClickListener(listener);
+            trailingActionView.setClickable(listener != null);
+            trailingActionView.setContentDescription(contentDescription);
+            trailingActionView.setVisibility(drawable != null ? View.VISIBLE : View.GONE);
+            if (drawable instanceof MirrlyPhoneEyeDrawable) {
+                ((MirrlyPhoneEyeDrawable) drawable).setColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayIcon, resourcesProvider));
+            }
         }
 
         public void setValue(CharSequence value) {

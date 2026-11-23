@@ -7718,6 +7718,32 @@ public class AlertsCreator {
         void didPressedNewCard();
     }
 
+    private static ArrayList<MessageObject> collectMirrlyDeleteTargets(MessageObject selectedMessage, SparseArray<MessageObject>[] selectedMessages, MessageObject.GroupedMessages selectedGroup) {
+        ArrayList<MessageObject> targets = new ArrayList<>();
+        if (selectedGroup != null && selectedGroup.messages != null) {
+            for (int i = 0; i < selectedGroup.messages.size(); i++) {
+                MessageObject msg = selectedGroup.messages.get(i);
+                if (msg != null) {
+                    targets.add(msg);
+                }
+            }
+        } else if (selectedMessage != null) {
+            targets.add(selectedMessage);
+        } else if (selectedMessages != null) {
+            for (int a = 1; a >= 0; a--) {
+                if (a < selectedMessages.length && selectedMessages[a] != null) {
+                    for (int b = 0; b < selectedMessages[a].size(); b++) {
+                        MessageObject msg = selectedMessages[a].valueAt(b);
+                        if (msg != null) {
+                            targets.add(msg);
+                        }
+                    }
+                }
+            }
+        }
+        return targets;
+    }
+
     public static void createDeleteMessagesAlert(BaseFragment fragment, TLRPC.User user, TLRPC.Chat chat, TLRPC.EncryptedChat encryptedChat, TLRPC.ChatFull chatInfo, long mergeDialogId, MessageObject selectedMessage, SparseArray<MessageObject>[] selectedMessages, MessageObject.GroupedMessages selectedGroup, int topicId, int mode, TLRPC.ChannelParticipant[] channelParticipants, Runnable onDelete, Runnable hideDim, Theme.ResourcesProvider resourcesProvider) {
         final boolean scheduled = mode == ChatActivity.MODE_SCHEDULED;
         final boolean isSavedMessages = mode == ChatActivity.MODE_SAVED;
@@ -7750,6 +7776,23 @@ public class AlertsCreator {
         } else {
             dialogId = -chat.id;
         }
+
+        final ArrayList<MessageObject> mirrlyTargets = collectMirrlyDeleteTargets(selectedMessage, selectedMessages, selectedGroup);
+        boolean allAlreadyMirrlyDeletedTemp = !mirrlyTargets.isEmpty();
+        for (int k = 0; k < mirrlyTargets.size(); k++) {
+            if (!mirrlyTargets.get(k).isMirrlyDeleted()) {
+                allAlreadyMirrlyDeletedTemp = false;
+                break;
+            }
+        }
+        final boolean allAlreadyMirrlyDeleted = allAlreadyMirrlyDeletedTemp;
+        final boolean canMirrlyPrompt = !allAlreadyMirrlyDeleted
+                && !scheduled
+                && !isSavedMessages
+                && !quickReplies
+                && mode != ChatActivity.MODE_WELCOME_MESSAGES
+                && dialogId != UserConfig.getInstance(currentAccount).getClientUserId()
+                && org.telegram.messenger.mirrly.MirrlyConfig.isSaveDeletedMessages();
 
         if (scheduled) {
             final int schedule_date, schedule_repeat_period;
@@ -7898,10 +7941,11 @@ public class AlertsCreator {
             revokeTimeLimit = MessagesController.getInstance(currentAccount).revokeTimeLimit;
         }
         boolean hasDeleteForAllCheck = false;
+        String deleteForAllOptionText = null;
         boolean hasNotOut = false;
         int myMessagesCount = 0;
         boolean canDeleteInbox = encryptedChat == null && user != null && canRevokeInbox && revokeTimeLimit == 0x7fffffff;
-        if (chat != null && chat.megagroup && !scheduled && !isSavedMessages) {
+        if (!allAlreadyMirrlyDeleted && chat != null && chat.megagroup && !scheduled && !isSavedMessages) {
             ArrayList<MessageObject> messages = new ArrayList<>();
             if (selectedMessage != null) {
                 if (selectedMessage.messageOwner.action == null || selectedMessage.messageOwner.action instanceof TLRPC.TL_messageActionEmpty ||
@@ -8023,25 +8067,13 @@ public class AlertsCreator {
                 return;
             } else if (!hasNotOut && myMessagesCount > 0 && hasNonDiceMessages) {
                 hasDeleteForAllCheck = true;
-                FrameLayout frameLayout = new FrameLayout(activity);
-                CheckBoxCell cell = new CheckBoxCell(activity, 1, resourcesProvider);
-                cell.setBackgroundDrawable(Theme.getSelectorDrawable(false));
                 if (chat != null && hasNotOut) {
-                    cell.setText(LocaleController.getString(R.string.DeleteForAll), "", false, false);
+                    deleteForAllOptionText = LocaleController.getString(R.string.DeleteForAll);
                 } else {
-                    cell.setText(LocaleController.getString(R.string.DeleteMessagesOption), "", false, false);
+                    deleteForAllOptionText = LocaleController.getString(R.string.DeleteMessagesOption);
                 }
-                cell.setPadding(LocaleController.isRTL ? dp(16) : dp(8), 0, LocaleController.isRTL ? dp(8) : dp(16), 0);
-                frameLayout.addView(cell, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, Gravity.TOP | Gravity.LEFT, 0, 0, 0, 0));
-                cell.setOnClickListener(v -> {
-                    CheckBoxCell cell12 = (CheckBoxCell) v;
-                    deleteForAll[0] = !deleteForAll[0];
-                    cell12.setChecked(deleteForAll[0], true);
-                });
-                builder.setView(frameLayout);
-                builder.setCustomViewOffset(9);
             }
-        } else if (!scheduled && !isSavedMessages && !ChatObject.isChannel(chat) && encryptedChat == null) {
+        } else if (!allAlreadyMirrlyDeleted && !scheduled && !isSavedMessages && !ChatObject.isChannel(chat) && encryptedChat == null) {
             if (user != null && user.id != UserConfig.getInstance(currentAccount).getClientUserId() && (!user.bot || user.support) || chat != null) {
                 if (selectedMessage != null) {
                     boolean hasOutgoing = !selectedMessage.isSendError() && (
@@ -8080,29 +8112,168 @@ public class AlertsCreator {
             }
             if (myMessagesCount > 0 && hasNonDiceMessages && (user == null || !UserObject.isDeleted(user))) {
                 hasDeleteForAllCheck = true;
-                FrameLayout frameLayout = new FrameLayout(activity);
-                CheckBoxCell cell = new CheckBoxCell(activity, 1, resourcesProvider);
-                cell.setBackgroundDrawable(Theme.getSelectorDrawable(false));
                 if (canDeleteInbox) {
-                    cell.setText(LocaleController.formatString("DeleteMessagesOptionAlso", R.string.DeleteMessagesOptionAlso, UserObject.getFirstName(user)), "", false, false);
+                    deleteForAllOptionText = LocaleController.formatString("DeleteMessagesOptionAlso", R.string.DeleteMessagesOptionAlso, UserObject.getFirstName(user));
                 } else if (chat != null && (hasNotOut || myMessagesCount == count)) {
-                    cell.setText(LocaleController.getString(R.string.DeleteForAll), "", false, false);
+                    deleteForAllOptionText = LocaleController.getString(R.string.DeleteForAll);
                 } else {
-                    cell.setText(LocaleController.getString(R.string.DeleteMessagesOption), "", false, false);
+                    deleteForAllOptionText = LocaleController.getString(R.string.DeleteMessagesOption);
                 }
-                cell.setPadding(LocaleController.isRTL ? dp(16) : dp(8), 0, LocaleController.isRTL ? dp(8) : dp(16), 0);
-                frameLayout.addView(cell, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, Gravity.TOP | Gravity.LEFT, 0, 0, 0, 0));
-                cell.setOnClickListener(v -> {
-                    CheckBoxCell cell1 = (CheckBoxCell) v;
-                    deleteForAll[0] = !deleteForAll[0];
-                    cell1.setChecked(deleteForAll[0], true);
-                });
-                builder.setView(frameLayout);
-                builder.setCustomViewOffset(9);
             }
         }
 
+        final boolean showMirrlyChoiceUi = canMirrlyPrompt && org.telegram.messenger.mirrly.MirrlyConfig.getDeletedLocalDeletePolicy() == org.telegram.messenger.mirrly.MirrlyConfig.DELETED_LOCAL_POLICY_ASK;
+        final boolean[] deleteEverywhereChoice = new boolean[1];
+        final boolean[] rememberMirrlyChoice = new boolean[1];
+        if ((hasDeleteForAllCheck && !allAlreadyMirrlyDeleted) || showMirrlyChoiceUi) {
+            LinearLayout customView = new LinearLayout(activity);
+            customView.setOrientation(LinearLayout.VERTICAL);
+            CheckBoxCell deleteForAllCell = null;
+            if (hasDeleteForAllCheck && !allAlreadyMirrlyDeleted && deleteForAllOptionText != null) {
+                deleteForAllCell = new CheckBoxCell(activity, 1, resourcesProvider);
+                deleteForAllCell.setBackgroundDrawable(Theme.getSelectorDrawable(false));
+                deleteForAllCell.setText(deleteForAllOptionText, "", false, showMirrlyChoiceUi);
+                deleteForAllCell.setPadding(LocaleController.isRTL ? dp(16) : dp(8), 0, LocaleController.isRTL ? dp(8) : dp(16), 0);
+                final CheckBoxCell finalDeleteForAllCell = deleteForAllCell;
+                deleteForAllCell.setOnClickListener(v -> {
+                    deleteForAll[0] = !deleteForAll[0];
+                    finalDeleteForAllCell.setChecked(deleteForAll[0], true);
+                });
+                customView.addView(deleteForAllCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
+            }
+            if (showMirrlyChoiceUi) {
+                final CheckBoxCell finalDeleteForAllCell = deleteForAllCell;
+                final org.telegram.ui.Cells.RadioButtonCell keepRadio = new org.telegram.ui.Cells.RadioButtonCell(activity, true);
+                final org.telegram.ui.Cells.RadioButtonCell everywhereRadio = new org.telegram.ui.Cells.RadioButtonCell(activity, true);
+                final CheckBoxCell rememberCheck = new CheckBoxCell(activity, 1, resourcesProvider);
+                final TextView rememberHint = new TextView(activity);
+
+                keepRadio.setBackgroundDrawable(Theme.getSelectorDrawable(false));
+                keepRadio.setTextAndValue(
+                        LocaleController.getString(R.string.MirrlyDeleteChoiceKeep),
+                        LocaleController.getString(R.string.MirrlyDeleteChoiceKeepDesc),
+                        false,
+                        true
+                );
+
+                everywhereRadio.setBackgroundDrawable(Theme.getSelectorDrawable(false));
+                everywhereRadio.setTextAndValue(
+                        LocaleController.getString(R.string.MirrlyDeleteChoiceEverywhere),
+                        LocaleController.getString(R.string.MirrlyDeleteChoiceEverywhereDesc),
+                        true,
+                        false
+                );
+
+                rememberCheck.setBackgroundDrawable(Theme.getSelectorDrawable(false));
+                rememberCheck.setText(LocaleController.getString(R.string.MirrlyDeleteChoiceRemember), "", false, false);
+                rememberCheck.setPadding(LocaleController.isRTL ? dp(16) : dp(8), 0, LocaleController.isRTL ? dp(8) : dp(16), 0);
+
+                rememberHint.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+                rememberHint.setTextColor(Theme.getColor(Theme.key_dialogTextGray2, resourcesProvider));
+                rememberHint.setGravity(LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT);
+                rememberHint.setPadding(dp(20), dp(2), dp(20), dp(6));
+                rememberHint.setVisibility(View.GONE);
+
+                Runnable updateHint = () -> {
+                    if (rememberMirrlyChoice[0]) {
+                        rememberHint.setText(LocaleController.getString(
+                                deleteEverywhereChoice[0]
+                                        ? R.string.MirrlyDeleteChoiceRememberEverywhereHint
+                                        : R.string.MirrlyDeleteChoiceRememberKeepHint
+                        ));
+                        rememberHint.setVisibility(View.VISIBLE);
+                    } else {
+                        rememberHint.setVisibility(View.GONE);
+                    }
+                };
+
+                keepRadio.setOnClickListener(v -> {
+                    if (!deleteEverywhereChoice[0]) {
+                        return;
+                    }
+                    deleteEverywhereChoice[0] = false;
+                    keepRadio.setChecked(true, true);
+                    everywhereRadio.setChecked(false, true);
+                    updateHint.run();
+                });
+                everywhereRadio.setOnClickListener(v -> {
+                    if (deleteEverywhereChoice[0]) {
+                        return;
+                    }
+                    deleteEverywhereChoice[0] = true;
+                    keepRadio.setChecked(false, true);
+                    everywhereRadio.setChecked(true, true);
+                    if (finalDeleteForAllCell != null && !deleteForAll[0]) {
+                        deleteForAll[0] = true;
+                        finalDeleteForAllCell.setChecked(true, true);
+                    }
+                    updateHint.run();
+                });
+                rememberCheck.setOnClickListener(v -> {
+                    rememberMirrlyChoice[0] = !rememberMirrlyChoice[0];
+                    rememberCheck.setChecked(rememberMirrlyChoice[0], true);
+                    updateHint.run();
+                });
+
+                customView.addView(keepRadio, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+                customView.addView(everywhereRadio, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+                customView.addView(rememberCheck, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
+                customView.addView(rememberHint, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+            }
+            builder.setView(customView);
+            builder.setCustomViewOffset(9);
+        }
+
         AlertDialog.OnButtonClickListener deleteAction = (dialogInterface, i) -> {
+            final org.telegram.messenger.mirrly.MirrlyDeletedStorage deletedStorage = org.telegram.messenger.mirrly.MirrlyDeletedStorage.getInstance(currentAccount);
+            if (allAlreadyMirrlyDeleted) {
+                for (int k = 0; k < mirrlyTargets.size(); k++) {
+                    MessageObject msg = mirrlyTargets.get(k);
+                    long msgDid = msg.getDialogId();
+                    if (msgDid == 0) {
+                        msgDid = dialogId;
+                    }
+                    deletedStorage.markForcePhysicalDelete(msgDid, msg.getId());
+                    deletedStorage.deleteRecordByUid(org.telegram.messenger.mirrly.MirrlyDeletedStorage.buildUid(msgDid, msg.getId()));
+                }
+            } else if (canMirrlyPrompt) {
+                if (deleteEverywhereChoice[0]) {
+                    for (int k = 0; k < mirrlyTargets.size(); k++) {
+                        MessageObject msg = mirrlyTargets.get(k);
+                        long msgDid = msg.getDialogId();
+                        if (msgDid == 0) {
+                            msgDid = dialogId;
+                        }
+                        deletedStorage.markForcePhysicalDelete(msgDid, msg.getId());
+                        if (msg.isMirrlyDeleted()) {
+                            deletedStorage.deleteRecordByUid(org.telegram.messenger.mirrly.MirrlyDeletedStorage.buildUid(msgDid, msg.getId()));
+                        }
+                    }
+                    if (showMirrlyChoiceUi && rememberMirrlyChoice[0]) {
+                        org.telegram.messenger.mirrly.MirrlyConfig.setSaveDeletedMessages(false);
+                        if (BulletinFactory.canShowBulletin(fragment)) {
+                            BulletinFactory.of(fragment).createSimpleBulletin(R.raw.info, LocaleController.getString(R.string.MirrlySaveDeletedTurnedOffBulletin)).show();
+                        }
+                    }
+                } else {
+                    for (int k = 0; k < mirrlyTargets.size(); k++) {
+                        MessageObject msg = mirrlyTargets.get(k);
+                        long msgDid = msg.getDialogId();
+                        if (msgDid == 0) {
+                            msgDid = dialogId;
+                        }
+                        if (msg.isMirrlyDeleted()) {
+                            deletedStorage.markForcePhysicalDelete(msgDid, msg.getId());
+                            deletedStorage.deleteRecordByUid(org.telegram.messenger.mirrly.MirrlyDeletedStorage.buildUid(msgDid, msg.getId()));
+                        } else {
+                            deletedStorage.markPendingLocalDeleteAsKeepByMe(msgDid, msg.getId());
+                        }
+                    }
+                    if (showMirrlyChoiceUi && rememberMirrlyChoice[0]) {
+                        org.telegram.messenger.mirrly.MirrlyConfig.setDeletedLocalDeletePolicy(org.telegram.messenger.mirrly.MirrlyConfig.DELETED_LOCAL_POLICY_ALWAYS_KEEP);
+                    }
+                }
+            }
             ArrayList<Integer> ids = null;
             long thisDialogId = dialogId;
             if (isSavedMessages) {
@@ -8143,7 +8314,7 @@ public class AlertsCreator {
                     thisDialogId = mergeDialogId;
                 }
                 if (!ids.isEmpty()) {
-                    MessagesController.getInstance(currentAccount).deleteMessages(ids, random_ids, encryptedChat, thisDialogId, topicId, deleteForAll[0], mode);
+                    MessagesController.getInstance(currentAccount).deleteMessages(ids, random_ids, encryptedChat, thisDialogId, topicId, deleteForAll[0], mode, allAlreadyMirrlyDeleted);
                 }
                 for (MessageObject msg: ephemeralMessages) {
                     MessagesController.getInstance(currentAccount).deleteEphemeralMessage(thisDialogId, topicId, msg);
@@ -8164,7 +8335,7 @@ public class AlertsCreator {
                             }
                         }
                     }
-                    MessagesController.getInstance(currentAccount).deleteMessages(ids, random_ids, encryptedChat, (a == 1 && mergeDialogId != 0) ? mergeDialogId : thisDialogId, topicId, deleteForAll[0], mode);
+                    MessagesController.getInstance(currentAccount).deleteMessages(ids, random_ids, encryptedChat, (a == 1 && mergeDialogId != 0) ? mergeDialogId : thisDialogId, topicId, deleteForAll[0], mode, allAlreadyMirrlyDeleted);
                     selectedMessages[a].clear();
                 }
             }
@@ -8179,6 +8350,8 @@ public class AlertsCreator {
             } else {
                 builder.setTitle(LocaleController.formatString(R.string.UnsaveMessagesTitle, LocaleController.formatPluralString("messages", count)));
             }
+        } else if (allAlreadyMirrlyDeleted) {
+            builder.setTitle(LocaleController.getString(count == 1 ? R.string.MirrlyDeletedSecondDeleteTitleSingle : R.string.MirrlyDeletedSecondDeleteTitleMultiple));
         } else {
             if (count == 1) {
                 builder.setTitle(LocaleController.getString(R.string.DeleteSingleMessagesTitle));
@@ -8193,6 +8366,8 @@ public class AlertsCreator {
             } else {
                 builder.setMessage(LocaleController.getString(R.string.AreYouSureUnsaveFewMessages));
             }
+        } else if (allAlreadyMirrlyDeleted) {
+            builder.setMessage(LocaleController.getString(count == 1 ? R.string.MirrlyDeletedSecondDeleteTextSingle : R.string.MirrlyDeletedSecondDeleteTextMultiple));
         } else if (chat != null && hasNotOut) {
             if (hasDeleteForAllCheck && myMessagesCount != count) {
                 builder.setMessage(LocaleController.formatString(R.string.DeleteMessagesTextGroupPart, LocaleController.formatPluralString("messages", myMessagesCount)));

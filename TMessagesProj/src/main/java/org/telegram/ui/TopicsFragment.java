@@ -422,7 +422,7 @@ public class TopicsFragment extends BaseFragment implements NotificationCenter.N
 
             @Override
             protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
-                if (child == actionBar && !isInPreviewMode()) {
+                if (child == actionBar && !isInPreviewMode() && !actionBar.isGlassMode()) {
                     int y = (int) (actionBar.getY() + getActionBarFullHeight());
                     getParentLayout().drawHeaderShadow(canvas, (int) (255 * (1f - searchAnimationProgress)), y);
                     if (searchAnimationProgress > 0) {
@@ -867,6 +867,7 @@ public class TopicsFragment extends BaseFragment implements NotificationCenter.N
             ThemeBind.cursorColor(editText, Theme.key_chat_messagePanelCursor, getResourceProvider());
         }
         other = menu.addItem(0, R.drawable.ic_ab_other, themeDelegate);
+        other.setBlurredBackgroundFactory(iBlur3FactoryLiquidGlass, BlurredBackgroundProviderImpl.messageMenuBackground(resourceProvider));
         other.setContentDescription(getString(R.string.AccDescrMoreOptions));
         other.addSubItem(toggle_id, R.drawable.msg_discussion, getString(R.string.TopicViewAsMessages));
         addMemberSubMenu = other.addSubItem(add_member_id, R.drawable.msg_addcontact, getString(R.string.AddMember));
@@ -1298,6 +1299,7 @@ public class TopicsFragment extends BaseFragment implements NotificationCenter.N
         contentView.addView(recyclerListView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         ((ViewGroup.MarginLayoutParams) recyclerListView.getLayoutParams()).topMargin = -AndroidUtilities.dp(100);
         floatingButton = new FragmentFloatingButton(getContext(), resourceProvider);
+        floatingButton.setBlurredBackgroundFactory(iBlur3FactoryLiquidGlass, true, resourceProvider);
         contentView.addView(floatingButton, FragmentFloatingButton.createDefaultLayoutParams());
         floatingButton.setOnClickListener(v -> presentFragment(TopicCreateFragment.create(chatId, 0)));
         floatingButton.imageView.setImageResource(R.drawable.ic_chatlist_add_2);
@@ -1421,7 +1423,7 @@ public class TopicsFragment extends BaseFragment implements NotificationCenter.N
 
         ThemeBind.backgroundColor(searchContainer, Theme.key_windowBackgroundWhite, getResourceProvider());
 
-        actionBar.setDrawBlurBackground(contentView);
+        applyTopicsActionBarGlass();
 
         getMessagesStorage().loadChatInfo(chatId, true, null, true, false, 0);
 
@@ -1550,6 +1552,7 @@ public class TopicsFragment extends BaseFragment implements NotificationCenter.N
         floatingButton.updateColors();
         bottomOverlayContainer.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
         actionBar.setActionModeColor(getThemedColor(Theme.key_windowBackgroundWhite));
+        applyTopicsActionBarGlass();
         if (!inPreviewMode) {
             actionBar.setBackgroundColor(getThemedColor(Theme.key_actionBarDefault));
         }
@@ -2426,6 +2429,7 @@ public class TopicsFragment extends BaseFragment implements NotificationCenter.N
         showItem.setVisibility(View.GONE);
 
         otherItem = actionMode.addItemWithWidth(0, R.drawable.ic_ab_other, AndroidUtilities.dp(54), getString(R.string.AccDescrMoreOptions));
+        otherItem.setBlurredBackgroundFactory(iBlur3FactoryLiquidGlass, BlurredBackgroundProviderImpl.messageMenuBackground(resourceProvider));
         readItem = otherItem.addSubItem(read_id, R.drawable.msg_markread, getString(R.string.MarkAsRead));
         closeTopic = otherItem.addSubItem(close_topic_id, R.drawable.msg_topic_close, getString(R.string.CloseTopic));
         restartTopic = otherItem.addSubItem(restart_topic_id, R.drawable.msg_topic_restart, getString(R.string.RestartTopic));
@@ -3308,10 +3312,14 @@ public class TopicsFragment extends BaseFragment implements NotificationCenter.N
 
     private void hideFloatingButton(boolean hide, boolean animated) {
         floatingButton.setButtonVisible(!hide, fragmentBeginToShow && animated);
+        if (recyclerListView != null) {
+            recyclerListView.postOnAnimation(this::blur3_InvalidateBlur);
+        }
     }
 
     private void updateFloatingButtonOffset() {
         floatingButton.setTranslationY(-transitionPadding - navigationBarHeight - additionFloatingButtonOffset);
+        blur3_InvalidateBlur();
     }
 
     @Override
@@ -4200,9 +4208,29 @@ public class TopicsFragment extends BaseFragment implements NotificationCenter.N
     private IBlur3Capture iBlur3Capture;
     private boolean iBlur3Invalidated;
 
+    private void applyTopicsActionBarGlass() {
+        if (actionBar == null) {
+            return;
+        }
+        if (!inPreviewMode && iBlur3FactoryLiquidGlass != null && BlurredBackgroundProviderImpl.checkBlurEnabled(currentAccount, resourceProvider)) {
+            if (!actionBar.isGlassMode()) {
+                actionBar.setupGlass(iBlur3FactoryLiquidGlass, BlurredBackgroundProviderImpl.simpleActionBar(resourceProvider));
+            }
+            actionBar.updateColors();
+        } else {
+            if (actionBar.isGlassMode()) {
+                actionBar.clearGlass();
+            }
+            if (!inPreviewMode && contentView != null) {
+                actionBar.setDrawBlurBackground(contentView);
+            }
+        }
+    }
+
     private final ArrayList<RectF> iBlur3Positions = new ArrayList<>();
     private final RectF iBlur3PositionActionBar = new RectF();
-    private final RectF iBlur3PositionMainTabs = new RectF(); {
+    private final RectF iBlur3PositionMainTabs = new RectF();
+    private final RectF iBlur3PositionFloatingButton = new RectF(); {
         iBlur3Positions.add(iBlur3PositionActionBar);
         iBlur3Positions.add(iBlur3PositionMainTabs);
     }
@@ -4226,7 +4254,25 @@ public class TopicsFragment extends BaseFragment implements NotificationCenter.N
         iBlur3PositionMainTabs.set(0, mainTabTop, fragmentView.getMeasuredWidth(), mainTabBottom);
         iBlur3PositionMainTabs.inset(0, LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) ? 0 : -dp(48));
 
-        scrollableViewNoiseSuppressor.setupRenderNodes(iBlur3Positions, parentDialogsActivity != null ? 2 : 1);
+        iBlur3Positions.clear();
+        iBlur3Positions.add(iBlur3PositionActionBar);
+        if (parentDialogsActivity != null) {
+            iBlur3Positions.add(iBlur3PositionMainTabs);
+        }
+        if (floatingButton != null && floatingButton.getVisibility() == View.VISIBLE && floatingButton.getAlpha() > 0f && floatingButton.getMeasuredWidth() > 0 && floatingButton.getMeasuredHeight() > 0) {
+            final float left = floatingButton.getX();
+            final float top = floatingButton.getY();
+            final float inset = LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) ? dp(8) : dp(24);
+            iBlur3PositionFloatingButton.set(
+                    Math.max(0f, left - inset),
+                    Math.max(0f, top - inset),
+                    Math.min(fragmentView.getMeasuredWidth(), left + floatingButton.getMeasuredWidth() + inset),
+                    Math.min(fragmentView.getMeasuredHeight(), top + floatingButton.getMeasuredHeight() + inset)
+            );
+            iBlur3Positions.add(iBlur3PositionFloatingButton);
+        }
+
+        scrollableViewNoiseSuppressor.setupRenderNodes(iBlur3Positions, iBlur3Positions.size());
         scrollableViewNoiseSuppressor.invalidateResultRenderNodes(iBlur3Capture, fragmentView.getMeasuredWidth(), fragmentView.getMeasuredHeight());
     }
 

@@ -1,18 +1,26 @@
 package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
+import static org.telegram.messenger.AndroidUtilities.dpf2;
 import static org.telegram.messenger.AndroidUtilities.lerp;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.Rect;
+import android.graphics.RectF;
+import android.graphics.Shader;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.math.MathUtils;
 import androidx.dynamicanimation.animation.DynamicAnimation;
 import androidx.dynamicanimation.animation.FloatPropertyCompat;
 import androidx.dynamicanimation.animation.SpringAnimation;
@@ -21,15 +29,19 @@ import androidx.dynamicanimation.animation.SpringForce;
 import android.util.Log;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.mirrly.MirrlyConfig;
+import org.telegram.messenger.mirrly.MirrlyInterfaceConfig;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AnimatedLinearLayout;
 import org.telegram.ui.Components.CubicBezierInterpolator;
+import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Components.glass.GlassTabView;
 
 import java.util.HashSet;
 import java.util.Set;
 
 import me.vkryl.android.animator.BoolAnimator;
+import me.vkryl.android.animator.FactorAnimator;
 import me.vkryl.android.animator.ListAnimator;
 import me.vkryl.android.util.ClickHelper;
 
@@ -47,6 +59,24 @@ public class MainTabsLayout extends AnimatedLinearLayout {
     private static final int[] PASS_PADDINGS_DP = {16, 8, 4};
 
     private int maxWidthPx;
+    private BlurredBackgroundDrawable blurredBackgroundDrawable;
+    private boolean fullWidthCentering;
+    private boolean collapsedCircleMode;
+    private int horizontalAlignment = MirrlyInterfaceConfig.ALIGN_CENTER;
+    private final FactorAnimator alignAnimator = new FactorAnimator(
+        0,
+        (id, factor, fraction, callee) -> updatePillAndEntries(),
+        CubicBezierInterpolator.EASE_OUT_QUINT,
+        320L,
+        0.5f
+    );
+    @Nullable
+    private Runnable onPillLayoutChangedListener;
+    private final Path pillClipPath = new Path();
+    private final RectF pillClipRectF = new RectF();
+    private float lastPillClipLeft, lastPillClipTop, lastPillClipRight, lastPillClipBottom, lastPillClipRadius = -1f;
+    private int lastPillBoundsLeft = Integer.MIN_VALUE, lastPillBoundsTop, lastPillBoundsRight, lastPillBoundsBottom, lastPillBoundsAlpha = -1;
+    private int lastPillEntriesCount = -1;
 
     public void setMaxWidth(int maxWidthPx) {
         if (this.maxWidthPx != maxWidthPx) {
@@ -55,9 +85,99 @@ public class MainTabsLayout extends AnimatedLinearLayout {
         }
     }
 
+    public void setBlurredBackgroundDrawable(@Nullable BlurredBackgroundDrawable drawable) {
+        this.blurredBackgroundDrawable = drawable;
+        this.fullWidthCentering = drawable != null;
+        requestLayout();
+        invalidate();
+    }
+
+    public void setCollapsedCircleMode(boolean collapsed) {
+        if (this.collapsedCircleMode != collapsed) {
+            this.collapsedCircleMode = collapsed;
+            requestLayout();
+            invalidate();
+        }
+    }
+
+    public void setOnPillLayoutChangedListener(@Nullable Runnable listener) {
+        this.onPillLayoutChangedListener = listener;
+    }
+
+    public void setHorizontalAlignment(int alignment, boolean animated) {
+        final int clamped = alignment == MirrlyInterfaceConfig.ALIGN_LEFT
+                ? MirrlyInterfaceConfig.ALIGN_LEFT
+                : (alignment == MirrlyInterfaceConfig.ALIGN_RIGHT
+                        ? MirrlyInterfaceConfig.ALIGN_RIGHT
+                        : MirrlyInterfaceConfig.ALIGN_CENTER);
+        final float targetFactor = clamped == MirrlyInterfaceConfig.ALIGN_LEFT
+                ? 0f
+                : (clamped == MirrlyInterfaceConfig.ALIGN_RIGHT ? 1f : 0.5f);
+        if (this.horizontalAlignment == clamped && !alignAnimator.isAnimating()
+                && Math.abs(alignAnimator.getFactor() - targetFactor) < 0.001f) {
+            return;
+        }
+        this.horizontalAlignment = clamped;
+        if (animated && isAttachedToWindow() && getWidth() > 0) {
+            alignAnimator.animateTo(targetFactor, this);
+        } else {
+            alignAnimator.forceFactor(targetFactor);
+        }
+        updatePillAndEntries();
+    }
+
+    public int getHorizontalAlignment() {
+        return horizontalAlignment;
+    }
+
+    public boolean isPointInsidePill(float localX, float localY) {
+        if (blurredBackgroundDrawable != null) {
+            final Rect padded = blurredBackgroundDrawable.getPaddedBounds();
+            if (!padded.isEmpty()) {
+                return localX >= padded.left - dp(4) && localX <= padded.right + dp(4)
+                        && localY >= padded.top - dp(4) && localY <= padded.bottom + dp(4);
+            }
+            final Rect bounds = blurredBackgroundDrawable.getBounds();
+            if (!bounds.isEmpty()) {
+                return localX >= bounds.left && localX <= bounds.right
+                        && localY >= bounds.top && localY <= bounds.bottom;
+            }
+            return false;
+        }
+        return localX >= 0 && localX <= getWidth() && localY >= 0 && localY <= getHeight();
+    }
+
+    public void getPillSampleBounds(@NonNull Rect out) {
+        if (blurredBackgroundDrawable != null) {
+            final Rect padded = blurredBackgroundDrawable.getPaddedBounds();
+            if (!padded.isEmpty()) {
+                out.set(padded);
+                return;
+            }
+        }
+        out.set(0, 0, getWidth(), getHeight());
+    }
+
+    public void pulseBounce() {
+        if (blurredBackgroundDrawable != null) {
+            final Rect bounds = blurredBackgroundDrawable.getBounds();
+            if (!bounds.isEmpty()) {
+                setPivotX(bounds.exactCenterX());
+                setPivotY(bounds.exactCenterY());
+            }
+        }
+        scaleX.cancel();
+        scaleY.cancel();
+        scaleX.setStartValue(0.91f);
+        scaleY.setStartValue(0.91f);
+        scaleX.animateToFinalPosition(1f);
+        scaleY.animateToFinalPosition(1f);
+    }
+
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        int width = MeasureSpec.getSize(widthMeasureSpec);
+        final int rawWidth = MeasureSpec.getSize(widthMeasureSpec);
+        int width = rawWidth;
         final int height = MeasureSpec.getSize(heightMeasureSpec);
         final int tabHeight = height - getPaddingTop() - getPaddingBottom();
 
@@ -65,8 +185,7 @@ public class MainTabsLayout extends AnimatedLinearLayout {
             width = maxWidthPx;
         }
 
-        final int maxTotalWidthForTabs = width - getPaddingLeft() - getPaddingRight();
-        final int minTotalWidthForTabs = Math.min(dp(320), maxTotalWidthForTabs);
+        final int maxTotalWidthForTabs = Math.max(0, width - getPaddingLeft() - getPaddingRight());
 
         int chosenPass = PASS_TEXT_SIZES_DP.length - 1;
         float lastMeasuredTextSize = -1;
@@ -88,6 +207,22 @@ public class MainTabsLayout extends AnimatedLinearLayout {
                 break;
             }
         }
+
+        final int minWidthDp;
+        if (collapsedCircleMode && visibleChildCount == 1) {
+            minWidthDp = 48;
+        } else if (visibleChildCount <= 0) {
+            minWidthDp = 0;
+        } else if (visibleChildCount == 1) {
+            minWidthDp = 80;
+        } else if (visibleChildCount == 2) {
+            minWidthDp = 168;
+        } else if (visibleChildCount == 3) {
+            minWidthDp = 248;
+        } else {
+            minWidthDp = 320;
+        }
+        final int minTotalWidthForTabs = Math.min(dp(minWidthDp), maxTotalWidthForTabs);
 
         applyPassTextSize(chosenPass);
 
@@ -118,12 +253,12 @@ public class MainTabsLayout extends AnimatedLinearLayout {
             totalWeight = visibleChildCount;
         }
 
-        if (totalWidth > maxTotalWidthForTabs) {
+        if (totalWidth > maxTotalWidthForTabs && totalWidth > 0) {
             final float m = maxTotalWidthForTabs / totalWidth;
             for (int a = 0, N = getChildCount(); a < N; a++) {
                 tabsTextWidthWithMargin[a] *= m;
             }
-        } else if (totalWidth < minTotalWidthForTabs) {
+        } else if (totalWidth < minTotalWidthForTabs && totalWeight > 0) {
             final float growW = minTotalWidthForTabs - totalWidth;
             final float growP = growW / totalWeight;
 
@@ -142,12 +277,14 @@ public class MainTabsLayout extends AnimatedLinearLayout {
             tabsLeftPos[a] = l;
             l += tabsWidth[a];
         }
-        setMeasuredDimension(l + getPaddingLeft() + getPaddingRight(), height);
+        final int measuredWidth = fullWidthCentering ? rawWidth : (l + getPaddingLeft() + getPaddingRight());
+        setMeasuredDimension(measuredWidth, height);
         for (int a = 0, N = getChildCount(); a < N; a++) {
             final View child = getChildAt(a);
+            final int childW = Math.max(0, tabsWidth[a]);
             child.measure(
-                MeasureSpec.makeMeasureSpec(tabsWidth[a], MeasureSpec.EXACTLY),
-                MeasureSpec.makeMeasureSpec(tabHeight, MeasureSpec.EXACTLY));
+                MeasureSpec.makeMeasureSpec(childW, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(Math.max(0, tabHeight), MeasureSpec.EXACTLY));
         }
 
         calculateTotalSizesAfterMeasure();
@@ -224,20 +361,77 @@ public class MainTabsLayout extends AnimatedLinearLayout {
     protected void setChildVisibilityFactor(View view, float factor) {
         final float s = lerp(0.7f, 1f, factor);
         view.setAlpha(factor);
-        view.setScaleX(s);
-        view.setScaleY(s);
+        if (factor < 0.999f || !view.isPressed()) {
+            view.setScaleX(s);
+            view.setScaleY(s);
+        }
     }
 
     @Override
     protected void onLayout(boolean changed, int l, int t, int r, int b) {
         super.onLayout(changed, l, t, r, b);
-        checkVisualWidth();
+        updatePillAndEntries();
     }
 
     @Override
     protected void onItemsChanged() {
         super.onItemsChanged();
-        checkVisualWidth();
+        updatePillAndEntries();
+    }
+
+    private void updatePillAndEntries() {
+        if (fullWidthCentering && blurredBackgroundDrawable != null) {
+            final float contentW = getMetadata().getTotalWidth();
+            final float visibility = MathUtils.clamp(getMetadata().getTotalVisibility(), 0f, 1f);
+            final float pillTotalW = contentW > 0.5f ? (contentW + getPaddingLeft() + getPaddingRight()) : 0f;
+            final float maxShift = Math.max(0f, getWidth() - pillTotalW);
+            final float edgeMargin = Math.min(dp(12), maxShift * 0.5f);
+            final float minLeft = edgeMargin;
+            final float maxLeft = Math.max(edgeMargin, getWidth() - edgeMargin - pillTotalW);
+            final float pillLeft = pillTotalW > 0f ? lerp(minLeft, maxLeft, alignAnimator.getFactor()) : 0f;
+            final float pillRight = pillLeft + pillTotalW;
+            final int bl = Math.round(pillLeft);
+            final int bt = 0;
+            final int br = Math.round(pillRight);
+            final int bb = getHeight();
+            final int ba = Math.round(255f * visibility);
+            boolean pillChanged = lastPillBoundsLeft != bl || lastPillBoundsTop != bt
+                    || lastPillBoundsRight != br || lastPillBoundsBottom != bb || lastPillBoundsAlpha != ba;
+            lastPillBoundsLeft = bl;
+            lastPillBoundsTop = bt;
+            lastPillBoundsRight = br;
+            lastPillBoundsBottom = bb;
+            lastPillBoundsAlpha = ba;
+            blurredBackgroundDrawable.setBounds(bl, bt, br, bb);
+            blurredBackgroundDrawable.setAlpha(ba);
+
+            final int count = getEntriesCount();
+            if (lastPillEntriesCount != count) {
+                lastPillEntriesCount = count;
+                pillChanged = true;
+            }
+            for (int a = 0; a < count; a++) {
+                final ListAnimator.Entry<Holder> entry = getEntry(a);
+                final View view = entry.item.view;
+                final RectF pos = entry.getRectF();
+                final float tx = (pillLeft + getPaddingLeft() + pos.left) - view.getLeft();
+                if (Math.abs(view.getTranslationX() - tx) > 0.05f) {
+                    view.setTranslationX(tx);
+                    pillChanged = true;
+                }
+                if (view instanceof GlassTabView) {
+                    ((GlassTabView) view).setVisualWidth(pos.width());
+                }
+            }
+            if (onPillLayoutChangedListener != null && pillChanged) {
+                onPillLayoutChangedListener.run();
+            }
+            if (pillChanged || drawCustomSelector) {
+                invalidate();
+            }
+        } else {
+            checkVisualWidth();
+        }
     }
 
     private void checkVisualWidth() {
@@ -309,22 +503,92 @@ public class MainTabsLayout extends AnimatedLinearLayout {
 
     @Override
     protected void dispatchDraw(@NonNull Canvas canvas) {
-        if (drawCustomSelector) {
+        final boolean hasPillBg = blurredBackgroundDrawable != null;
+        if (hasPillBg) {
+            final float vis = getMetadata().getTotalVisibility();
+            final float contentW = getMetadata().getTotalWidth();
+            if (vis > 0.001f && contentW > 0.5f) {
+                blurredBackgroundDrawable.draw(canvas);
+            }
+        }
+
+        boolean clipped = false;
+        if (hasPillBg) {
+            final Rect padded = blurredBackgroundDrawable.getPaddedBounds();
+            if (!padded.isEmpty()) {
+                pillClipRectF.set(padded);
+                final float r = Math.min(dp(DialogsActivity.MAIN_TABS_HEIGHT / 2f), Math.min(pillClipRectF.width(), pillClipRectF.height()) / 2f);
+                if (lastPillClipRadius != r
+                        || lastPillClipLeft != pillClipRectF.left || lastPillClipTop != pillClipRectF.top
+                        || lastPillClipRight != pillClipRectF.right || lastPillClipBottom != pillClipRectF.bottom) {
+                    lastPillClipLeft = pillClipRectF.left;
+                    lastPillClipTop = pillClipRectF.top;
+                    lastPillClipRight = pillClipRectF.right;
+                    lastPillClipBottom = pillClipRectF.bottom;
+                    lastPillClipRadius = r;
+                    pillClipPath.rewind();
+                    pillClipPath.addRoundRect(pillClipRectF, r, r, Path.Direction.CW);
+                }
+                canvas.save();
+                canvas.clipPath(pillClipPath);
+                clipped = true;
+            }
+        }
+
+        if (drawCustomSelector && !collapsedCircleMode) {
             final float x = animatedLongSelectedViewCenterX + animatedLongSelectedViewOffsetX;
             final float sWidth = getInterpolatedWidthByX(x, this);
             final float sHeight = getHeight() - getPaddingTop() - getPaddingBottom();
+            final float selL = x - sWidth / 2f;
+            final float selT = (getHeight() - sHeight) / 2f;
+            final float selR = x + sWidth / 2f;
+            final float selB = (getHeight() + sHeight) / 2f;
+            final float rad = sHeight / 2f;
 
-            canvas.drawRoundRect(
-                    x - sWidth / 2f, (getHeight() - sHeight) / 2f,
-                    x + sWidth / 2f, (getHeight() + sHeight) / 2f,
-                    sHeight / 2f, sHeight / 2f, selectorPaint);
+            canvas.drawRoundRect(selL, selT, selR, selB, rad, rad, selectorPaint);
+            if (MirrlyConfig.isGlassLiquidEnabled() && sWidth > 1f && sHeight > 1f) {
+                glassLensMatrix.reset();
+                glassLensMatrix.setScale(1f, sHeight);
+                glassLensMatrix.postTranslate(0f, selT);
+                glassLensFillGradient.setLocalMatrix(glassLensMatrix);
+                glassLensFillPaint.setShader(glassLensFillGradient);
+                glassLensFillPaint.setAlpha(255);
+                glassLensRect.set(selL, selT, selR, selB);
+                canvas.drawRoundRect(glassLensRect, rad, rad, glassLensFillPaint);
+
+                final float rimScale = MirrlyConfig.getGlassRimScale();
+                if (rimScale > 0.01f) {
+                    final boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
+                    final LinearGradient rimShader = isDark ? glassLensRimDarkGradient : glassLensRimLightGradient;
+                    rimShader.setLocalMatrix(glassLensMatrix);
+                    final float strokeW = dpf2(0.55f) * rimScale;
+                    final float inset = strokeW * 0.5f;
+                    glassLensRimPaint.setStyle(Paint.Style.STROKE);
+                    glassLensRimPaint.setStrokeWidth(strokeW);
+                    glassLensRimPaint.setShader(rimShader);
+                    glassLensRimPaint.setAlpha(255);
+                    glassLensRect.set(selL + inset, selT + inset, selR - inset, selB - inset);
+                    canvas.drawRoundRect(glassLensRect, Math.max(0f, rad - inset), Math.max(0f, rad - inset), glassLensRimPaint);
+                }
+            }
         }
 
         super.dispatchDraw(canvas);
+
+        if (clipped) {
+            canvas.restore();
+        }
     }
 
 
     final Paint selectorPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint glassLensFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint glassLensRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final LinearGradient glassLensFillGradient = new LinearGradient(0, 0, 0, 1, 0x18FFFFFF, 0x04FFFFFF, Shader.TileMode.CLAMP);
+    private final LinearGradient glassLensRimDarkGradient = new LinearGradient(0, 0, 0, 1, 0x33FFFFFF, 0x16FFFFFF, Shader.TileMode.CLAMP);
+    private final LinearGradient glassLensRimLightGradient = new LinearGradient(0, 0, 0, 1, 0xD9FFFFFF, 0x33FFFFFF, Shader.TileMode.CLAMP);
+    private final Matrix glassLensMatrix = new Matrix();
+    private final RectF glassLensRect = new RectF();
     final SpringAnimation scaleX = new SpringAnimation(this, DynamicAnimation.SCALE_X, 1f);
     final SpringAnimation scaleY = new SpringAnimation(this, DynamicAnimation.SCALE_Y, 1f);
 
@@ -384,9 +648,12 @@ public class MainTabsLayout extends AnimatedLinearLayout {
             View child = parent.getChildAt(i);
 
             if (child.getVisibility() != View.VISIBLE) continue;
+            if (parent instanceof MainTabsLayout && !((MainTabsLayout) parent).isViewVisible(child)) continue;
 
-            if (x >= child.getLeft() && x <= child.getRight()
-                    && y >= child.getTop() && y <= child.getBottom()) {
+            final float left = child.getX();
+            final float top = child.getY();
+            if (x >= left && x <= left + child.getWidth()
+                    && y >= top && y <= top + child.getHeight()) {
                 return child;
             }
         }
@@ -433,6 +700,10 @@ public class MainTabsLayout extends AnimatedLinearLayout {
         tabsWithIgnoreClick.add(v);
     }
 
+    public void removeTabToIgnoreClick(View v) {
+        tabsWithIgnoreClick.remove(v);
+    }
+
     private final BoolAnimator animatorIsScaled = new BoolAnimator(0, (a, factor, c, g) -> {
         setScaleX(lerp(1, 1.019f, factor));
         setScaleY(lerp(1, 1.019f, factor));
@@ -452,7 +723,11 @@ public class MainTabsLayout extends AnimatedLinearLayout {
 
         @Override
         public boolean needLongPress(float x, float y) {
-            return true;
+            if (collapsedCircleMode || visibleChildCount <= 1) {
+                return false;
+            }
+            final View found = findChildUnder(MainTabsLayout.this, x, y);
+            return found != null && !tabsWithIgnoreClick.contains(found);
         }
 
         @Override
@@ -605,6 +880,11 @@ public class MainTabsLayout extends AnimatedLinearLayout {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
+        if (fullWidthCentering && ev.getAction() == MotionEvent.ACTION_DOWN) {
+            if (getVisibility() != VISIBLE || !isPointInsidePill(ev.getX(), ev.getY())) {
+                return false;
+            }
+        }
         clickHelper.onTouchEvent(this, ev);
         return super.dispatchTouchEvent(ev);
     }
@@ -622,6 +902,9 @@ public class MainTabsLayout extends AnimatedLinearLayout {
         for (int i = 0; i < parent.getChildCount(); i++) {
             View view = parent.getChildAt(i);
             if (view == null || view.getVisibility() != View.VISIBLE) {
+                continue;
+            }
+            if (parent instanceof MainTabsLayout && !((MainTabsLayout) parent).isViewVisible(view)) {
                 continue;
             }
 
@@ -656,6 +939,9 @@ public class MainTabsLayout extends AnimatedLinearLayout {
             if (view == null || view.getVisibility() != View.VISIBLE) {
                 continue;
             }
+            if (parent instanceof MainTabsLayout && !((MainTabsLayout) parent).isViewVisible(view)) {
+                continue;
+            }
 
             float centerX = view.getX() + view.getWidth() * 0.5f;
             float distance = Math.abs(centerX - x);
@@ -680,6 +966,9 @@ public class MainTabsLayout extends AnimatedLinearLayout {
         for (int i = 0; i < parent.getChildCount(); i++) {
             View view = parent.getChildAt(i);
             if (view == null || view.getVisibility() != View.VISIBLE) {
+                continue;
+            }
+            if (parent instanceof MainTabsLayout && !((MainTabsLayout) parent).isViewVisible(view)) {
                 continue;
             }
 
@@ -715,6 +1004,14 @@ public class MainTabsLayout extends AnimatedLinearLayout {
 
         float ratio = (x - leftX) / (rightX - leftX);
         return lerp(left.getWidth(), right.getWidth(), ratio);
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        alignAnimator.cancel();
+        scaleX.cancel();
+        scaleY.cancel();
+        super.onDetachedFromWindow();
     }
 
     private static float getCenterX(View v) {

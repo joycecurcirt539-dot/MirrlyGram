@@ -31,11 +31,13 @@ public class ScreenReceiver extends BroadcastReceiver {
                 }
             }
             ApplicationLoader.isScreenOn = false;
+            org.telegram.messenger.mirrly.MirrlyPowerTelemetry.onScreenStateChanged(false);
         } else if (intent.getAction().equals(Intent.ACTION_SCREEN_ON)) {
             if (BuildVars.LOGS_ENABLED) {
                 FileLog.d("screen on");
             }
             ApplicationLoader.isScreenOn = true;
+            org.telegram.messenger.mirrly.MirrlyPowerTelemetry.onScreenStateChanged(true);
             org.telegram.messenger.mirrly.MirrlyEngineController.notifyScreenWake();
             for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
                 if (a == UserConfig.selectedAccount || UserConfig.getInstance(a).isClientActivated()) {

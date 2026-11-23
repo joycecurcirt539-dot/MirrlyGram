@@ -1,18 +1,25 @@
 package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
+import static org.telegram.messenger.AndroidUtilities.dpf2;
 import static org.telegram.messenger.AndroidUtilities.lerp;
 import static org.telegram.messenger.LocaleController.getString;
 import static org.telegram.ui.Components.Premium.LimitReachedBottomSheet.TYPE_ACCOUNTS;
 
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.mirrly.MirrlyConfig;
+import org.telegram.messenger.mirrly.MirrlyInterfaceConfig;
 import android.animation.Animator;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.ShapeDrawable;
+import android.graphics.drawable.shapes.RoundRectShape;
+import android.graphics.drawable.shapes.Shape;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.SpannableStringBuilder;
@@ -70,13 +77,16 @@ import org.telegram.ui.Components.FolderDrawable;
 import org.telegram.ui.Components.HintsController;
 import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.ScaleStateListAnimator;
 import org.telegram.ui.Components.Premium.LimitReachedBottomSheet;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
 import org.telegram.ui.Components.blur3.BlurredBackgroundWithFadeDrawable;
 import org.telegram.ui.Components.blur3.RenderNodeWithHash;
 import org.telegram.ui.Components.blur3.capture.IBlur3Hash;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
+import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundProvider;
 import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
+import org.telegram.utils.glass.GlassContrastHelper;
 import org.telegram.utils.glass.GlassEngine;
 import org.telegram.utils.glass.GlassSettings;
 import org.telegram.utils.glass.source.GlassSourceColor;
@@ -122,7 +132,12 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     private UpdateLayoutWrapper updateLayoutWrapper;
     private FrameLayout tabsViewWrapper;
     private MainTabsLayout tabsView;
+    private GlassTabView collapsedCircleTab;
+    private boolean isCircleExpanded;
+    private boolean pendingOpenSearch;
+    private final Rect pillSampleRect = new Rect();
     private BlurredBackgroundDrawable tabsViewBackground;
+    private BlurredBackgroundDrawableViewFactory iBlur3FactoryGlass;
     private View fadeView;
 
     public MainTabsActivity() {
@@ -140,6 +155,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         Bulletin.Delegate delegate = new Bulletin.Delegate() {
             @Override
             public int getBottomOffset(int tag) {
+                if (MirrlyInterfaceConfig.isBottomBarCompletelyHidden()) {
+                    return navigationBarHeight;
+                }
                 return navigationBarHeight + dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN);
             }
         };
@@ -155,8 +173,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         source.setupRenderer(new RenderNodeWithHash.Renderer() {
             @Override
             public void renderNodeCalculateHash(IBlur3Hash hash) {
-                hash.add(getThemedColor(Theme.key_windowBackgroundWhite));
+                hash.add(getEstBackgroundColor());
                 hash.add(SharedConfig.chatBlurEnabled());
+                hash.add(GlassEngine.getGlassSettingsGenerationId());
 
                 for (int a = 0, N = fragmentsArr.size(); a < N; a++) {
                     final FragmentState state = fragmentsArr.valueAt(a);
@@ -188,7 +207,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
                 final int width = fragmentView.getMeasuredWidth();
                 final int height = fragmentView.getMeasuredHeight();
 
-                canvas.drawColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                canvas.drawColor(getEstBackgroundColor());
 
                 for (int a = 0, N = fragmentsArr.size(); a < N; a++) {
                     final FragmentState state = fragmentsArr.valueAt(a);
@@ -223,11 +242,28 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     protected FrameLayout createContentView(Context context) {
         return new FrameLayout(context) {
             @Override
+            public boolean dispatchTouchEvent(MotionEvent ev) {
+                if (isCircleExpanded && ev.getAction() == MotionEvent.ACTION_DOWN
+                        && tabsView != null && tabsViewWrapper != null
+                        && tabsViewWrapper.getVisibility() == View.VISIBLE) {
+                    final float localX = ev.getX() - tabsViewWrapper.getX() - tabsView.getX();
+                    final float localY = ev.getY() - tabsViewWrapper.getY() - tabsView.getY();
+                    if (!tabsView.isPointInsidePill(localX, localY)) {
+                        setCircleExpanded(false, true);
+                    }
+                }
+                return super.dispatchTouchEvent(ev);
+            }
+
+            @Override
             protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
                 super.onLayout(changed, left, top, right, bottom);
                 checkUi_tabsPosition();
                 checkUi_fadeView();
                 blur3_updateFragmentsGlass();
+                if (changed) {
+                    scheduleMainTabsAdaptiveContrastUpdate(true);
+                }
             }
 
             @Override
@@ -290,21 +326,26 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         blur3_updateColors();
         checkContactsTabBadge();
         checkUnreadCount(true);
+        refreshCustomChatSlotsIfNeeded();
 
         showAccountChangeHint();
     }
 
     private void checkContactsTabBadge() {
-        if (tabsView != null && tabs[INDEX_CONTACTS] != null) {
+        if (tabsView != null && tabs != null && tabs[INDEX_CONTACTS] != null) {
             final boolean hasPermission = Build.VERSION.SDK_INT >= 23 && ContactsController.hasContactsPermission();
             if (hasPermission) {
                 MessagesController.getGlobalNotificationsSettings().edit().putBoolean("askAboutContacts2", true).apply();
             }
-            if (Build.VERSION.SDK_INT >= 23 && UserConfig.getInstance(currentAccount).syncContacts && !hasPermission && MessagesController.getGlobalNotificationsSettings().getBoolean("askAboutContacts2", true)) {
+            final boolean contactsIsDefault = MirrlyInterfaceConfig.getSlotMode(MirrlyInterfaceConfig.SLOT_CONTACTS) == MirrlyInterfaceConfig.SLOT_MODE_DEFAULT;
+            if (contactsIsDefault && Build.VERSION.SDK_INT >= 23 && UserConfig.getInstance(currentAccount).syncContacts && !hasPermission && MessagesController.getGlobalNotificationsSettings().getBoolean("askAboutContacts2", true)) {
                 tabs[INDEX_CONTACTS].setCounter("!", true, true);
             } else {
                 tabs[INDEX_CONTACTS].setCounter(null, true, true);
             }
+        }
+        if (collapsedCircleTab != null && MirrlyInterfaceConfig.shouldCollapseToCircle() && !isCircleExpanded) {
+            updateCollapsedCircleBadge(true);
         }
     }
 
@@ -313,6 +354,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         super.onPause();
         if (accountSwitchHint != null) {
             accountSwitchHint.hide();
+        }
+        if (isCircleExpanded) {
+            setCircleExpanded(false, false);
         }
     }
 
@@ -325,6 +369,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         tabsView.setClipChildren(false);
         tabsView.setPadding(dp(DialogsActivity.MAIN_TABS_MARGIN + 4), dp(DialogsActivity.MAIN_TABS_MARGIN + 4), dp(DialogsActivity.MAIN_TABS_MARGIN + 4), dp(DialogsActivity.MAIN_TABS_MARGIN + 4));
         tabsView.setMaxWidth(dp(328 + DialogsActivity.MAIN_TABS_MARGIN * 2));
+        tabsView.setOnPillLayoutChangedListener(this::updateAccountSwitchHintJoint);
 
         tabs = new GlassTabView[5];
         tabs[INDEX_CHATS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.CHATS, R.string.MainTabsChats);
@@ -332,49 +377,33 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         tabs[INDEX_SETTINGS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.SETTINGS, R.string.Settings);
         tabs[INDEX_CALLS] = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.CALLS, R.string.MainTabsCalls);
         tabs[INDEX_PROFILE] = GlassTabView.createAvatar(context, resourceProvider, currentAccount, R.string.MainTabsProfile);
-        tabs[INDEX_CHATS].setOnLongClickListener(this::openFoldersSelector);
-        tabs[INDEX_CONTACTS].setOnLongClickListener(this::openContactsSelector);
-        tabs[INDEX_CALLS].setOnLongClickListener(this::openCallsSelector);
-        tabs[INDEX_PROFILE].setOnLongClickListener(this::openAccountSelector);
-
-        tabsView.addTabToIgnoreClick(tabs[INDEX_CHATS]);
-        tabsView.addTabToIgnoreClick(tabs[INDEX_CONTACTS]);
-        tabsView.addTabToIgnoreClick(tabs[INDEX_PROFILE]);
-        tabsView.addTabToIgnoreClick(tabs[INDEX_CALLS]);
 
         for (int index = 0; index < tabs.length; index++) {
-            final GlassTabView view = tabs[index];
-
-            final int position = indexToPosition(index);
-            tabs[index].setOnClickListener(v -> {
-                if (viewPager.isManualScrolling() || viewPager.isTouch()) {
-                    return;
-                }
-
-                if (viewPager.getCurrentPosition() == position) {
-                    final BaseFragment fragment = getCurrentVisibleFragment();
-                    if (fragment instanceof MainTabsActivity.TabFragmentDelegate) {
-                        ((MainTabsActivity.TabFragmentDelegate) fragment).onParentScrollToTop();
-                    }
-                    return;
-                }
-
-                selectTab(position, true);
-                viewPager.scrollToPosition(position);
-            });
-
             tabsView.addView(tabs[index]);
-            tabsView.setViewVisible(view, true, false);
+            tabsView.setViewVisible(tabs[index], false, false);
         }
-        checkUi_callTabVisible(getUserConfig().showCallsTab, false);
 
-        selectTab(viewPager.getCurrentPosition(), false);
+        collapsedCircleTab = GlassTabView.createMainTab(context, resourceProvider, GlassTabView.TabAnimation.CHATS, R.string.MainTabsChats);
+        collapsedCircleTab.setCircleCompactMode(true);
+        collapsedCircleTab.setContentDescription(getString(R.string.MirrlyInterfaceBarAccessibilityCircle));
+        ScaleStateListAnimator.apply(collapsedCircleTab, 0.1f, 1.5f);
+        collapsedCircleTab.setOnClickListener(v -> {
+            AndroidUtilities.vibrateCursor(v);
+            if (tabsView != null) {
+                tabsView.pulseBounce();
+            }
+            setCircleExpanded(true, true);
+        });
+        collapsedCircleTab.setOnLongClickListener(this::openQuickCustomizeShortcut);
+        tabsView.addView(collapsedCircleTab);
+        tabsView.addTabToIgnoreClick(collapsedCircleTab);
+        tabsView.setViewVisible(collapsedCircleTab, false, false);
 
-        iBlur3SourceColor.setColor(getThemedColor(Theme.key_windowBackgroundWhite));
+        iBlur3SourceColor.setColor(getEstBackgroundColor());
 
         final ViewPositionWatcher viewPositionWatcher = new ViewPositionWatcher(contentView);
 
-        BlurredBackgroundDrawableViewFactory iBlur3FactoryGlass = new BlurredBackgroundDrawableViewFactory(
+        iBlur3FactoryGlass = new BlurredBackgroundDrawableViewFactory(
             iBlur3SourceTabGlass != null ? iBlur3SourceTabGlass : iBlur3SourceColor,
             iBlur3SourceTabFrosted != null ? iBlur3SourceTabFrosted : iBlur3SourceColor,
             iBlur3SourceColor);
@@ -384,7 +413,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         tabsViewBackground = iBlur3FactoryGlass.create(tabsView, BlurredBackgroundProviderImpl.mainTabs(resourceProvider));
         tabsViewBackground.setRadius(dp(DialogsActivity.MAIN_TABS_HEIGHT / 2f));
         tabsViewBackground.setPadding(dp(DialogsActivity.MAIN_TABS_MARGIN - 0.334f));
-        tabsView.setBackground(tabsViewBackground);
+        tabsView.setBlurredBackgroundDrawable(tabsViewBackground);
 
         BlurredBackgroundDrawableViewFactory iBlur3FactoryFade = new BlurredBackgroundDrawableViewFactory(iBlur3SourceColor);
         iBlur3FactoryFade.setSourceRootView(viewPositionWatcher, contentView);
@@ -397,7 +426,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         contentView.addView(fadeView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 0, Gravity.BOTTOM));
 
         tabsViewWrapper = new FrameLayout(context);
-        tabsViewWrapper.setOnClickListener(v -> {});
+        tabsViewWrapper.setClipChildren(false);
         tabsViewWrapper.addView(tabsView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL));
         tabsViewWrapper.setClipToPadding(false);
         contentView.addView(tabsViewWrapper, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM));
@@ -410,23 +439,88 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             updateLayout.updateAppUpdateViews(currentAccount, false);
         }
 
+        syncBottomBarConfig(false);
         updateLayout();
         checkUnreadCount(false);
         return contentView;
     }
 
     private void checkUnreadCount(boolean animated) {
-        if (tabsView == null) {
+        if (tabsView == null || tabs == null || tabs[INDEX_CHATS] == null) {
             return;
         }
 
         final int unreadCount = MessagesStorage.getInstance(currentAccount).getMainUnreadCount();
-        if (unreadCount > 0) {
+        final boolean chatsIsDefault = MirrlyInterfaceConfig.getSlotMode(MirrlyInterfaceConfig.SLOT_CHATS) == MirrlyInterfaceConfig.SLOT_MODE_DEFAULT;
+        if (chatsIsDefault && unreadCount > 0) {
             final String unreadCountFmt = LocaleController.formatNumber(unreadCount, ',');
             tabs[INDEX_CHATS].setCounter(unreadCountFmt, false, animated);
         } else {
             tabs[INDEX_CHATS].setCounter(null, false, animated);
         }
+        if (collapsedCircleTab != null && MirrlyInterfaceConfig.shouldCollapseToCircle() && !isCircleExpanded) {
+            updateCollapsedCircleBadge(animated);
+        }
+    }
+
+    private Drawable createTabScrimBackground() {
+        return createTabScrimBackground(tabsView);
+    }
+
+    private Drawable createTabScrimBackground(View view) {
+        final Theme.ResourcesProvider rp = getResourceProvider();
+        final boolean isDark = rp != null ? rp.isDark() : Theme.isCurrentThemeDark();
+        final boolean blurEnabled = BlurredBackgroundProviderImpl.checkBlurEnabled(currentAccount, rp);
+        if (blurEnabled && iBlur3FactoryGlass != null) {
+            return iBlur3FactoryGlass.create(view != null ? view : tabsView, BlurredBackgroundProviderImpl.scrimMenuBackground(rp))
+                    .setRadius(dp(28))
+                    .setPadding(dp(8));
+        }
+        final int baseColor = getThemedColor(Theme.key_windowBackgroundWhite);
+        final int fillColor = blurEnabled
+                ? Theme.multAlpha(baseColor, MirrlyConfig.getEffectiveGlassAlpha(isDark ? 0.80f : 0.78f))
+                : baseColor;
+        final float rad = dp(28);
+        final float[] radii = new float[]{rad, rad, rad, rad, rad, rad, rad, rad};
+        final int rimColor = isDark ? 0x22FFFFFF : 0x18000000;
+        final float rimWidth = dpf2(0.55f) * MirrlyConfig.getGlassRimScale();
+        final Paint rimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        rimPaint.setStyle(Paint.Style.STROKE);
+        rimPaint.setStrokeWidth(rimWidth);
+        rimPaint.setColor(rimColor);
+
+        final ShapeDrawable bg = new ShapeDrawable(new RoundRectShape(radii, null, null)) {
+            private int currentAlpha = 255;
+
+            @Override
+            public void setAlpha(int alpha) {
+                currentAlpha = alpha;
+                super.setAlpha(alpha);
+            }
+
+            @Override
+            protected void onDraw(Shape shape, Canvas canvas, Paint paint) {
+                super.onDraw(shape, canvas, paint);
+                if (blurEnabled && rimWidth > 0 && currentAlpha > 0) {
+                    rimPaint.setColor(Theme.multAlpha(rimColor, currentAlpha / 255f));
+                    final Rect b = getBounds();
+                    final float inset = rimWidth * 0.5f;
+                    AndroidUtilities.rectTmp.set(b.left + inset, b.top + inset, b.right - inset, b.bottom - inset);
+                    canvas.drawRoundRect(AndroidUtilities.rectTmp, rad - inset, rad - inset, rimPaint);
+                }
+            }
+        };
+        bg.getPaint().setColor(fillColor);
+        bg.getPaint().setShadowLayer(dp(6), 0, dp(1), Theme.multAlpha(0xFF000000, isDark ? 0.28f : 0.14f));
+        return bg;
+    }
+
+    private void applyTabScrimBackground(ItemOptions o, View anchor) {
+        final Drawable bg = createTabScrimBackground(anchor);
+        if (bg instanceof BlurredBackgroundDrawable) {
+            o.setViewAdditionalOffsets(dp(8), dp(8), dp(8), dp(8));
+        }
+        o.setScrimViewBackground(bg);
     }
 
     public boolean openContactsSelector(View anchor) {
@@ -443,9 +537,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         o.setBlur(true);
         o.translate(0, -dp(4));
         o.setGravity(Gravity.LEFT);
-        final ShapeDrawable bg = Theme.createRoundRectDrawable(dp(28), getThemedColor(Theme.key_windowBackgroundWhite));
-        bg.getPaint().setShadowLayer(dp(6), 0, dp(1), Theme.multAlpha(0xFF000000, 0.15f));
-        o.setScrimViewBackground(bg);
+        applyTabScrimBackground(o, anchor);
         o.show();
         return true;
     }
@@ -469,9 +561,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         }
         o.setBlur(true);
         o.translate(0, -dp(4));
-        final ShapeDrawable bg = Theme.createRoundRectDrawable(dp(28), getThemedColor(Theme.key_windowBackgroundWhite));
-        bg.getPaint().setShadowLayer(dp(6), 0, dp(1), Theme.multAlpha(0xFF000000, 0.15f));
-        o.setScrimViewBackground(bg);
+        applyTabScrimBackground(o, anchor);
         o.show();
         return true;
     }
@@ -526,12 +616,10 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             });
             o.addView(folderItem, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         }
-//        o.setBlur(true);
+        o.setBlur(true);
         o.translate(-dp(8), -dp(4));
         o.setMaxHeight(dp(400));
-        final ShapeDrawable bg = Theme.createRoundRectDrawable(dp(28), getThemedColor(Theme.key_windowBackgroundWhite));
-        bg.getPaint().setShadowLayer(dp(6), 0, dp(1), Theme.multAlpha(0xFF000000, 0.15f));
-        o.setScrimViewBackground(bg);
+        applyTabScrimBackground(o, anchor);
         o.setGravity(Gravity.LEFT);
         o.show();
 
@@ -685,9 +773,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
         o.setBlur(true);
         o.translate(0, -dp(4));
-        final ShapeDrawable bg = Theme.createRoundRectDrawable(dp(28), getThemedColor(Theme.key_windowBackgroundWhite));
-        bg.getPaint().setShadowLayer(dp(6), 0, dp(1), Theme.multAlpha(0xFF000000, 0.15f));
-        o.setScrimViewBackground(bg);
+        applyTabScrimBackground(o, button);
         o.show();
 
         HintsController.Hint.AccountSwitchHint.doNotShowAgain();
@@ -748,6 +834,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             setGestureSelectedOverride(0, false);
         }
         blur3_invalidateBlur();
+        scheduleMainTabsAdaptiveContrastUpdate(true);
 
         if (viewPager != null) {
             final int currentPosition = viewPager.getCurrentPosition();
@@ -761,6 +848,10 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             if (pendingFolderId != null && currentPosition == POSITION_CHATS && dialogsActivity != null) {
                 dialogsActivity.scrollToFolder(pendingFolderId);
                 pendingFolderId = null;
+            }
+            if (pendingOpenSearch && currentPosition == POSITION_CHATS && dialogsActivity != null) {
+                pendingOpenSearch = false;
+                dialogsActivity.openSearchFromTabs();
             }
         }
 
@@ -781,6 +872,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         checkUi_fadeView();
         blur3_invalidateBlur();
         contentView.invalidate();
+        scheduleMainTabsAdaptiveContrastUpdate(false);
     }
 
 
@@ -791,13 +883,31 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
     @Override
     protected int getStartPosition() {
+        for (int pos = 0; pos < MirrlyInterfaceConfig.SLOT_COUNT; pos++) {
+            if (MirrlyInterfaceConfig.getSlotMode(pos) == MirrlyInterfaceConfig.SLOT_MODE_DEFAULT) {
+                return pos;
+            }
+        }
         return POSITION_CHATS;
+    }
+
+    private static boolean isNativeTabSlot(int position) {
+        if (position < 0 || position >= MirrlyInterfaceConfig.SLOT_COUNT) {
+            return false;
+        }
+        return MirrlyInterfaceConfig.getSlotMode(position) == MirrlyInterfaceConfig.SLOT_MODE_DEFAULT;
     }
 
     private DialogsActivity dialogsActivity;
 
     @Override
     public boolean onBackPressed(boolean invoked) {
+        if (isCircleExpanded) {
+            if (invoked) {
+                setCircleExpanded(false, true);
+            }
+            return false;
+        }
         final boolean result = super.onBackPressed(invoked);
         if (result) {
             final int startPosition = getStartPosition();
@@ -869,15 +979,23 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     public void selectTab(int position, boolean animated) {
         for (int a = 0; a < tabs.length; a++) {
             GlassTabView tab = tabs[a];
-            tab.setSelected(indexToPosition(a) == position, animated);
+            final int tabPosition = indexToPosition(a);
+            tab.setSelected(isNativeTabSlot(tabPosition) && tabPosition == position, animated);
+        }
+        if (collapsedCircleTab != null && MirrlyInterfaceConfig.shouldCollapseToCircle() && !isCircleExpanded) {
+            updateCollapsedCircleContent(getUserConfig().showCallsTab, animated);
         }
     }
 
     public void setGestureSelectedOverride(float animatedPosition, boolean allow) {
         for (int index = 0; index < tabs.length; index++) {
             final int position = indexToPosition(index);
-            final float visibility = Math.max(0, 1f - Math.abs(position - animatedPosition));
-            tabs[index].setGestureSelectedOverride(visibility, allow);
+            if (isNativeTabSlot(position)) {
+                final float visibility = Math.max(0, 1f - Math.abs(position - animatedPosition));
+                tabs[index].setGestureSelectedOverride(visibility, allow);
+            } else {
+                tabs[index].setGestureSelectedOverride(0f, false);
+            }
         }
         tabsView.invalidate();
     }
@@ -914,6 +1032,12 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     }
 
     private boolean canScrollInternal(MotionEvent ev, boolean forward) {
+        if (viewPager != null) {
+            final int targetPosition = viewPager.getCurrentPosition() + (forward ? 1 : -1);
+            if (targetPosition < 0 || targetPosition >= TABS_COUNT || !isNativeTabSlot(targetPosition)) {
+                return false;
+            }
+        }
         final BaseFragment fragment = getCurrentVisibleFragment();
         if (fragment instanceof TabFragmentDelegate) {
             final TabFragmentDelegate delegate = (TabFragmentDelegate) fragment;
@@ -955,7 +1079,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         }
         {
             int bottomMargin = isUpdateLayoutVisible ? (navigationBarHeight + updateLayoutHeight) : 0;
-            if (tabletLayout) {
+            if (tabletLayout && !MirrlyInterfaceConfig.isBottomBarCompletelyHidden()) {
                 bottomMargin = Math.max(bottomMargin, navigationBarHeight + dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS));
             }
             lp = (ViewGroup.MarginLayoutParams) viewPager.getLayoutParams();
@@ -982,6 +1106,15 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     public void didReceivedNotification(int id, int account, Object... args) {
         if (id == NotificationCenter.notificationsCountUpdated || id == NotificationCenter.updateInterfaces) {
             checkUnreadCount(fragmentView != null && fragmentView.isAttachedToWindow());
+            if (id == NotificationCenter.updateInterfaces && args != null && args.length > 0 && args[0] instanceof Integer) {
+                final int mask = (Integer) args[0];
+                if ((mask & (MessagesController.UPDATE_MASK_AVATAR
+                        | MessagesController.UPDATE_MASK_NAME
+                        | MessagesController.UPDATE_MASK_CHAT_AVATAR
+                        | MessagesController.UPDATE_MASK_CHAT_NAME)) != 0) {
+                    refreshCustomChatSlotsIfNeeded();
+                }
+            }
         } else if (id == NotificationCenter.appUpdateLoading) {
             if (updateLayout != null) {
                 updateLayout.updateFileProgress(null);
@@ -1013,22 +1146,43 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             }
         } else if (id == NotificationCenter.needSetDayNightTheme) {
             clearAllHiddenFragments();
+        } else if (id == NotificationCenter.didSetNewTheme) {
+            blur3_updateColors();
+            refreshThemeQuickActionsIfNeeded();
+        } else if (id == NotificationCenter.dialogsNeedReload) {
+            refreshCustomChatSlotsIfNeeded();
         } else if (id == NotificationCenter.callTabsVisibleToggled) {
             final boolean callTabsVisible = getUserConfig().showCallsTab;
+            final boolean slot2IsDefault = MirrlyInterfaceConfig.getSlotMode(MirrlyInterfaceConfig.SLOT_SETTINGS_OR_CALLS) == MirrlyInterfaceConfig.SLOT_MODE_DEFAULT;
             checkUi_callTabVisible(callTabsVisible, true);
-            if (viewPager != null && viewPager.getCurrentPosition() == POSITION_CALLS_OR_SETTINGS) {
-                viewPager.scrollToPosition(POSITION_CHATS);
-                selectTab(POSITION_CHATS, true);
+            if (slot2IsDefault && viewPager != null && viewPager.getCurrentPosition() == POSITION_CALLS_OR_SETTINGS) {
+                final int target = getStartPosition();
+                viewPager.scrollToPosition(target);
+                selectTab(target, true);
                 dropCallsFragmentAfterPageScroll = true;
             } else {
                 dropFragmentAtPosition(POSITION_CALLS_OR_SETTINGS);
             }
         } else if (id == NotificationCenter.mainUserInfoChanged) {
-            if (tabs != null && tabs[INDEX_PROFILE] != null) {
+            if (tabs != null && tabs[INDEX_PROFILE] != null
+                    && MirrlyInterfaceConfig.getSlotMode(MirrlyInterfaceConfig.SLOT_PROFILE) == MirrlyInterfaceConfig.SLOT_MODE_DEFAULT) {
                 tabs[INDEX_PROFILE].updateUserAvatar(currentAccount);
+            }
+            refreshCustomChatSlotsIfNeeded();
+            if (collapsedCircleTab != null && MirrlyInterfaceConfig.shouldCollapseToCircle() && !isCircleExpanded) {
+                updateCollapsedCircleContent(getUserConfig().showCallsTab, false);
             }
         } else if (id == NotificationCenter.contactsPermissionBadgeCheck) {
             checkContactsTabBadge();
+        } else if (id == NotificationCenter.mirrlyGlassSettingsDidChange) {
+            blur3_onFragmentGlassCaptured();
+            blur3_updateColors();
+            if (tabsViewWrapper != null) {
+                tabsViewWrapper.invalidate();
+            }
+        } else if (id == NotificationCenter.mirrlyBottomBarConfigChanged) {
+            syncBottomBarConfig(fragmentView != null && fragmentView.isAttachedToWindow());
+            blur3_updateFragmentsGlass();
         }
     }
 
@@ -1046,15 +1200,20 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             .add(NotificationCenter.callTabsVisibleToggled)
             .add(NotificationCenter.mainUserInfoChanged)
             .add(NotificationCenter.contactsPermissionBadgeCheck)
+            .add(NotificationCenter.dialogsNeedReload)
             .addGlobal(NotificationCenter.appUpdateAvailable)
             .addGlobal(NotificationCenter.appUpdateLoading)
-            .addGlobal(NotificationCenter.needSetDayNightTheme);
+            .addGlobal(NotificationCenter.needSetDayNightTheme)
+            .addGlobal(NotificationCenter.didSetNewTheme)
+            .addGlobal(NotificationCenter.mirrlyGlassSettingsDidChange)
+            .addGlobal(NotificationCenter.mirrlyBottomBarConfigChanged);
 
         return super.onFragmentCreate();
     }
 
     @Override
     public void onFragmentDestroy() {
+        cancelMainTabsAdaptiveTick();
         Bulletin.removeDelegate(this);
         Bulletin.removeDelegate(contentView);
 
@@ -1078,6 +1237,11 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         if (viewPager == null || fadeView == null) {
             return;
         }
+        if (MirrlyInterfaceConfig.isBottomBarCompletelyHidden()) {
+            fadeView.setAlpha(0f);
+            fadeView.setVisibility(View.GONE);
+            return;
+        }
 
         final float animatedPosition = viewPager.getPositionAnimated();
         final float isProfile = 1f - MathUtils.clamp(Math.abs(POSITION_PROFILE - animatedPosition), 0, 1);
@@ -1093,6 +1257,15 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     }
 
     private void checkUi_tabsPosition() {
+        if (tabsViewWrapper == null || tabsView == null || updateLayoutWrapper == null) {
+            return;
+        }
+        if (MirrlyInterfaceConfig.isBottomBarCompletelyHidden()) {
+            tabsViewWrapper.setVisibility(View.GONE);
+            tabsView.setVisibility(View.GONE);
+            return;
+        }
+
         final boolean isUpdateLayoutVisible = updateLayoutWrapper.isUpdateLayoutVisible();
         final int updateLayoutHeight = isUpdateLayoutVisible ? dp(UpdateLayoutWrapper.HEIGHT) : 0;
         final int normalY = -(updateLayoutHeight);
@@ -1102,6 +1275,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         final float scale = lerp(0.85f, 1f, factor);
 
         tabsViewWrapper.setTranslationY(lerp(hiddenY, normalY, factor));
+        tabsViewWrapper.setVisibility(factor > 0 ? View.VISIBLE : View.GONE);
         tabsView.setClickable(factor > 1);
         tabsView.setEnabled(factor > 1);
         tabsView.setAlpha(factor);
@@ -1109,9 +1283,387 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
     }
 
     private void checkUi_callTabVisible(boolean callTabsVisible, boolean animated) {
-        if (tabsView != null) {
-            tabsView.setViewVisible(tabs[INDEX_SETTINGS], !callTabsVisible, animated);
-            tabsView.setViewVisible(tabs[INDEX_CALLS], callTabsVisible, animated);
+        syncBottomBarConfig(animated);
+    }
+
+    private void setCircleExpanded(boolean expanded, boolean animated) {
+        final boolean shouldCollapse = MirrlyInterfaceConfig.shouldCollapseToCircle();
+        final boolean target = shouldCollapse && expanded;
+        if (isCircleExpanded == target && animated) {
+            return;
+        }
+        isCircleExpanded = target;
+        syncBottomBarConfig(animated);
+    }
+
+    private void syncBottomBarConfig(boolean animated) {
+        if (tabsView == null || tabs == null) {
+            return;
+        }
+        final boolean allHidden = MirrlyInterfaceConfig.isBottomBarCompletelyHidden();
+        final boolean shouldCollapse = MirrlyInterfaceConfig.shouldCollapseToCircle();
+        if (!shouldCollapse || allHidden) {
+            isCircleExpanded = false;
+        }
+        final boolean showCalls = getUserConfig().showCallsTab;
+
+        // Slot 0: Chats
+        final int slot0Mode = MirrlyInterfaceConfig.getSlotMode(MirrlyInterfaceConfig.SLOT_CHATS);
+        if (slot0Mode == MirrlyInterfaceConfig.SLOT_MODE_DEFAULT) {
+            tabs[INDEX_CHATS].restoreMainTab(GlassTabView.TabAnimation.CHATS, getString(R.string.MainTabsChats));
+            tabs[INDEX_CHATS].setContentDescription(getString(R.string.MainTabsChats));
+            tabs[INDEX_CHATS].setOnClickListener(createNativeTabClickListener(POSITION_CHATS));
+            tabs[INDEX_CHATS].setOnLongClickListener(this::openFoldersSelector);
+            tabsView.addTabToIgnoreClick(tabs[INDEX_CHATS]);
+        } else if (slot0Mode == MirrlyInterfaceConfig.SLOT_MODE_CUSTOM) {
+            bindCustomSlot(tabs[INDEX_CHATS], MirrlyInterfaceConfig.SLOT_CHATS);
+        } else {
+            tabs[INDEX_CHATS].setCounter(null, false, false);
+        }
+
+        // Slot 1: Contacts
+        final int slot1Mode = MirrlyInterfaceConfig.getSlotMode(MirrlyInterfaceConfig.SLOT_CONTACTS);
+        if (slot1Mode == MirrlyInterfaceConfig.SLOT_MODE_DEFAULT) {
+            tabs[INDEX_CONTACTS].restoreMainTab(GlassTabView.TabAnimation.CONTACTS, getString(R.string.MainTabsContacts));
+            tabs[INDEX_CONTACTS].setContentDescription(getString(R.string.MainTabsContacts));
+            tabs[INDEX_CONTACTS].setOnClickListener(createNativeTabClickListener(POSITION_CONTACTS));
+            tabs[INDEX_CONTACTS].setOnLongClickListener(this::openContactsSelector);
+            tabsView.addTabToIgnoreClick(tabs[INDEX_CONTACTS]);
+        } else if (slot1Mode == MirrlyInterfaceConfig.SLOT_MODE_CUSTOM) {
+            bindCustomSlot(tabs[INDEX_CONTACTS], MirrlyInterfaceConfig.SLOT_CONTACTS);
+        } else {
+            tabs[INDEX_CONTACTS].setCounter(null, false, false);
+        }
+
+        // Slot 2: Settings or Calls
+        final int slot2Mode = MirrlyInterfaceConfig.getSlotMode(MirrlyInterfaceConfig.SLOT_SETTINGS_OR_CALLS);
+        final GlassTabView activeSlot2 = showCalls ? tabs[INDEX_CALLS] : tabs[INDEX_SETTINGS];
+        final GlassTabView inactiveSlot2 = showCalls ? tabs[INDEX_SETTINGS] : tabs[INDEX_CALLS];
+        inactiveSlot2.setCounter(null, false, false);
+        if (slot2Mode == MirrlyInterfaceConfig.SLOT_MODE_DEFAULT) {
+            if (showCalls) {
+                tabs[INDEX_CALLS].restoreMainTab(GlassTabView.TabAnimation.CALLS, getString(R.string.MainTabsCalls));
+                tabs[INDEX_CALLS].setContentDescription(getString(R.string.MainTabsCalls));
+                tabs[INDEX_CALLS].setOnClickListener(createNativeTabClickListener(POSITION_CALLS_OR_SETTINGS));
+                tabs[INDEX_CALLS].setOnLongClickListener(this::openCallsSelector);
+                tabsView.addTabToIgnoreClick(tabs[INDEX_CALLS]);
+            } else {
+                tabs[INDEX_SETTINGS].restoreMainTab(GlassTabView.TabAnimation.SETTINGS, getString(R.string.Settings));
+                tabs[INDEX_SETTINGS].setContentDescription(getString(R.string.Settings));
+                tabs[INDEX_SETTINGS].setOnClickListener(createNativeTabClickListener(POSITION_CALLS_OR_SETTINGS));
+                tabs[INDEX_SETTINGS].setOnLongClickListener(null);
+                tabsView.removeTabToIgnoreClick(tabs[INDEX_SETTINGS]);
+            }
+        } else if (slot2Mode == MirrlyInterfaceConfig.SLOT_MODE_CUSTOM) {
+            bindCustomSlot(activeSlot2, MirrlyInterfaceConfig.SLOT_SETTINGS_OR_CALLS);
+        } else {
+            activeSlot2.setCounter(null, false, false);
+        }
+
+        // Slot 3: Profile
+        final int slot3Mode = MirrlyInterfaceConfig.getSlotMode(MirrlyInterfaceConfig.SLOT_PROFILE);
+        if (slot3Mode == MirrlyInterfaceConfig.SLOT_MODE_DEFAULT) {
+            tabs[INDEX_PROFILE].restoreUserAvatarTab(currentAccount, getString(R.string.MainTabsProfile));
+            tabs[INDEX_PROFILE].setContentDescription(getString(R.string.MainTabsProfile));
+            tabs[INDEX_PROFILE].setOnClickListener(createNativeTabClickListener(POSITION_PROFILE));
+            tabs[INDEX_PROFILE].setOnLongClickListener(this::openAccountSelector);
+            tabsView.addTabToIgnoreClick(tabs[INDEX_PROFILE]);
+        } else if (slot3Mode == MirrlyInterfaceConfig.SLOT_MODE_CUSTOM) {
+            bindCustomSlot(tabs[INDEX_PROFILE], MirrlyInterfaceConfig.SLOT_PROFILE);
+        } else {
+            tabs[INDEX_PROFILE].setCounter(null, false, false);
+        }
+
+        final boolean showSingleCircle = !allHidden && shouldCollapse && !isCircleExpanded;
+        if (accountSwitchHint != null && (allHidden || showSingleCircle || slot3Mode != MirrlyInterfaceConfig.SLOT_MODE_DEFAULT)) {
+            accountSwitchHint.hide();
+        }
+        tabsView.setCollapsedCircleMode(showSingleCircle);
+        tabsView.setHorizontalAlignment(MirrlyInterfaceConfig.getBottomBarAlignment(), animated);
+
+        if (allHidden) {
+            for (GlassTabView tab : tabs) {
+                tabsView.setViewVisible(tab, false, animated);
+            }
+            if (collapsedCircleTab != null) {
+                tabsView.setViewVisible(collapsedCircleTab, false, animated);
+            }
+        } else if (showSingleCircle) {
+            for (GlassTabView tab : tabs) {
+                tabsView.setViewVisible(tab, false, animated);
+            }
+            updateCollapsedCircleContent(showCalls, animated);
+            if (collapsedCircleTab != null) {
+                tabsView.setViewVisible(collapsedCircleTab, true, animated);
+            }
+        } else {
+            if (collapsedCircleTab != null) {
+                tabsView.setViewVisible(collapsedCircleTab, false, animated);
+            }
+            tabsView.setViewVisible(tabs[INDEX_CHATS], slot0Mode != MirrlyInterfaceConfig.SLOT_MODE_HIDDEN, animated);
+            tabsView.setViewVisible(tabs[INDEX_CONTACTS], slot1Mode != MirrlyInterfaceConfig.SLOT_MODE_HIDDEN, animated);
+            final boolean slot2Visible = slot2Mode != MirrlyInterfaceConfig.SLOT_MODE_HIDDEN;
+            tabsView.setViewVisible(tabs[INDEX_SETTINGS], slot2Visible && !showCalls, animated);
+            tabsView.setViewVisible(tabs[INDEX_CALLS], slot2Visible && showCalls, animated);
+            tabsView.setViewVisible(tabs[INDEX_PROFILE], slot3Mode != MirrlyInterfaceConfig.SLOT_MODE_HIDDEN, animated);
+        }
+
+        checkUnreadCount(animated);
+        checkContactsTabBadge();
+
+        if (viewPager != null && !viewPager.isManualScrolling() && !viewPager.isTouch()) {
+            final int currentPos = viewPager.getCurrentPosition();
+            final int startPos = getStartPosition();
+            if (!isNativeTabSlot(currentPos) && (currentPos != POSITION_CHATS || startPos != POSITION_CHATS)) {
+                viewPager.setPosition(startPos);
+            }
+            selectTab(viewPager.getCurrentPosition(), false);
+        }
+
+        checkUi_tabsPosition();
+        checkUi_fadeView();
+        updateAccountSwitchHintJoint();
+        blur3_updateFragmentsGlass();
+        blur3_invalidateBlur();
+        scheduleMainTabsAdaptiveContrastUpdate(true);
+        if (tabletLayout && fragmentView != null) {
+            androidx.core.view.ViewCompat.requestApplyInsets(fragmentView);
+        }
+        tabsView.requestLayout();
+    }
+
+    private View.OnClickListener createNativeTabClickListener(int position) {
+        return v -> {
+            if (viewPager == null || viewPager.isManualScrolling() || viewPager.isTouch()) {
+                return;
+            }
+
+            if (viewPager.getCurrentPosition() == position) {
+                final BaseFragment fragment = getCurrentVisibleFragment();
+                if (fragment instanceof MainTabsActivity.TabFragmentDelegate) {
+                    ((MainTabsActivity.TabFragmentDelegate) fragment).onParentScrollToTop();
+                }
+            } else {
+                selectTab(position, true);
+                viewPager.scrollToPosition(position);
+            }
+            if (isCircleExpanded) {
+                setCircleExpanded(false, true);
+            }
+        };
+    }
+
+    private void bindCustomSlot(GlassTabView tab, int slot) {
+        final String actionKey = MirrlyInterfaceConfig.getSlotCustomAction(slot);
+        final long customDialogId = MirrlyInterfaceConfig.getSlotCustomChatId(slot);
+        final String storedTitle = MirrlyInterfaceConfig.getSlotCustomChatTitle(slot);
+        MirrlyQuickActionRouter.bindTabView(tab, currentAccount, actionKey, customDialogId, storedTitle);
+        tab.setCounter(null, false, false);
+        tab.setSelected(false, false);
+        tab.setGestureSelectedOverride(0f, false);
+        tab.setOnClickListener(v -> {
+            AndroidUtilities.vibrateCursor(v);
+            MirrlyQuickActionRouter.executeAction(
+                    MainTabsActivity.this,
+                    v,
+                    actionKey,
+                    customDialogId,
+                    this::openSearchFromCustomTab
+            );
+            if (isCircleExpanded) {
+                setCircleExpanded(false, true);
+            }
+        });
+        tab.setOnLongClickListener(this::openQuickCustomizeShortcut);
+        tabsView.addTabToIgnoreClick(tab);
+    }
+
+    private boolean openQuickCustomizeShortcut(View anchor) {
+        if (getContext() == null || getParentActivity() == null) {
+            return false;
+        }
+        AndroidUtilities.vibrate(anchor);
+        final ItemOptions o = ItemOptions.makeOptions(this, anchor);
+        o.add(R.drawable.mirrly_settings_interface, getString(R.string.MirrlyInterfaceSlotEditShortcut), () -> {
+            if (isCircleExpanded) {
+                setCircleExpanded(false, false);
+            }
+            presentFragment(new MirrlyInterfaceSettingsActivity(MirrlyInterfaceSettingsActivity.TAB_BOTTOM_BAR));
+        });
+        o.setBlur(true);
+        o.translate(0, -dp(4));
+        applyTabScrimBackground(o, anchor);
+        o.show();
+        return true;
+    }
+
+    private void openSearchFromCustomTab() {
+        if (viewPager == null) {
+            return;
+        }
+        if (dialogsActivity == null) {
+            prepareDialogsActivity(null);
+        }
+        if (viewPager.getCurrentPosition() != POSITION_CHATS) {
+            pendingOpenSearch = true;
+            selectTab(POSITION_CHATS, true);
+            viewPager.scrollToPosition(POSITION_CHATS);
+        } else if (dialogsActivity != null) {
+            dialogsActivity.openSearchFromTabs();
+        }
+    }
+
+    private void updateCollapsedCircleContent(boolean showCalls, boolean animated) {
+        if (collapsedCircleTab == null) {
+            return;
+        }
+        int representativeSlot = -1;
+        final int currentPos = viewPager != null ? viewPager.getCurrentPosition() : POSITION_CHATS;
+        if (currentPos >= 0 && currentPos < MirrlyInterfaceConfig.SLOT_COUNT
+                && MirrlyInterfaceConfig.getSlotMode(currentPos) == MirrlyInterfaceConfig.SLOT_MODE_DEFAULT) {
+            representativeSlot = currentPos;
+        } else {
+            for (int slot = 0; slot < MirrlyInterfaceConfig.SLOT_COUNT; slot++) {
+                if (MirrlyInterfaceConfig.getSlotMode(slot) == MirrlyInterfaceConfig.SLOT_MODE_DEFAULT) {
+                    representativeSlot = slot;
+                    break;
+                }
+            }
+            if (representativeSlot == -1) {
+                for (int slot = 0; slot < MirrlyInterfaceConfig.SLOT_COUNT; slot++) {
+                    if (MirrlyInterfaceConfig.getSlotMode(slot) != MirrlyInterfaceConfig.SLOT_MODE_HIDDEN) {
+                        representativeSlot = slot;
+                        break;
+                    }
+                }
+            }
+        }
+        if (representativeSlot == -1) {
+            representativeSlot = MirrlyInterfaceConfig.SLOT_CHATS;
+        }
+
+        final int mode = MirrlyInterfaceConfig.getSlotMode(representativeSlot);
+        if (mode == MirrlyInterfaceConfig.SLOT_MODE_CUSTOM) {
+            MirrlyQuickActionRouter.bindTabView(
+                    collapsedCircleTab,
+                    currentAccount,
+                    MirrlyInterfaceConfig.getSlotCustomAction(representativeSlot),
+                    MirrlyInterfaceConfig.getSlotCustomChatId(representativeSlot),
+                    MirrlyInterfaceConfig.getSlotCustomChatTitle(representativeSlot)
+            );
+        } else {
+            switch (representativeSlot) {
+                case MirrlyInterfaceConfig.SLOT_CONTACTS:
+                    collapsedCircleTab.restoreMainTab(GlassTabView.TabAnimation.CONTACTS, "");
+                    break;
+                case MirrlyInterfaceConfig.SLOT_SETTINGS_OR_CALLS:
+                    collapsedCircleTab.restoreMainTab(showCalls ? GlassTabView.TabAnimation.CALLS : GlassTabView.TabAnimation.SETTINGS, "");
+                    break;
+                case MirrlyInterfaceConfig.SLOT_PROFILE:
+                    collapsedCircleTab.restoreUserAvatarTab(currentAccount, "");
+                    break;
+                case MirrlyInterfaceConfig.SLOT_CHATS:
+                default:
+                    collapsedCircleTab.restoreMainTab(GlassTabView.TabAnimation.CHATS, "");
+                    break;
+            }
+        }
+        collapsedCircleTab.setContentDescription(getString(R.string.MirrlyInterfaceBarAccessibilityCircle));
+        updateCollapsedCircleBadge(animated);
+    }
+
+    private void updateCollapsedCircleBadge(boolean animated) {
+        if (collapsedCircleTab == null) {
+            return;
+        }
+        final int unreadCount = MessagesStorage.getInstance(currentAccount).getMainUnreadCount();
+        if (unreadCount > 0) {
+            collapsedCircleTab.setCounter(LocaleController.formatNumber(unreadCount, ','), false, animated);
+        } else {
+            final boolean hasPermission = Build.VERSION.SDK_INT < 23 || ContactsController.hasContactsPermission();
+            final boolean contactsVisible = MirrlyInterfaceConfig.getSlotMode(MirrlyInterfaceConfig.SLOT_CONTACTS) != MirrlyInterfaceConfig.SLOT_MODE_HIDDEN;
+            if (contactsVisible && Build.VERSION.SDK_INT >= 23 && UserConfig.getInstance(currentAccount).syncContacts
+                    && !hasPermission && MessagesController.getGlobalNotificationsSettings().getBoolean("askAboutContacts2", true)) {
+                collapsedCircleTab.setCounter("!", true, animated);
+            } else {
+                collapsedCircleTab.setCounter(null, false, animated);
+            }
+        }
+    }
+
+    private void refreshCustomChatSlotsIfNeeded() {
+        if (tabs == null) {
+            return;
+        }
+        final boolean showCalls = getUserConfig().showCallsTab;
+        boolean changed = false;
+        for (int slot = 0; slot < MirrlyInterfaceConfig.SLOT_COUNT; slot++) {
+            if (MirrlyInterfaceConfig.getSlotMode(slot) == MirrlyInterfaceConfig.SLOT_MODE_CUSTOM
+                    && MirrlyInterfaceConfig.QUICK_CUSTOM_CHAT.equals(MirrlyInterfaceConfig.getSlotCustomAction(slot))) {
+                final GlassTabView tab = getSlotView(slot, showCalls);
+                if (tab != null) {
+                    MirrlyQuickActionRouter.bindTabView(
+                            tab,
+                            currentAccount,
+                            MirrlyInterfaceConfig.QUICK_CUSTOM_CHAT,
+                            MirrlyInterfaceConfig.getSlotCustomChatId(slot),
+                            MirrlyInterfaceConfig.getSlotCustomChatTitle(slot)
+                    );
+                    changed = true;
+                }
+            }
+        }
+        if (changed && collapsedCircleTab != null && MirrlyInterfaceConfig.shouldCollapseToCircle() && !isCircleExpanded) {
+            updateCollapsedCircleContent(showCalls, false);
+        }
+        if (changed && tabsView != null) {
+            tabsView.requestLayout();
+        }
+    }
+
+    private void refreshThemeQuickActionsIfNeeded() {
+        if (tabs == null) {
+            return;
+        }
+        final boolean showCalls = getUserConfig().showCallsTab;
+        boolean changed = false;
+        for (int slot = 0; slot < MirrlyInterfaceConfig.SLOT_COUNT; slot++) {
+            if (MirrlyInterfaceConfig.getSlotMode(slot) == MirrlyInterfaceConfig.SLOT_MODE_CUSTOM
+                    && MirrlyInterfaceConfig.QUICK_THEME_TOGGLE.equals(MirrlyInterfaceConfig.getSlotCustomAction(slot))) {
+                final GlassTabView tab = getSlotView(slot, showCalls);
+                if (tab != null) {
+                    MirrlyQuickActionRouter.bindTabView(
+                            tab,
+                            currentAccount,
+                            MirrlyInterfaceConfig.QUICK_THEME_TOGGLE,
+                            0L,
+                            null
+                    );
+                    changed = true;
+                }
+            }
+        }
+        if (changed && collapsedCircleTab != null && MirrlyInterfaceConfig.shouldCollapseToCircle() && !isCircleExpanded) {
+            updateCollapsedCircleContent(showCalls, false);
+        }
+    }
+
+    @Nullable
+    private GlassTabView getSlotView(int slot, boolean showCallsTab) {
+        if (tabs == null) {
+            return null;
+        }
+        switch (slot) {
+            case MirrlyInterfaceConfig.SLOT_CHATS:
+                return tabs[INDEX_CHATS];
+            case MirrlyInterfaceConfig.SLOT_CONTACTS:
+                return tabs[INDEX_CONTACTS];
+            case MirrlyInterfaceConfig.SLOT_SETTINGS_OR_CALLS:
+                return showCallsTab ? tabs[INDEX_CALLS] : tabs[INDEX_SETTINGS];
+            case MirrlyInterfaceConfig.SLOT_PROFILE:
+                return tabs[INDEX_PROFILE];
+            default:
+                return null;
         }
     }
 
@@ -1130,6 +1682,9 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         @Override
         public void setTabsVisible(boolean visible) {
             animatorTabsVisible.setValue(visible, true);
+            if (!visible && isCircleExpanded) {
+                setCircleExpanded(false, false);
+            }
         }
     }
 
@@ -1179,31 +1734,62 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
 
     private void showAccountChangeHint() {
         if (accountSwitchHintShown) return;
+        if (MirrlyInterfaceConfig.getSlotMode(MirrlyInterfaceConfig.SLOT_PROFILE) != MirrlyInterfaceConfig.SLOT_MODE_DEFAULT
+                || MirrlyInterfaceConfig.shouldCollapseToCircle()) {
+            return;
+        }
 
         if (accountSwitchHint == null && HintsController.Hint.AccountSwitchHint.show()) {
             AndroidUtilities.runOnUIThread(() -> {
-                if (getContext() == null || tabs == null) return;
-
-                final View v = tabs[INDEX_PROFILE];
-                final float translate = (contentView.getWidth() - ((tabsView.getX() + v.getX()) + v.getWidth()) + v.getWidth() / 2f) / AndroidUtilities.density;
+                if (getContext() == null || tabs == null || tabs[INDEX_PROFILE] == null
+                        || tabsView == null || !tabsView.isViewVisible(tabs[INDEX_PROFILE])
+                        || tabs[INDEX_PROFILE].getVisibility() != View.VISIBLE || tabs[INDEX_PROFILE].getWidth() <= 0
+                        || tabsViewWrapper == null || tabsViewWrapper.getVisibility() != View.VISIBLE
+                        || MirrlyInterfaceConfig.getSlotMode(MirrlyInterfaceConfig.SLOT_PROFILE) != MirrlyInterfaceConfig.SLOT_MODE_DEFAULT
+                        || MirrlyInterfaceConfig.shouldCollapseToCircle()) {
+                    return;
+                }
 
                 accountSwitchHint = new HintView2(getContext(), HintView2.DIRECTION_BOTTOM);
+                if (iBlur3FactoryGlass != null) {
+                    accountSwitchHint.setGlass(iBlur3FactoryGlass, BlurredBackgroundProviderImpl.hint(resourceProvider));
+                }
                 accountSwitchHint.setTranslationY(-navigationBarHeight + dp(4));
                 accountSwitchHint.setPadding(dp(7.33f), 0, dp(7.33f), 0);
                 accountSwitchHint.setMultilineText(false);
                 accountSwitchHint.setCloseButton(true);
                 accountSwitchHint.setText(getString(R.string.SwitchAccountHint));
-                accountSwitchHint.setJoint(1, -translate + 7.33f);
+                updateAccountSwitchHintJoint();
                 contentView.addView(accountSwitchHint, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 100, Gravity.BOTTOM | Gravity.FILL_HORIZONTAL, 0, 0, 0, DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS));
-                accountSwitchHint.setOnHiddenListener(() -> AndroidUtilities.removeFromParent(accountSwitchHint));
+                accountSwitchHint.setOnHiddenListener(() -> {
+                    AndroidUtilities.removeFromParent(accountSwitchHint);
+                    accountSwitchHint = null;
+                    blur3_updateFragmentsGlass();
+                    blur3_invalidateBlur();
+                });
                 accountSwitchHint.setDuration(8000);
                 accountSwitchHint.show();
+                blur3_updateFragmentsGlass();
+                blur3_invalidateBlur();
 
                 HintsController.Hint.AccountSwitchHint.increment();
             }, 1500);
         }
 
         accountSwitchHintShown = true;
+    }
+
+    private void updateAccountSwitchHintJoint() {
+        if (accountSwitchHint == null || contentView == null || tabsView == null || tabs == null || tabs[INDEX_PROFILE] == null) {
+            return;
+        }
+        final View v = tabs[INDEX_PROFILE];
+        if (v.getWidth() <= 0 || v.getVisibility() != View.VISIBLE || !tabsView.isViewVisible(v)) {
+            return;
+        }
+        final float wrapperX = tabsViewWrapper != null ? tabsViewWrapper.getX() : 0f;
+        final float centerX = wrapperX + tabsView.getX() + v.getX() + v.getWidth() * 0.5f;
+        accountSwitchHint.setJointPx(0f, centerX - dp(7.33f));
     }
 
 
@@ -1233,6 +1819,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             iBlur3SourceTabFrosted.invalidateRenderer();
             blur3_invalidateBlur();
         }
+        scheduleMainTabsAdaptiveContrastUpdate(false);
     }
 
     /** The tabs go to the capture of the page under them: the full width, the place of the shown tabs whatever they do. */
@@ -1241,9 +1828,23 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             return;
         }
 
+        if (MirrlyInterfaceConfig.isBottomBarCompletelyHidden()) {
+            for (int a = 0, N = fragmentsArr.size(); a < N; a++) {
+                final BaseFragment fragment = fragmentsArr.valueAt(a).fragment;
+                if (fragment instanceof TabFragmentDelegate) {
+                    fragment.setParentGlass(null, null);
+                }
+            }
+            return;
+        }
+
         final int updateLayoutHeight = updateLayoutWrapper != null && updateLayoutWrapper.isUpdateLayoutVisible() ? dp(UpdateLayoutWrapper.HEIGHT) : 0;
         final int bottom = contentView.getHeight() - navigationBarHeight - updateLayoutHeight - dp(DialogsActivity.MAIN_TABS_MARGIN);
         final int top = bottom - dp(DialogsActivity.MAIN_TABS_HEIGHT);
+        int captureTop = top - dp(1);
+        if (accountSwitchHint != null && accountSwitchHint.getParent() != null && accountSwitchHint.getVisibility() == View.VISIBLE) {
+            captureTop = Math.max(0, top - dp(64));
+        }
 
         for (int a = 0, N = fragmentsArr.size(); a < N; a++) {
             final BaseFragment fragment = fragmentsArr.valueAt(a).fragment;
@@ -1254,7 +1855,7 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
             if (top >= view.getHeight()) {
                 fragment.setParentGlass(null, null);
             } else {
-                tabsCapturePosition.set(0, top - dp(1), view.getWidth(), bottom + dp(1));
+                tabsCapturePosition.set(0, captureTop, view.getWidth(), bottom + dp(1));
                 fragment.setParentGlass(tabsCapturePosition, onFragmentGlassCaptured);
             }
         }
@@ -1276,19 +1877,136 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         }
     }
 
+    private int lastFadeEstBackgroundColor;
+    private boolean hasLastFadeEstBackgroundColor;
+
     private void blur3_updateFadeColors() {
-        iBlur3SourceColor.setColor(getEstBackgroundColor());
-        if (fadeView != null) {
-            fadeView.invalidate();
+        final int color = getEstBackgroundColor();
+        iBlur3SourceColor.setColor(color);
+        if (!hasLastFadeEstBackgroundColor || lastFadeEstBackgroundColor != color) {
+            hasLastFadeEstBackgroundColor = true;
+            lastFadeEstBackgroundColor = color;
+            if (fadeView != null) {
+                fadeView.invalidate();
+            }
+        }
+    }
+
+    private BlurredBackgroundProvider mainTabsAdaptiveColorProvider;
+    private long lastMainTabsSampleMs;
+    private float mainTabsAdaptiveTarget;
+    private float mainTabsAdaptiveFactor;
+    private boolean mainTabsAdaptiveTickPosted;
+    private final Runnable mainTabsAdaptiveTickRunnable = () -> {
+        mainTabsAdaptiveTickPosted = false;
+        updateMainTabsAdaptiveContrast(false);
+    };
+
+    private void cancelMainTabsAdaptiveTick() {
+        if (mainTabsAdaptiveTickPosted && contentView != null) {
+            contentView.removeCallbacks(mainTabsAdaptiveTickRunnable);
+        }
+        mainTabsAdaptiveTickPosted = false;
+    }
+
+    private void scheduleMainTabsAdaptiveContrastUpdate(boolean forceSample) {
+        if (forceSample) {
+            cancelMainTabsAdaptiveTick();
+            updateMainTabsAdaptiveContrast(true);
+            return;
+        }
+        final long now = android.os.SystemClock.uptimeMillis();
+        final long elapsed = now - lastMainTabsSampleMs;
+        if (elapsed >= 80L) {
+            cancelMainTabsAdaptiveTick();
+            updateMainTabsAdaptiveContrast(false);
+        } else if (!mainTabsAdaptiveTickPosted && contentView != null) {
+            mainTabsAdaptiveTickPosted = true;
+            contentView.postDelayed(mainTabsAdaptiveTickRunnable, Math.max(16L, 84L - elapsed));
+        }
+    }
+
+    @Nullable
+    private ViewGroup findMainTabScrollTarget(@Nullable View root, int depth) {
+        if (!(root instanceof ViewGroup)) {
+            return null;
+        }
+        final ViewGroup group = (ViewGroup) root;
+        if (group instanceof androidx.recyclerview.widget.RecyclerView && group.getVisibility() == View.VISIBLE && group.getChildCount() > 0) {
+            return group;
+        }
+        if (depth >= 2) {
+            return null;
+        }
+        for (int i = group.getChildCount() - 1; i >= 0; i--) {
+            final View child = group.getChildAt(i);
+            if (child != null && child.getVisibility() == View.VISIBLE && child.getWidth() > 0 && child.getHeight() > 0) {
+                final ViewGroup found = findMainTabScrollTarget(child, depth + 1);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return depth == 0 ? group : null;
+    }
+
+    private void updateMainTabsAdaptiveContrast(boolean forceSample) {
+        if (tabsView == null || tabs == null || contentView == null) {
+            return;
+        }
+        if (MirrlyInterfaceConfig.isBottomBarCompletelyHidden()
+                || tabsView.getVisibility() != View.VISIBLE
+                || (tabsViewWrapper != null && tabsViewWrapper.getVisibility() != View.VISIBLE)
+                || !BlurredBackgroundProviderImpl.checkBlurEnabled(currentAccount, resourceProvider)) {
+            if (mainTabsAdaptiveFactor > 0.001f) {
+                mainTabsAdaptiveTarget = mainTabsAdaptiveFactor = 0f;
+                for (GlassTabView tabView : tabs) {
+                    if (tabView != null) {
+                        tabView.applyAdaptiveGlassContrast(0f);
+                    }
+                }
+                if (collapsedCircleTab != null) {
+                    collapsedCircleTab.applyAdaptiveGlassContrast(0f);
+                }
+            }
+            return;
+        }
+
+        final long now = android.os.SystemClock.uptimeMillis();
+        if (forceSample || now - lastMainTabsSampleMs >= 80L) {
+            lastMainTabsSampleMs = now;
+            if (mainTabsAdaptiveColorProvider == null) {
+                mainTabsAdaptiveColorProvider = BlurredBackgroundProviderImpl.mainTabs(resourceProvider);
+            }
+            final BaseFragment currentFrag = getCurrentVisibleFragment();
+            final View fragView = currentFrag != null ? currentFrag.fragmentView : null;
+            final ViewGroup sampleTarget = findMainTabScrollTarget(fragView, 0);
+            final int estBg = getEstBackgroundColor();
+            final float backdropLuma = GlassContrastHelper.computeLuminance(estBg);
+            final int glassBg = mainTabsAdaptiveColorProvider.getBackgroundColor();
+            final int vw = contentView.getWidth();
+            final int vh = contentView.getHeight();
+            for (GlassTabView tabView : tabs) {
+                if (tabView != null) {
+                    tabView.updateSmartAdaptiveGlassContrast(sampleTarget, glassBg, vw, vh, backdropLuma, false);
+                }
+            }
+            if (collapsedCircleTab != null) {
+                collapsedCircleTab.updateSmartAdaptiveGlassContrast(sampleTarget, glassBg, vw, vh, backdropLuma, false);
+            }
         }
     }
 
     private void blur3_updateColors() {
+        mainTabsAdaptiveColorProvider = null;
+        lastMainTabsSampleMs = 0L;
+        hasLastFadeEstBackgroundColor = false;
         blur3_updateFadeColors();
         if (tabsViewBackground != null) {
             tabsViewBackground.updateColors();
         }
         blur3_invalidateBlur();
+        scheduleMainTabsAdaptiveContrastUpdate(true);
         if (fadeView != null) {
             fadeView.invalidate();
         }
@@ -1297,8 +2015,16 @@ public class MainTabsActivity extends ViewPagerActivity implements NotificationC
         }
         if (tabs != null) {
             for (GlassTabView tabView : tabs) {
-                tabView.updateColorsLottie();
+                if (tabView != null) {
+                    tabView.updateColorsLottie();
+                }
             }
+        }
+        if (collapsedCircleTab != null) {
+            collapsedCircleTab.updateColorsLottie();
+        }
+        if (accountSwitchHint != null) {
+            accountSwitchHint.invalidate();
         }
     }
 

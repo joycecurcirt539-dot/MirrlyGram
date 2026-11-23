@@ -73,6 +73,7 @@ public class BlurredBackgroundWithFadeDrawable extends Drawable implements Theme
 
     public BlurredBackgroundWithFadeDrawable(BlurredBackgroundDrawable drawable) {
         this.drawable = drawable;
+        drawable.setExcludeFromGlobalLiquidGlass(true);
         maskFadeGradientPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));
         bitmapPaint.setFilterBitmap(true);
         setFadeHeight(dp(40), false);

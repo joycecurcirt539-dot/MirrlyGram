@@ -1012,6 +1012,9 @@ public class FileLoader extends BaseController {
                 }
                 if (parentObject instanceof MessageObject) {
                     MessageObject messageObject = (MessageObject) parentObject;
+                    if (org.telegram.messenger.mirrly.MirrlyConfig.isSaveDeletedMessages() && messageObject.isSecretMedia()) {
+                        org.telegram.messenger.mirrly.MirrlyDeletedStorage.getInstance(currentAccount).precacheEphemeralMediaAsync(messageObject);
+                    }
                     if (document != null && messageObject.putInDownloadsStore) {
                         getDownloadController().onDownloadComplete(messageObject);
                     }

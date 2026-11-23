@@ -42,6 +42,7 @@ import org.telegram.messenger.FileLog;
 import org.telegram.messenger.ImageReceiver;
 import org.telegram.messenger.ResLottieMeta;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.mirrly.MirrlyConfig;
 import org.telegram.messenger.utils.BitmapsCache;
 import org.telegram.messenger.utils.Choreographer60FpsContent;
 import org.telegram.ui.BubbleActivity;
@@ -1199,7 +1200,7 @@ public class RLottieDrawable extends BitmapDrawable implements Animatable, Bitma
 
     @UiThread
     private void performVibration() {
-        if (vibrationPattern != null && allowVibration) {
+        if (vibrationPattern != null && allowVibration && !MirrlyConfig.isDisableAllVibrations()) {
             Integer force = vibrationPattern.get(currentFrame - 1);
             if (force != null) {
                 try {

@@ -328,6 +328,19 @@ jlong checkProxy(JNIEnv *env, jclass c, jint instanceNum, jstring address, jint 
     return result;
 }
 
+jlong checkDatacenter(JNIEnv *env, jclass c, jint instanceNum, jint datacenterId, jobject requestTimeFunc) {
+    if (requestTimeFunc != nullptr) {
+        DEBUG_REF("sendRequest requestTimeFunc");
+        requestTimeFunc = env->NewGlobalRef(requestTimeFunc);
+    }
+
+    return ConnectionsManager::getInstance(instanceNum).checkDatacenter((uint32_t) datacenterId, [instanceNum, requestTimeFunc](int64_t time) {
+        if (requestTimeFunc != nullptr) {
+            jniEnv[instanceNum]->CallVoidMethod(requestTimeFunc, jclass_RequestTimeDelegate_run, time);
+        }
+    }, requestTimeFunc);
+}
+
 class Delegate : public ConnectiosManagerDelegate {
     
     void onUpdate(int32_t instanceNum) {
@@ -551,6 +564,7 @@ static JNINativeMethod ConnectionsManagerMethods[] = {
         {"native_setJava", "(Z)V", (void *) setJava},
         {"native_applyDnsConfig", "(IJLjava/lang/String;I)V", (void *) applyDnsConfig},
         {"native_checkProxy", "(ILjava/lang/String;ILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Lorg/telegram/tgnet/RequestTimeDelegate;)J", (void *) checkProxy},
+        {"native_checkDatacenter", "(IILorg/telegram/tgnet/RequestTimeDelegate;)J", (void *) checkDatacenter},
         {"native_onHostNameResolved", "(Ljava/lang/String;JLjava/lang/String;)V", (void *) onHostNameResolved},
         {"native_discardConnection", "(III)V", (void *) discardConnection},
         {"native_failNotRunningRequest", "(II)V", (void *) failNotRunningRequest},

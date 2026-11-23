@@ -5,6 +5,7 @@ import android.animation.AnimatorListenerAdapter;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Rect;
+import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.ShapeDrawable;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -594,6 +595,22 @@ public class FiltersView extends RecyclerListView implements Theme.Colorable {
     }
 
     public boolean drawDivider = true;
+    private boolean glassStyle;
+
+    public void setGlassStyle(boolean glassStyle) {
+        if (this.glassStyle != glassStyle) {
+            this.glassStyle = glassStyle;
+            updateColors();
+        }
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        if (!glassStyle && getParent() instanceof org.telegram.ui.SearchTabsAndFiltersLayout) {
+            setGlassStyle(true);
+        }
+    }
 
     @Override
     public void onDraw(Canvas c) {
@@ -605,10 +622,18 @@ public class FiltersView extends RecyclerListView implements Theme.Colorable {
 
     @Override
     public void updateColors() {
+        for (int i = 0; i < getChildCount(); i++) {
+            View view = getChildAt(i);
+            if (view instanceof FilterView) {
+                ((FilterView) view).setGlassStyle(glassStyle);
+                ((FilterView) view).updateColors();
+            }
+        }
         // pooled FilterViews are Theme.Colorable and are recolored by the theme dispatcher (no pool clear on every frame)
         for (int i = 0; i < getCachedChildCount(); i++) {
             View view = getCachedChildAt(i);
             if (view instanceof FilterView) {
+                ((FilterView) view).setGlassStyle(glassStyle);
                 ((FilterView) view).updateColors();
             }
         }
@@ -616,6 +641,7 @@ public class FiltersView extends RecyclerListView implements Theme.Colorable {
         for (int i = 0; i < getAttachedScrapChildCount(); i++) {
             View view = getAttachedScrapChildAt(i);
             if (view instanceof FilterView) {
+                ((FilterView) view).setGlassStyle(glassStyle);
                 ((FilterView) view).updateColors();
             }
         }
@@ -627,7 +653,10 @@ public class FiltersView extends RecyclerListView implements Theme.Colorable {
         @NonNull
         @Override
         public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-            ViewHolder holder = new ViewHolder(new FilterView(parent.getContext(), resourcesProvider));
+            final boolean inGlass = glassStyle || parent.getParent() instanceof org.telegram.ui.SearchTabsAndFiltersLayout;
+            FilterView filterView = new FilterView(parent.getContext(), resourcesProvider);
+            filterView.setGlassStyle(inGlass);
+            ViewHolder holder = new ViewHolder(filterView);
             RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, AndroidUtilities.dp(30));
             holder.itemView.setLayoutParams(lp);
             return holder;
@@ -692,6 +721,7 @@ public class FiltersView extends RecyclerListView implements Theme.Colorable {
     public static class FilterView extends FrameLayout implements Theme.Colorable {
 
         private final Theme.ResourcesProvider resourcesProvider;
+        private boolean glassStyle;
 
         BackupImageView avatarImageView;
         TextView titleView;
@@ -710,16 +740,41 @@ public class FiltersView extends RecyclerListView implements Theme.Colorable {
             updateColors();
         }
 
+        public void setGlassStyle(boolean glassStyle) {
+            if (this.glassStyle != glassStyle) {
+                this.glassStyle = glassStyle;
+                updateColors();
+            }
+        }
+
         @Override
         public void updateColors() {
-            if (getBackground() instanceof ShapeDrawable) {
-                Theme.setDrawableColor(getBackground(), getThemedColor(Theme.key_groupcreate_spanBackground));
-                invalidate();
+            final int textColor = getThemedColor(Theme.key_windowBackgroundWhiteBlackText);
+            if (glassStyle) {
+                final boolean isDark = resourcesProvider != null
+                        ? resourcesProvider.isDark()
+                        : AndroidUtilities.computePerceivedBrightness(textColor) > 0.5f;
+                final int fillColor = Theme.multAlpha(textColor, isDark ? 0.09f : 0.065f);
+                final int rimColor = isDark ? 0x22FFFFFF : 0x16000000;
+                final int strokePx = Math.max(1, Math.round(AndroidUtilities.dpf2(0.5f)));
+                GradientDrawable bg = getBackground() instanceof GradientDrawable ? (GradientDrawable) getBackground() : null;
+                if (bg == null) {
+                    bg = new GradientDrawable();
+                    bg.setCornerRadius(AndroidUtilities.dp(28));
+                    setBackground(bg);
+                }
+                bg.setColor(fillColor);
+                bg.setStroke(strokePx, rimColor);
             } else {
-                setBackground(Theme.createRoundRectDrawable(AndroidUtilities.dp(28), getThemedColor(Theme.key_groupcreate_spanBackground)));
+                if (getBackground() instanceof ShapeDrawable) {
+                    Theme.setDrawableColor(getBackground(), getThemedColor(Theme.key_groupcreate_spanBackground));
+                    invalidate();
+                } else {
+                    setBackground(Theme.createRoundRectDrawable(AndroidUtilities.dp(28), getThemedColor(Theme.key_groupcreate_spanBackground)));
+                }
             }
             if (titleView != null) {
-                titleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
+                titleView.setTextColor(textColor);
             }
             if (thumbDrawable != null && data != null) {
                 if (data.filterType == FILTER_TYPE_ARCHIVE) {

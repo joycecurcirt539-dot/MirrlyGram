@@ -2698,6 +2698,7 @@ public class LocaleController {
     }
 
     public void recreateFormatters() {
+        MirrlyBrandFormatter.clearCache();
         Locale locale = currentLocale;
         if (locale == null) {
             locale = Locale.getDefault();
@@ -4855,7 +4856,16 @@ public class LocaleController {
                 || res == R.string.PromoteUrl
                 || res == R.string.BotWebViewToSLink
                 || res == R.string.BotDefaultPrivacyPolicy
-                || res == R.string.StarsTOSLink;
+                || res == R.string.StarsTOSLink
+                || res == R.string.MirrlyInterfaceQuickCatTelegram
+                || res == R.string.MirrlyInterfaceQuickCatMirrly
+                || res == R.string.MirrlyQuickNameSettings
+                || res == R.string.MirrlyQuickNameMirrlySettings
+                || res == R.string.MirrlyInterfaceTopSettingsDesc
+                || res == R.string.MirrlyDrawerItemTgSettings
+                || res == R.string.MirrlyDrawerItemMirrlySettings
+                || res == R.string.MirrlyAboutClientDesc
+                || res == R.string.MirrlyAboutVersionFooter;
     }
 
 

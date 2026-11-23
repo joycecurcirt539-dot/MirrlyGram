@@ -47,6 +47,7 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.mirrly.MirrlyPhonePrivacyManager;
 import org.telegram.messenger.utils.DrawableUtils;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
@@ -532,8 +533,17 @@ public class ProfileSearchCell extends BaseCell implements NotificationCenter.No
         }
         nameString = AndroidUtilities.replaceNewLines(nameString);
         if (TextUtils.isEmpty(nameString)) {
-            if (user != null && !TextUtils.isEmpty(user.phone)) {
-                nameString = PhoneFormat.getInstance().format("+" + user.phone);
+            if (user != null) {
+                MirrlyPhonePrivacyManager.ResolvedPhone resolved = MirrlyPhonePrivacyManager.resolveUserPhone(currentAccount, user, null, false);
+                if (resolved.isCustomRule) {
+                    nameString = (resolved.hiddenLabel || resolved.spoilered)
+                            ? LocaleController.getString(R.string.MirrlyPhoneHiddenLabel)
+                            : resolved.plainDisplayText;
+                } else if (!TextUtils.isEmpty(user.phone)) {
+                    nameString = PhoneFormat.getInstance().format("+" + user.phone);
+                } else {
+                    nameString = getString(R.string.HiddenName);
+                }
             } else {
                 nameString = getString(R.string.HiddenName);
             }

@@ -838,15 +838,22 @@ public class SendGiftSheet extends BottomSheetWithRecyclerListView implements No
             } else if (BuildVars.useInvoiceBilling()) {
                 final LaunchActivity activity = LaunchActivity.instance;
                 if (activity != null) {
-                    Uri uri = Uri.parse(o.bot_url);
-                    if (uri.getHost().equals("t.me")) {
-                        if (!uri.getPath().startsWith("/$") && !uri.getPath().startsWith("/invoice/")) {
-                            activity.setNavigateToPremiumBot(true);
-                        } else {
-                            activity.setNavigateToPremiumGiftCallback(() -> onGiftSuccess(false));
+                    final String botUrl = o.bot_url != null && !o.bot_url.isEmpty()
+                            ? o.bot_url
+                            : (premiumTier != null && premiumTier.giftOption != null ? premiumTier.giftOption.bot_url : null);
+                    if (botUrl != null && !botUrl.isEmpty()) {
+                        Uri uri = Uri.parse(botUrl);
+                        String host = uri.getHost();
+                        String path = uri.getPath();
+                        if ("t.me".equalsIgnoreCase(host)) {
+                            if (path == null || (!path.startsWith("/$") && !path.startsWith("/invoice/"))) {
+                                activity.setNavigateToPremiumBot(true);
+                            } else {
+                                activity.setNavigateToPremiumGiftCallback(() -> onGiftSuccess(false));
+                            }
                         }
+                        Browser.openUrl(activity, botUrl);
                     }
-                    Browser.openUrl(activity, premiumTier.giftOption.bot_url);
                     dismiss();
                 }
             } else {

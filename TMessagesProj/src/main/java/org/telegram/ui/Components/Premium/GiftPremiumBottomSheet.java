@@ -300,16 +300,22 @@ public class GiftPremiumBottomSheet extends BottomSheetWithRecyclerListView impl
     private void onGiftPremium() {
         GiftTier tier = giftTiers.get(selectedTierIndex);
         if (BuildVars.useInvoiceBilling()) {
-            if (getBaseFragment().getParentActivity() instanceof LaunchActivity) {
-                Uri uri = Uri.parse(tier.giftOption.bot_url);
-                if (uri.getHost().equals("t.me")) {
-                    if (!uri.getPath().startsWith("/$") && !uri.getPath().startsWith("/invoice/")) {
-                        ((LaunchActivity) getBaseFragment().getParentActivity()).setNavigateToPremiumBot(true);
-                    } else {
-                        ((LaunchActivity) getBaseFragment().getParentActivity()).setNavigateToPremiumGiftCallback(()-> onGiftSuccess(false));
+            if (getBaseFragment() != null && getBaseFragment().getParentActivity() instanceof LaunchActivity) {
+                final LaunchActivity activity = (LaunchActivity) getBaseFragment().getParentActivity();
+                final String botUrl = tier != null && tier.giftOption != null ? tier.giftOption.bot_url : null;
+                if (botUrl != null && !botUrl.isEmpty()) {
+                    Uri uri = Uri.parse(botUrl);
+                    String host = uri.getHost();
+                    String path = uri.getPath();
+                    if ("t.me".equalsIgnoreCase(host)) {
+                        if (path == null || (!path.startsWith("/$") && !path.startsWith("/invoice/"))) {
+                            activity.setNavigateToPremiumBot(true);
+                        } else {
+                            activity.setNavigateToPremiumGiftCallback(() -> onGiftSuccess(false));
+                        }
                     }
+                    Browser.openUrl(activity, botUrl);
                 }
-                Browser.openUrl(getBaseFragment().getParentActivity(), tier.giftOption.bot_url);
                 dismiss();
             }
         } else {

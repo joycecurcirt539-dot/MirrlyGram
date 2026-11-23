@@ -267,6 +267,7 @@ public class MessageObject {
     public boolean expandedExplanation;
     public boolean forceShowPollResults;
     public boolean suppressMirrlyNoteBadge;
+    public boolean suppressMirrlyDeletedVisuals;
 
     public boolean isSpoilersRevealed;
     public boolean isMediaSpoilersRevealed;
@@ -3864,13 +3865,21 @@ public class MessageObject {
             return replyUpdated || true;
         } else if (
             messageOwner != null &&
-            TranslateController.isTranslatable(this) &&
-            translateController.isTranslatingDialog(getDialogId()) &&
-            !translateController.isTranslateDialogHidden(getDialogId()) &&
-            (translatedText != null || messageOwner.translatedPoll != null || messageOwner.translatedRichMessage != null) &&
-            TextUtils.equals(translateController.getDialogTranslateTo(getDialogId()), messageOwner.translatedToLanguage)
+            (
+                (
+                    messageOwner.mirrlyTranslatedOpen &&
+                    TranslateController.isTranslatable(this, true) &&
+                    (translatedText != null || messageOwner.translatedPoll != null || messageOwner.translatedRichMessage != null)
+                ) || (
+                    TranslateController.isTranslatable(this) &&
+                    translateController.isTranslatingDialog(getDialogId()) &&
+                    !translateController.isTranslateDialogHidden(getDialogId()) &&
+                    (translatedText != null || messageOwner.translatedPoll != null || messageOwner.translatedRichMessage != null) &&
+                    TextUtils.equals(translateController.getDialogTranslateTo(getDialogId()), messageOwner.translatedToLanguage)
+                )
+            )
         ) {
-            if (translated && !summarized) {
+            if (translated && !summarized && !force) {
                 return replyUpdated || false;
             }
             translated = true;
@@ -7778,6 +7787,9 @@ public class MessageObject {
             return null;
         }
         if (TextUtils.isEmpty(messageOwner.voiceTranscription)) {
+            if (!messageOwner.voiceTranscriptionFinal && TranscribeButton.isTranscribing(this)) {
+                return "";
+            }
             SpannableString ssb = new SpannableString(getString(R.string.NoWordsRecognized));
             ssb.setSpan(new CharacterStyle() {
                 @Override
@@ -8755,6 +8767,8 @@ public class MessageObject {
                 maxWidth -= dp(64);
             } else if (needDrawAvatarInternal() && !isOutOwner() && !messageOwner.isThreadMessage) {
                 maxWidth -= dp(52);
+            } else if (!isOutOwner() && !messageOwner.isThreadMessage && org.telegram.messenger.mirrly.MirrlyConfig.isMsgTranslateButtonEnabled() && !isSponsored() && !isAnyKindOfSticker() && type != TYPE_EMOJIS && type != TYPE_DATE && (messageOwner == null || messageOwner.action == null)) {
+                maxWidth -= dp(38);
             }
         } else if (getMedia(messageOwner) instanceof TLRPC.TL_messageMediaWebPage && getMedia(messageOwner).webpage != null && "telegram_background".equals(getMedia(messageOwner).webpage.type)) {
             try {
@@ -8783,6 +8797,8 @@ public class MessageObject {
                 maxWidth -= dp(type == TYPE_ARTICLE ? ChatActivity.SIDE_MENU_WIDTH + 52 - 48 : 64);
             } else if (needDrawAvatarInternal && !isOutOwner() && !messageOwner.isThreadMessage) {
                 maxWidth -= dp(52);
+            } else if (!isOutOwner() && org.telegram.messenger.mirrly.MirrlyConfig.isMsgTranslateButtonEnabled() && !isSponsored() && !isAnyKindOfSticker() && type != TYPE_EMOJIS && type != TYPE_DATE && (messageOwner == null || messageOwner.action == null)) {
+                maxWidth -= dp(38);
             }
             if (needDrawShareButton() && (isSaved || !isOutOwner())) {
                 maxWidth -= dp(isSaved && isOutOwner() ? 40 : 14);
@@ -10327,6 +10343,9 @@ public class MessageObject {
     }
 
     public boolean needDrawBluredPreview() {
+        if (isMirrlyDeleted() && hasLocalSavedAttachFile()) {
+            return false;
+        }
         if (isRepostPreview) {
             return false;
         }
@@ -10377,6 +10396,25 @@ public class MessageObject {
 
     public static boolean isOut(TLRPC.Message message) {
         return message.out;
+    }
+
+    public boolean isMirrlyDeleted() {
+        return messageOwner != null && messageOwner.mirrlyDeleted;
+    }
+
+    public boolean hasLocalSavedAttachFile() {
+        if (messageOwner == null || TextUtils.isEmpty(messageOwner.attachPath)) {
+            return false;
+        }
+        if (attachPathExists) {
+            return true;
+        }
+        File file = new File(messageOwner.attachPath);
+        boolean exists = file.exists() && file.length() > 0;
+        if (exists) {
+            attachPathExists = true;
+        }
+        return exists;
     }
 
     // cached: checked while drawing, and a message doesn't change its dialog
@@ -12285,6 +12323,10 @@ public class MessageObject {
                 }
             }
         } else if (type == TYPE_PHOTO) {
+            if (messageOwner.attachPath != null && messageOwner.attachPath.length() > 0) {
+                File f = new File(messageOwner.attachPath);
+                attachPathExists = f.exists();
+            }
             TLRPC.PhotoSize currentPhotoObject = FileLoader.getClosestPhotoSizeWithSize(photoThumbs, AndroidUtilities.getPhotoSize(true));
             if (currentPhotoObject != null) {
                 File file = FileLoader.getInstance(currentAccount).getPathToMessage(messageOwner, useFileDatabaseQueue);
@@ -12294,6 +12336,9 @@ public class MessageObject {
                 if (!mediaExists) {
                     mediaExists = file.exists();
                 }
+            }
+            if (!mediaExists && attachPathExists) {
+                mediaExists = true;
             }
         }
         if (!mediaExists && type == TYPE_GIF || type == TYPE_VIDEO || type == TYPE_FILE || type == TYPE_VOICE || type == TYPE_MUSIC || type == TYPE_ROUND_VIDEO) {

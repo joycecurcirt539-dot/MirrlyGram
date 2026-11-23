@@ -109,6 +109,7 @@ import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
 import org.telegram.messenger.VideoEditedInfo;
 import org.telegram.messenger.browser.Browser;
+import org.telegram.messenger.mirrly.MirrlyHaptics;
 import org.telegram.messenger.utils.tlutils.TLKeyboardHelper;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.SerializedData;
@@ -4228,6 +4229,9 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                         injectedJS = true;
                         evaluateJS(readRes(R.raw.webview_app_ext).replace("$DEBUG$", "" + BuildVars.DEBUG_VERSION));
                     }
+                    if (MirrlyHaptics.isDisabled()) {
+                        evaluateJS("try{if(navigator&&navigator.vibrate){navigator.vibrate=function(){return false;};}}catch(e){}");
+                    }
                     super.onPageCommitVisible(view, url);
                 }
 
@@ -4400,6 +4404,9 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                     }
                     super.onPageStarted(view, url, favicon);
                     injectedJS = false;
+                    if (MirrlyHaptics.isDisabled()) {
+                        evaluateJS("try{if(navigator&&navigator.vibrate){navigator.vibrate=function(){return false;};}}catch(e){}");
+                    }
                 }
 
                 @Override
@@ -4431,6 +4438,9 @@ public abstract class BotWebViewContainer extends FrameLayout implements Notific
                     } else {
                         injectedJS = true;
                         evaluateJS(readRes(R.raw.webview_app_ext).replace("$DEBUG$", "" + BuildVars.DEBUG_VERSION));
+                    }
+                    if (MirrlyHaptics.isDisabled()) {
+                        evaluateJS("try{if(navigator&&navigator.vibrate){navigator.vibrate=function(){return false;};}}catch(e){}");
                     }
                     saveHistory();
                     if (botWebViewContainer != null) {

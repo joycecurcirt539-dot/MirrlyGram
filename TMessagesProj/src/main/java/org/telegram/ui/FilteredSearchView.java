@@ -462,7 +462,8 @@ public class FilteredSearchView extends FrameLayout implements Theme.Colorable, 
 
     public void setBlurredBackgroundDrawableFactory(BlurredBackgroundDrawableViewFactory factory) {
         blurredBackgroundDrawableFactory = factory;
-        floatingDateView.setBlurredBackgroundDrawable(factory.create(floatingDateView, BlurredBackgroundProviderImpl.searchFloatingDate(null)));
+        final Theme.ResourcesProvider resourcesProvider = parentFragment != null ? parentFragment.getResourceProvider() : null;
+        floatingDateView.setBlurredBackgroundDrawable(factory.create(floatingDateView, BlurredBackgroundProviderImpl.searchFloatingDate(resourcesProvider)));
     }
 
     public static CharSequence createFromInfoString(MessageObject messageObject, int arrowType) {

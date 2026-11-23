@@ -409,7 +409,7 @@ public class ShareAlert extends BottomSheet implements NotificationCenter.Notifi
             iBlur3FactoryLiquidGlass.setOutset(LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) ? dp(8) : dp(48));
             iBlur3FactoryLiquidGlass.setGlassEngine(glassEngine);
 
-            iBlur3FactoryFrostedLiquidGlass = new BlurredBackgroundDrawableViewFactory(iBlur3SourceGlassFrosted);
+            iBlur3FactoryFrostedLiquidGlass = new BlurredBackgroundDrawableViewFactory(iBlur3SourceGlass, iBlur3SourceGlassFrosted, iBlur3SourceColor);
             iBlur3FactoryFrostedLiquidGlass.setLiquidGlassEffectAllowed(true);
             iBlur3FactoryFrostedLiquidGlass.setOutset(dp(48));
             iBlur3FactoryFrostedLiquidGlass.setGlassEngine(glassEngine);

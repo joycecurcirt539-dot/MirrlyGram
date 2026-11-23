@@ -33,6 +33,7 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
+import org.telegram.messenger.mirrly.MirrlyPhonePrivacyManager;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
@@ -51,7 +52,9 @@ import org.telegram.ui.Cells.EditTextCell;
 import org.telegram.ui.Components.AlertsCreator;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.IconBackgroundColors;
+import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.MirrlyPhoneEyeDrawable;
 import org.telegram.ui.Components.Premium.LimitReachedBottomSheet;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.UItem;
@@ -73,6 +76,7 @@ public class UserInfoActivity extends UniversalFragment implements NotificationC
     private int bioInfoHash = Integer.MIN_VALUE;
     private CharSequence bioInfo;
     private CharSequence birthdayInfo;
+    private boolean ownPhoneTempRevealed = false;
 
     private ArrayList<TL_account.TL_connectedBot> bots = new ArrayList<>();
 
@@ -92,6 +96,7 @@ public class UserInfoActivity extends UniversalFragment implements NotificationC
         getNotificationCenter().addWeakObserver(this, NotificationCenter.privacyRulesUpdated);
         getNotificationCenter().addWeakObserver(this, NotificationCenter.updateInterfaces);
         getNotificationCenter().addWeakObserver(this, NotificationCenter.updatedChatbot);
+        NotificationCenter.getGlobalInstance().addObserver(this, NotificationCenter.mirrlyPhonePrivacyChanged);
         getContactsController().loadPrivacySettings();
         BusinessChatbotController.getInstance(currentAccount).load(null);
         return super.onFragmentCreate();
@@ -103,8 +108,9 @@ public class UserInfoActivity extends UniversalFragment implements NotificationC
         getNotificationCenter().removeObserver(this, NotificationCenter.privacyRulesUpdated);
         getNotificationCenter().removeObserver(this, NotificationCenter.updateInterfaces);
         getNotificationCenter().removeObserver(this, NotificationCenter.updatedChatbot);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.mirrlyPhonePrivacyChanged);
         super.onFragmentDestroy();
-        if (!wasSaved) {
+        if (!wasSaved && hasChanges()) {
             processDone(false);
         }
     }
@@ -198,7 +204,7 @@ public class UserInfoActivity extends UniversalFragment implements NotificationC
                         }
                         bioInfo = replaceArrows(AndroidUtilities.replaceSingleTag(formatString(R.string.EditProfileBioInfoContactsExtra, extra), this::openBioSettings), true);
                     }
-                } else if (currentType == PrivacyControlActivity.TYPE_EVERYBODY) {
+                } else if (currentType == PrivacyControlActivity.TYPE_NOBODY) {
                     if (currentPlus <= 0) {
                         bioInfo = replaceArrows(AndroidUtilities.replaceSingleTag(getString(R.string.EditProfileBioInfoNobody), this::openBioSettings), true);
                     } else {
@@ -257,6 +263,9 @@ public class UserInfoActivity extends UniversalFragment implements NotificationC
         listView.setSections();
         listView.setSectionsDrawBackground(true);
         listView.setClipToPadding(false);
+        if (listView.getItemAnimator() instanceof androidx.recyclerview.widget.DefaultItemAnimator) {
+            ((androidx.recyclerview.widget.DefaultItemAnimator) listView.getItemAnimator()).setSupportsChangeAnimations(false);
+        }
         if (parentLayout != null && parentLayout.isRightLayout()) {
             simpleActionBar.setBackButtonImage(R.drawable.ic_ab_close);
         }
@@ -357,7 +366,22 @@ public class UserInfoActivity extends UniversalFragment implements NotificationC
         items.add(UItem.asHeader(getString(R.string.EditAccountInfoHeader)));
         if (user != null) {
             numberRow = items.size();
-            items.add(SettingsActivity.SettingCell.Factory.of(INFO_PHONE, IconBackgroundColors.GREEN.top, IconBackgroundColors.GREEN.bottom, R.drawable.settings_calls, PhoneFormat.getInstance().format("+" + user.phone), getString(R.string.TapToChangePhone)));
+            MirrlyPhonePrivacyManager.ResolvedPhone resolved = MirrlyPhonePrivacyManager.resolveSelfPhone(currentAccount, user, ownPhoneTempRevealed);
+            boolean showEye = MirrlyPhonePrivacyManager.isOwnHidden(currentAccount);
+            UItem phoneItem = PhoneInfoFactory.of(
+                    INFO_PHONE,
+                    resolved.plainDisplayText,
+                    getString(R.string.TapToChangePhone),
+                    showEye,
+                    ownPhoneTempRevealed,
+                    () -> {
+                        ownPhoneTempRevealed = !ownPhoneTempRevealed;
+                        if (listView != null && listView.adapter != null) {
+                            listView.adapter.update(true);
+                        }
+                    }
+            );
+            items.add(phoneItem);
         }
         usernameRow = items.size();
         if (UserObject.getPublicUsername(user) != null) {
@@ -556,6 +580,25 @@ public class UserInfoActivity extends UniversalFragment implements NotificationC
 
     @Override
     protected boolean onLongClick(UItem item, View view, int position, float x, float y) {
+        if (item != null && item.id == INFO_PHONE) {
+            TLRPC.User user = getUserConfig().getCurrentUser();
+            MirrlyPhonePrivacyManager.ResolvedPhone resolved = MirrlyPhonePrivacyManager.resolveSelfPhone(currentAccount, user, ownPhoneTempRevealed);
+            if (!resolved.canCopy) {
+                return false;
+            }
+            ItemOptions o = ItemOptions.makeOptions(this, view);
+            if (listView != null) {
+                o.setScrimViewBackground(listView.getClipBackground(view));
+            }
+            o.add(R.drawable.msg_copy, getString(R.string.Copy), () -> {
+                MirrlyUiKit.copyTextWithBulletin(this, resolved.copyValue, getString(R.string.PhoneCopied), null, resourceProvider);
+            });
+            o.add(R.drawable.menu_storage_path, getString(R.string.ProfilePhoneEdit), () -> {
+                presentFragment(new ActionIntroActivity(ActionIntroActivity.ACTION_TYPE_CHANGE_PHONE_NUMBER));
+            });
+            o.show();
+            return true;
+        }
         return false;
     }
 
@@ -576,6 +619,24 @@ public class UserInfoActivity extends UniversalFragment implements NotificationC
             final TL_account.connectedBots bots = BusinessChatbotController.getInstance(currentAccount).getValue();
             this.bots = bots != null && bots.connected_bots != null ? bots.connected_bots : new ArrayList<>();
             if (listView != null) {
+                listView.adapter.update(true);
+            }
+        } else if (id == NotificationCenter.mirrlyPhonePrivacyChanged) {
+            if (!MirrlyPhonePrivacyManager.isOwnHidden(currentAccount)) {
+                ownPhoneTempRevealed = false;
+            }
+            if (listView != null) {
+                listView.adapter.update(true);
+            }
+        }
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        if (ownPhoneTempRevealed && MirrlyPhonePrivacyManager.isAutoRehideOnLeave(currentAccount)) {
+            ownPhoneTempRevealed = false;
+            if (listView != null && listView.adapter != null) {
                 listView.adapter.update(true);
             }
         }
@@ -652,6 +713,9 @@ public class UserInfoActivity extends UniversalFragment implements NotificationC
     }
 
     public boolean hasChanges() {
+        if (firstNameEdit == null || lastNameEdit == null || bioEdit == null) {
+            return false;
+        }
         return (
             !TextUtils.equals(currentFirstName == null ? "" : currentFirstName, firstNameEdit.getText().toString()) ||
             !TextUtils.equals(currentLastName == null ? "" : currentLastName, lastNameEdit.getText().toString()) ||
@@ -674,7 +738,7 @@ public class UserInfoActivity extends UniversalFragment implements NotificationC
     private boolean wasSaved = false;
     private int shiftDp = -4;
     private void processDone(boolean error) {
-        if (doneButton.isLoading()) return;
+        if (doneButton == null || doneButton.isLoading()) return;
 
         if (error && TextUtils.isEmpty(firstNameEdit.getText())) {
             BotWebViewVibrationEffect.APP_ERROR.vibrate();
@@ -682,10 +746,10 @@ public class UserInfoActivity extends UniversalFragment implements NotificationC
             return;
         }
 
-        doneButton.setLoading(true, true);
         TLRPC.User user = getUserConfig().getCurrentUser();
         TLRPC.UserFull userFull = getMessagesController().getUserFull(getUserConfig().getClientUserId());
         if (user == null || userFull == null) return;
+        doneButton.setLoading(true, true);
 
         ArrayList<TLObject> requests = new ArrayList<TLObject>();
 
@@ -797,6 +861,80 @@ public class UserInfoActivity extends UniversalFragment implements NotificationC
 
         NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.mainUserInfoChanged);
         NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.updateInterfaces, MessagesController.UPDATE_MASK_NAME);
+    }
+
+    public static class PhoneInfoFactory extends UItem.UItemFactory<SettingsActivity.SettingCell> {
+        static {
+            setup(new PhoneInfoFactory());
+        }
+
+        public static UItem of(int id, CharSequence text, CharSequence subtext, boolean showEye, boolean revealed, Runnable onToggleEye) {
+            UItem item = UItem.ofFactory(PhoneInfoFactory.class);
+            item.id = id;
+            item.text = text;
+            item.subtext = subtext;
+            item.checked = showEye;
+            item.enabled = true;
+            item.intValue = revealed ? 1 : 0;
+            item.object = onToggleEye;
+            return item;
+        }
+
+        @Override
+        public SettingsActivity.SettingCell createView(Context context, RecyclerListView listView, int currentAccount, int classGuid, Theme.ResourcesProvider resourcesProvider) {
+            return new SettingsActivity.SettingCell(context, resourcesProvider);
+        }
+
+        @Override
+        public void bindView(View view, UItem item, boolean divider, UniversalAdapter adapter, UniversalRecyclerView listView) {
+            SettingsActivity.SettingCell cell = (SettingsActivity.SettingCell) view;
+            cell.set(
+                    IconBackgroundColors.GREEN.top,
+                    IconBackgroundColors.GREEN.bottom,
+                    R.drawable.settings_calls,
+                    item.text,
+                    item.subtext,
+                    null
+            );
+            if (item.checked) {
+                MirrlyPhoneEyeDrawable eye;
+                boolean animated;
+                if (cell.getTag() instanceof MirrlyPhoneEyeDrawable) {
+                    eye = (MirrlyPhoneEyeDrawable) cell.getTag();
+                    animated = true;
+                } else {
+                    eye = new MirrlyPhoneEyeDrawable(18);
+                    cell.setTag(eye);
+                    animated = false;
+                }
+                boolean revealed = item.intValue == 1;
+                eye.setSlashed(revealed, animated);
+                String desc = LocaleController.getString(revealed ? R.string.MirrlyPhoneHideDesc : R.string.MirrlyPhoneShowDesc);
+                cell.setTrailingAction(eye, v -> {
+                    AndroidUtilities.vibrateCursor(v);
+                    if (item.object instanceof Runnable) {
+                        ((Runnable) item.object).run();
+                    }
+                }, desc);
+            } else {
+                cell.setTrailingAction(null, null, null);
+            }
+        }
+
+        @Override
+        public boolean equals(UItem a, UItem b) {
+            return a != null && b != null && a.id == b.id && a.viewType == b.viewType;
+        }
+
+        @Override
+        public boolean contentsEquals(UItem a, UItem b) {
+            return a != null && b != null
+                    && a.id == b.id
+                    && a.checked == b.checked
+                    && a.intValue == b.intValue
+                    && TextUtils.equals(a.text, b.text)
+                    && TextUtils.equals(a.subtext, b.subtext);
+        }
     }
 
     public static class AdminedChannelsFetcher {

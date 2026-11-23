@@ -30,11 +30,13 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
+import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 
 import org.telegram.messenger.AndroidUtilities;
@@ -66,6 +68,8 @@ import org.telegram.ui.ProfileActivity;
 import org.telegram.ui.Stories.StoriesUtilities;
 import org.telegram.ui.TopicsFragment;
 import org.telegram.ui.community.CommunityArrowDrawable;
+import org.telegram.utils.glass.GlassContrastHelper;
+import org.telegram.utils.glass.source.GlassSource;
 
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -115,7 +119,10 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
     private int currentConnectionState;
     private CharSequence lastSubtitle;
     private int lastSubtitleColorKey = -1;
+    private Integer overrideTitleColor;
     private Integer overrideSubtitleColor;
+    private boolean adaptiveContrastApplied;
+    private float lastAdaptiveInvertFactor;
 
     private SharedMediaLayout.SharedMediaPreloader sharedMediaPreloader;
     private Theme.ResourcesProvider resourcesProvider;
@@ -658,11 +665,22 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
 
     public void setTitleColors(int title, int subtitle) {
         // caller-owned colors (re-applied by the caller's theme hook): drop the default-key bindings
+        overrideTitleColor = title;
+        overrideSubtitleColor = subtitle;
         ThemeBind.clear(titleTextView);
         ThemeBind.clear(subtitleTextView);
         titleTextView.setTextColor(title);
-        subtitleTextView.setTextColor(subtitle);
-        subtitleTextView.setTag(subtitle);
+        if (subtitleTextView != null) {
+            subtitleTextView.setTextColor(subtitle);
+            subtitleTextView.setTag(subtitle);
+        } else if (animatedSubtitleTextView != null) {
+            animatedSubtitleTextView.setTextColor(subtitle);
+        }
+        if (adaptiveContrastApplied && lastAdaptiveInvertFactor > 0.001f) {
+            final float factor = lastAdaptiveInvertFactor;
+            lastAdaptiveInvertFactor = -1f;
+            applyAdaptiveGlassContrast(factor);
+        }
     }
 
     @Override
@@ -761,11 +779,141 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
     public void setGlassMode() {
         if (titleTextView != null) {
             titleTextView.setTextSizePx(dp(17.5f));
+            titleTextView.setGlassOpticalHaloEnabled(true);
         }
         if (subtitleTextView != null) {
             subtitleTextView.setTextSizePx(dp(13.5f));
+            subtitleTextView.setGlassOpticalHaloEnabled(true);
+        } else if (animatedSubtitleTextView != null) {
+            GlassContrastHelper.applyOpticalTextHalo(animatedSubtitleTextView.getPaint(), animatedSubtitleTextView.getTextColor(), true);
         }
         glassMode = true;
+    }
+
+    private float lastHaloStrength = 0.55f;
+
+    public void applyAdaptiveGlassContrast(float invertFactor) {
+        applyAdaptiveGlassContrast(invertFactor, invertFactor > 0.001f ? Math.max(0.55f, invertFactor * 0.85f) : (glassMode ? 0.35f : 0f));
+    }
+
+    public void applyAdaptiveGlassContrast(float invertFactor, float haloStrength) {
+        final float clampedHalo = Math.max(0f, Math.min(1f, haloStrength));
+        if (invertFactor <= 0.001f) {
+            if (!adaptiveContrastApplied && Math.abs(lastHaloStrength - clampedHalo) <= 0.02f) {
+                return;
+            }
+            adaptiveContrastApplied = false;
+            lastAdaptiveInvertFactor = 0f;
+            lastHaloStrength = clampedHalo;
+            final int baseTitle = overrideTitleColor != null ? overrideTitleColor : getThemedColor(Theme.key_actionBarDefaultTitle);
+            final int subKey = lastSubtitleColorKey >= 0 ? lastSubtitleColorKey : Theme.key_actionBarDefaultSubtitle;
+            final int baseSubtitle = overrideSubtitleColor != null ? overrideSubtitleColor : getThemedColor(subKey);
+            if (titleTextView != null) {
+                titleTextView.clearAdaptiveHorizontalGradient();
+                titleTextView.setGlassOpticalHaloStrength(clampedHalo);
+                titleTextView.setTextColor(baseTitle);
+                titleTextView.setEmojiColor(baseTitle);
+            }
+            if (subtitleTextView != null) {
+                subtitleTextView.clearAdaptiveHorizontalGradient();
+                subtitleTextView.setGlassOpticalHaloStrength(clampedHalo);
+                subtitleTextView.setTextColor(baseSubtitle);
+            } else if (animatedSubtitleTextView != null) {
+                animatedSubtitleTextView.clearAdaptiveHorizontalGradient();
+                animatedSubtitleTextView.setTextColor(baseSubtitle);
+                GlassContrastHelper.applyOpticalTextHalo(animatedSubtitleTextView.getPaint(), baseSubtitle, clampedHalo);
+                animatedSubtitleTextView.invalidate();
+            }
+            return;
+        }
+
+        if (adaptiveContrastApplied && Math.abs(lastAdaptiveInvertFactor - invertFactor) < 0.005f && Math.abs(lastHaloStrength - clampedHalo) <= 0.02f) {
+            return;
+        }
+        adaptiveContrastApplied = true;
+        lastAdaptiveInvertFactor = invertFactor;
+        lastHaloStrength = clampedHalo;
+
+        final int baseTitle = overrideTitleColor != null ? overrideTitleColor : getThemedColor(Theme.key_actionBarDefaultTitle);
+        final int subKey = lastSubtitleColorKey >= 0 ? lastSubtitleColorKey : Theme.key_actionBarDefaultSubtitle;
+        final int baseSubtitle = overrideSubtitleColor != null ? overrideSubtitleColor : getThemedColor(subKey);
+        final int adaptedTitle = GlassContrastHelper.blendAdaptiveTextColor(baseTitle, invertFactor, false);
+        final int adaptedSubtitle = GlassContrastHelper.blendAdaptiveTextColor(baseSubtitle, invertFactor, true);
+
+        if (titleTextView != null) {
+            titleTextView.setGlassOpticalHaloStrength(Math.max(0.55f, clampedHalo));
+            titleTextView.setTextColor(adaptedTitle);
+            titleTextView.setEmojiColor(adaptedTitle);
+        }
+        if (subtitleTextView != null) {
+            subtitleTextView.setGlassOpticalHaloStrength(Math.max(0.50f, clampedHalo));
+            subtitleTextView.setTextColor(adaptedSubtitle);
+        } else if (animatedSubtitleTextView != null) {
+            animatedSubtitleTextView.setTextColor(adaptedSubtitle);
+            GlassContrastHelper.applyOpticalTextHalo(animatedSubtitleTextView.getPaint(), adaptedSubtitle, Math.max(0.50f, clampedHalo));
+            animatedSubtitleTextView.invalidate();
+        }
+    }
+
+    private final GlassContrastHelper.HorizontalAdaptiveBand titleAdaptiveBand = new GlassContrastHelper.HorizontalAdaptiveBand();
+    private final GlassContrastHelper.HorizontalAdaptiveBand subtitleAdaptiveBand = new GlassContrastHelper.HorizontalAdaptiveBand();
+
+    public void updateSmartAdaptiveGlassContrast(
+            @Nullable ViewGroup sampleTarget,
+            int glassBgColor,
+            @Nullable GlassSource backdropSource,
+            @Nullable Drawable backdropDrawable,
+            int viewportW,
+            int viewportH,
+            float fallbackBgLuma,
+            boolean liquidShaderActive
+    ) {
+        final int baseTitle = overrideTitleColor != null ? overrideTitleColor : getThemedColor(Theme.key_actionBarDefaultTitle);
+        final int subKey = lastSubtitleColorKey >= 0 ? lastSubtitleColorKey : Theme.key_actionBarDefaultSubtitle;
+        final int baseSubtitle = overrideSubtitleColor != null ? overrideSubtitleColor : getThemedColor(subKey);
+
+        if (titleTextView != null && titleTextView.getVisibility() == VISIBLE && titleTextView.getWidth() > 0) {
+            final float tw = Math.max(titleTextView.getTextWidth(), AndroidUtilities.dp(24));
+            final float sx = Math.max(0f, titleTextView.getTextStartX());
+            GlassContrastHelper.computeHorizontalAdaptiveBand(
+                    titleTextView, sampleTarget,
+                    sx, 0f, Math.min(titleTextView.getWidth(), sx + tw), titleTextView.getHeight(),
+                    glassBgColor, baseTitle, backdropSource, backdropDrawable,
+                    viewportW, viewportH, fallbackBgLuma, resourcesProvider,
+                    false, false, liquidShaderActive, titleAdaptiveBand
+            );
+            titleTextView.setGlassOpticalHaloStrength(titleAdaptiveBand.haloStrength);
+            titleTextView.setTextColor(titleAdaptiveBand.solidColor);
+            titleTextView.setEmojiColor(titleAdaptiveBand.solidColor);
+            titleTextView.setAdaptiveHorizontalGradient(titleAdaptiveBand, sx);
+        }
+
+        if (subtitleTextView != null && subtitleTextView.getVisibility() == VISIBLE && subtitleTextView.getWidth() > 0) {
+            final float sw = Math.max(subtitleTextView.getTextWidth(), AndroidUtilities.dp(24));
+            final float sx = Math.max(0f, subtitleTextView.getTextStartX());
+            GlassContrastHelper.computeHorizontalAdaptiveBand(
+                    subtitleTextView, sampleTarget,
+                    sx, 0f, Math.min(subtitleTextView.getWidth(), sx + sw), subtitleTextView.getHeight(),
+                    glassBgColor, baseSubtitle, backdropSource, backdropDrawable,
+                    viewportW, viewportH, fallbackBgLuma, resourcesProvider,
+                    true, false, liquidShaderActive, subtitleAdaptiveBand
+            );
+            subtitleTextView.setGlassOpticalHaloStrength(subtitleAdaptiveBand.haloStrength);
+            subtitleTextView.setTextColor(subtitleAdaptiveBand.solidColor);
+            subtitleTextView.setAdaptiveHorizontalGradient(subtitleAdaptiveBand, sx);
+        } else if (animatedSubtitleTextView != null && animatedSubtitleTextView.getVisibility() == VISIBLE && animatedSubtitleTextView.getWidth() > 0) {
+            final float sw = Math.max(animatedSubtitleTextView.getDrawable().getCurrentWidth(), AndroidUtilities.dp(24));
+            GlassContrastHelper.computeHorizontalAdaptiveBand(
+                    animatedSubtitleTextView, sampleTarget,
+                    0f, 0f, Math.min(animatedSubtitleTextView.getWidth(), sw), animatedSubtitleTextView.getHeight(),
+                    glassBgColor, baseSubtitle, backdropSource, backdropDrawable,
+                    viewportW, viewportH, fallbackBgLuma, resourcesProvider,
+                    true, false, liquidShaderActive, subtitleAdaptiveBand
+            );
+            animatedSubtitleTextView.setTextColor(subtitleAdaptiveBand.solidColor);
+            GlassContrastHelper.applyOpticalTextHalo(animatedSubtitleTextView.getPaint(), subtitleAdaptiveBand.solidColor, subtitleAdaptiveBand.haloStrength);
+            animatedSubtitleTextView.setAdaptiveHorizontalGradient(subtitleAdaptiveBand, 0f);
+        }
     }
 
     @Override
@@ -1307,6 +1455,11 @@ public class ChatAvatarContainer extends FrameLayout implements FactorAnimator.T
             }
         } else {
             lastSubtitle = newSubtitle;
+        }
+        if (adaptiveContrastApplied && lastAdaptiveInvertFactor > 0.001f) {
+            final float factor = lastAdaptiveInvertFactor;
+            lastAdaptiveInvertFactor = -1f;
+            applyAdaptiveGlassContrast(factor);
         }
         checkActionBar(animated);
     }

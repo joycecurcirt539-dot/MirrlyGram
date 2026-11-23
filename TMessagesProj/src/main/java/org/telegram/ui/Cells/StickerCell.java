@@ -36,7 +36,12 @@ import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.messenger.SvgHelper;
 import org.telegram.ui.Components.Premium.PremiumLockIconView;
 
-public class StickerCell extends FrameLayout {
+import java.util.HashSet;
+
+public class StickerCell extends FrameLayout implements Theme.Colorable {
+
+    private static int cachedDarkFallbackColor;
+    private static PorterDuffColorFilter cachedDarkFallbackFilter;
 
     private BackupImageView imageView;
     private TLRPC.Document sticker;
@@ -96,7 +101,7 @@ public class StickerCell extends FrameLayout {
         parentObject = parent;
         isPremiumSticker = MessageObject.isPremiumSticker(document);
         if (isPremiumSticker) {
-            premiumIconView.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+            premiumIconView.setColor(Theme.getColor(Theme.key_windowBackgroundWhite, resourcesProvider));
             premiumIconView.setWaitingImage();
         }
         if (document != null) {
@@ -123,12 +128,68 @@ public class StickerCell extends FrameLayout {
             }
         }
         sticker = document;
-        Drawable background = getBackground();
-        if (background != null) {
-            background.setAlpha(230);
-            ThemeBind.drawableColorFilter(this, background, Theme.key_chat_stickersHintPanel, PorterDuff.Mode.MULTIPLY);
-        }
+        applyHintPanelBackground(this, resourcesProvider);
         updatePremiumStatus(false);
+    }
+
+    @Override
+    protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        updateColors();
+    }
+
+    @Override
+    public void updateColors() {
+        if (isPremiumSticker && premiumIconView != null) {
+            premiumIconView.setColor(Theme.getColor(Theme.key_windowBackgroundWhite, resourcesProvider));
+        }
+        applyHintPanelBackground(this, resourcesProvider);
+    }
+
+    @Override
+    public void addColorKeys(HashSet<Integer> colors) {
+        if (colors != null) {
+            colors.add(Theme.key_windowBackgroundWhite);
+            colors.add(Theme.key_chat_stickersHintPanel);
+            colors.add(Theme.key_actionBarDefaultSubmenuBackground);
+        }
+    }
+
+    static void applyHintPanelBackground(View view, Theme.ResourcesProvider resourcesProvider) {
+        if (view == null) {
+            return;
+        }
+        Drawable background = view.getBackground();
+        if (background == null) {
+            ThemeBind.clear(view);
+            return;
+        }
+        Drawable mutated = background.mutate();
+        if (mutated != background) {
+            int padLeft = view.getPaddingLeft();
+            int padTop = view.getPaddingTop();
+            int padRight = view.getPaddingRight();
+            int padBottom = view.getPaddingBottom();
+            view.setBackground(mutated);
+            view.setPadding(padLeft, padTop, padRight, padBottom);
+            background = mutated;
+        }
+        background.setAlpha(230);
+        int panelColor = Theme.getColor(Theme.key_chat_stickersHintPanel, resourcesProvider);
+        boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
+        if (isDark && AndroidUtilities.computePerceivedBrightness(panelColor) > 0.85f) {
+            ThemeBind.clear(view);
+            int fallback = Theme.getColor(Theme.key_actionBarDefaultSubmenuBackground, resourcesProvider);
+            float lum = AndroidUtilities.computePerceivedBrightness(fallback);
+            int resolved = (lum > 0.02f && lum < 0.5f) ? fallback : 0xFF212121;
+            if (cachedDarkFallbackFilter == null || cachedDarkFallbackColor != resolved) {
+                cachedDarkFallbackColor = resolved;
+                cachedDarkFallbackFilter = new PorterDuffColorFilter(resolved, PorterDuff.Mode.MULTIPLY);
+            }
+            background.setColorFilter(cachedDarkFallbackFilter);
+        } else {
+            ThemeBind.drawableColorFilter(view, background, Theme.key_chat_stickersHintPanel, resourcesProvider, PorterDuff.Mode.MULTIPLY);
+        }
     }
 
     public TLRPC.Document getSticker() {

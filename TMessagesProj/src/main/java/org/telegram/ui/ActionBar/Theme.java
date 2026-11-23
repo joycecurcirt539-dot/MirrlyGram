@@ -5698,6 +5698,52 @@ public class Theme {
         return themesDict.get(key);
     }
 
+    /**
+     * Mirrlygram: registers (or refreshes) a locally generated .attheme file as a regular
+     * custom theme without applying it. Used by the Monet theme generator.
+     */
+    public static ThemeInfo mirrlyRegisterLocalThemeFile(File file, String name) {
+        String path = file.getAbsolutePath();
+        ThemeInfo info = themesDict.get(name);
+        boolean isNewOrMoved = false;
+        if (info == null) {
+            info = new ThemeInfo();
+            info.name = name;
+            info.account = UserConfig.selectedAccount;
+            themes.add(info);
+            otherThemes.add(info);
+            isNewOrMoved = true;
+        } else if (!TextUtils.equals(info.pathToFile, path)) {
+            isNewOrMoved = true;
+        }
+        info.pathToFile = path;
+        info.previewParsed = false;
+        info.isDark = ThemeInfo.UNKNOWN;
+        themesDict.put(info.getKey(), info);
+        if (isNewOrMoved) {
+            saveOtherThemes(true);
+            sortThemes();
+        }
+        return info;
+    }
+
+    public static ThemeInfo mirrlyGetDayTheme() {
+        return currentDayTheme != null ? currentDayTheme : defaultTheme;
+    }
+
+    public static ThemeInfo mirrlyGetDefaultTheme() {
+        return defaultTheme;
+    }
+
+    public static void mirrlySetDayNightThemes(ThemeInfo day, ThemeInfo night) {
+        if (day != null) {
+            currentDayTheme = day;
+        }
+        if (night != null) {
+            currentNightTheme = night;
+        }
+    }
+
     public static void applyTheme(ThemeInfo themeInfo) {
         applyTheme(themeInfo, true, true, false);
     }
@@ -9443,6 +9489,26 @@ public class Theme {
         return isCustomTheme;
     }
 
+    private static Bitmap monetPatternBitmap;
+    private static int monetPatternBitmapW;
+    private static int monetPatternBitmapH;
+
+    public static synchronized Bitmap getOrCreateMonetPatternBitmap(int w, int h) {
+        if (w <= 0 || h <= 0) {
+            return null;
+        }
+        if (monetPatternBitmap != null && !monetPatternBitmap.isRecycled() && monetPatternBitmapW == w && monetPatternBitmapH == h) {
+            return monetPatternBitmap;
+        }
+        Bitmap rendered = SvgHelper.getBitmap(R.raw.default_pattern, w, h, Color.WHITE, 1f, SvgHelper.ScaleMode.ByWidth);
+        if (rendered != null) {
+            monetPatternBitmap = rendered;
+            monetPatternBitmapW = w;
+            monetPatternBitmapH = h;
+        }
+        return monetPatternBitmap;
+    }
+
     public static void reloadWallpaper(boolean async) {
         if (backgroundGradientDisposable != null) {
             backgroundGradientDisposable.dispose();
@@ -9551,7 +9617,13 @@ public class Theme {
         isWallpaperMotion = settings.isWallpaperMotion != null ? settings.isWallpaperMotion : isWallpaperMotion;
         isPatternWallpaper = settings.isPatternWallpaper != null ? settings.isPatternWallpaper : isPatternWallpaper;
         isCustomTheme = settings.isCustomTheme != null ? settings.isCustomTheme : isCustomTheme;
-        patternIntensity = intensity;
+        if (intensity == 0 && Boolean.TRUE.equals(settings.isPatternWallpaper)
+                && org.telegram.messenger.mirrly.MirrlyMonetThemeHelper.isMonetTheme(currentTheme)) {
+            final boolean amoledMonet = currentTheme.isDark() && org.telegram.messenger.mirrly.MirrlyConfig.isMonetAmoled();
+            patternIntensity = amoledMonet ? -52 : (currentTheme.isDark() ? 32 : 38);
+        } else {
+            patternIntensity = intensity;
+        }
         wallpaper = settings.wallpaper != null ? settings.wallpaper : wallpaper;
         Drawable drawable = settings.wallpaper;
         calcBackgroundColor(drawable, 1);
@@ -9676,8 +9748,25 @@ public class Theme {
                                 e.printStackTrace();
                             }
                         }
+                    } else if (currentTheme != null
+                            && org.telegram.messenger.mirrly.MirrlyMonetThemeHelper.isMonetTheme(currentTheme)
+                            && org.telegram.messenger.mirrly.MirrlyConfig.isMonetThemedWallpaper()) {
+                        final int minDim = Math.min(AndroidUtilities.displaySize.x, AndroidUtilities.displaySize.y);
+                        final int maxDim = Math.max(AndroidUtilities.displaySize.x, AndroidUtilities.displaySize.y);
+                        final int w = Math.max(360, Math.min(1080, minDim));
+                        final int h = Math.max(640, Math.min(2400, maxDim));
+                        patternBitmap = getOrCreateMonetPatternBitmap(w, h);
+                        if (intensity == 0) {
+                            final boolean amoledMonet = currentTheme.isDark() && org.telegram.messenger.mirrly.MirrlyConfig.isMonetAmoled();
+                            intensity = amoledMonet ? -52 : (currentTheme.isDark() ? 32 : 38);
+                        }
+                        settings.isPatternWallpaper = true;
+                        settings.isWallpaperMotion = true;
                     }
                     motionBackgroundDrawable.setPatternBitmap(intensity, patternBitmap);
+                    if (patternBitmap != null) {
+                        motionBackgroundDrawable.setPatternColorFilter(motionBackgroundDrawable.getPatternColor());
+                    }
                     motionBackgroundDrawable.setPhase(previousPhase);
                     settings.wallpaper = motionBackgroundDrawable;
                 } else if (gradientToColor1 == 0 || gradientToColor1 == backgroundColor) {

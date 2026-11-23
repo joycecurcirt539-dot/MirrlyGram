@@ -1125,6 +1125,18 @@ public class DeleteMessagesBottomSheet extends BottomSheetWithRecyclerListView {
                 });
             }
         } else {
+            org.telegram.messenger.mirrly.MirrlyDeletedStorage deletedStorage = org.telegram.messenger.mirrly.MirrlyDeletedStorage.getInstance(currentAccount);
+            for (int k = 0; k < messages.size(); k++) {
+                MessageObject msg = messages.get(k);
+                if (msg != null && msg.isMirrlyDeleted()) {
+                    long msgDid = msg.getDialogId();
+                    if (msgDid == 0) {
+                        msgDid = -inChat.id;
+                    }
+                    deletedStorage.markForcePhysicalDelete(msgDid, msg.getId());
+                    deletedStorage.deleteRecordByUid(org.telegram.messenger.mirrly.MirrlyDeletedStorage.buildUid(msgDid, msg.getId()));
+                }
+            }
             if (!supergroupMessageIds.isEmpty()) {
                 MessagesController.getInstance(currentAccount).deleteMessages(supergroupMessageIds, null, null, -inChat.id, topicId, false, mode);
             }

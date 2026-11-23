@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -32,7 +33,16 @@ public final class MirrlyBrandFormatter {
             "MenuTelegramStars",
             "SponsoredMessageAlertLearnMoreUrl",
             "PromoteUrl",
-            "BotDefaultPrivacyPolicy"
+            "BotDefaultPrivacyPolicy",
+            "MirrlyInterfaceQuickCatTelegram",
+            "MirrlyInterfaceQuickCatMirrly",
+            "MirrlyQuickNameSettings",
+            "MirrlyQuickNameMirrlySettings",
+            "MirrlyInterfaceTopSettingsDesc",
+            "MirrlyDrawerItemTgSettings",
+            "MirrlyDrawerItemMirrlySettings",
+            "MirrlyAboutClientDesc",
+            "MirrlyAboutVersionFooter"
     )));
 
     private static final Pattern PROTECTED_PATTERN = Pattern.compile(
@@ -78,7 +88,14 @@ public final class MirrlyBrandFormatter {
     private static final Pattern ARABIC_TELEGRAM = Pattern.compile("تيليجرام");
     private static final Pattern KOREAN_TELEGRAM = Pattern.compile("텔레그램");
 
+    private static final int MAX_CACHE_SIZE = 1024;
+    private static final ConcurrentHashMap<String, String> FORMAT_CACHE = new ConcurrentHashMap<>(256);
+
     private MirrlyBrandFormatter() {
+    }
+
+    public static void clearCache() {
+        FORMAT_CACHE.clear();
     }
 
     public static boolean isExcludedKey(String key) {
@@ -92,29 +109,62 @@ public final class MirrlyBrandFormatter {
         if (value == null || value.isEmpty() || isExcludedKey(key)) {
             return value;
         }
-        if (!containsBrandCandidate(value)) {
+        final boolean cacheable = value.length() <= 512;
+        if (cacheable) {
+            String cached = FORMAT_CACHE.get(value);
+            if (cached != null) {
+                return cached;
+            }
+        }
+        if (!containsBrandCandidateFast(value)) {
+            if (cacheable) {
+                putCache(value, value);
+            }
             return value;
         }
 
         Matcher matcher = PROTECTED_PATTERN.matcher(value);
+        final String formatted;
         if (!matcher.find()) {
-            return replaceUnprotected(value);
-        }
+            formatted = replaceUnprotected(value);
+        } else {
+            StringBuilder out = new StringBuilder(value.length());
+            int lastEnd = 0;
+            do {
+                if (matcher.start() > lastEnd) {
+                    out.append(replaceUnprotected(value.substring(lastEnd, matcher.start())));
+                }
+                out.append(matcher.group());
+                lastEnd = matcher.end();
+            } while (matcher.find());
 
-        StringBuilder out = new StringBuilder(value.length());
-        int lastEnd = 0;
-        do {
-            if (matcher.start() > lastEnd) {
-                out.append(replaceUnprotected(value.substring(lastEnd, matcher.start())));
+            if (lastEnd < value.length()) {
+                out.append(replaceUnprotected(value.substring(lastEnd)));
             }
-            out.append(matcher.group());
-            lastEnd = matcher.end();
-        } while (matcher.find());
-
-        if (lastEnd < value.length()) {
-            out.append(replaceUnprotected(value.substring(lastEnd)));
+            formatted = out.toString();
         }
-        return out.toString();
+        if (cacheable) {
+            putCache(value, formatted);
+        }
+        return formatted;
+    }
+
+    private static void putCache(String key, String value) {
+        if (FORMAT_CACHE.size() >= MAX_CACHE_SIZE) {
+            FORMAT_CACHE.clear();
+        }
+        FORMAT_CACHE.put(key, value);
+    }
+
+    private static boolean containsBrandCandidateFast(String value) {
+        int len = value.length();
+        for (int i = 0; i < len; i++) {
+            char c = value.charAt(i);
+            if (c == 'T' || c == 'M' || c == '\u0422' || c == '\u062A' || c == '\uD154') {
+                return containsBrandCandidate(value);
+            }
+        }
+        return false;
     }
 
     private static boolean containsBrandCandidate(String value) {

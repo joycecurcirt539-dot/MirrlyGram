@@ -9,6 +9,7 @@ import android.util.SparseArray;
 
 import androidx.annotation.Nullable;
 
+import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildConfig;
 
 import me.vkryl.core.reference.ReferenceList;
@@ -31,6 +32,9 @@ public final class Choreographer60FpsContent implements Choreographer.FrameCallb
 
     /** Duration of one target frame in nanoseconds (~16.67 ms). */
     private static final long FRAME_INTERVAL_NS = 1_000_000_000L / TARGET_FPS;
+
+    /** Jitter tolerance so high-refresh displays slightly early on VSync don't skip to 30fps. */
+    private static final long VSYNC_JITTER_TOLERANCE_NS = 2_000_000L;
 
     /** Fixed schedules indexed by fps - 1. */
     private static final long[] FRAME_MASKS = buildFrameMasks();
@@ -71,6 +75,12 @@ public final class Choreographer60FpsContent implements Choreographer.FrameCallb
     /** Current tick in the repeating 60-tick cycle; also used for legacy 30fps drawables. */
     private int mCounter;
 
+    /** Whether a frame callback is currently queued with {@link #mChoreographer}. */
+    private boolean mScheduled;
+
+    /** True while {@link #doFrame(long)} is executing on the UI thread to prevent duplicate posts. */
+    private boolean mInDoFrame;
+
     // ── Public interface ──────────────────────────────────────────────────────
 
     /** Callback interface, mirrors {@link Choreographer.FrameCallback}. */
@@ -86,16 +96,19 @@ public final class Choreographer60FpsContent implements Choreographer.FrameCallb
     public void postInvalidateDrawable(Drawable drawable) {
         checkMainThread();
         mDrawablesToInvalidate.add(drawable);
+        ensureScheduled();
     }
 
     public void postInvalidateDrawable30fps(Drawable drawable) {
         checkMainThread();
         mDrawablesToInvalidate30fps.add(drawable);
+        ensureScheduled();
     }
 
     public void postInvalidateView(View view) {
         checkMainThread();
         mViewsToInvalidate.add(view);
+        ensureScheduled();
     }
 
     /**
@@ -124,6 +137,7 @@ public final class Choreographer60FpsContent implements Choreographer.FrameCallb
             group.runnableCallbacksOnce = new ReferenceList<>();
         }
         group.runnableCallbacksOnce.add(callback);
+        ensureScheduled();
     }
 
 
@@ -141,6 +155,7 @@ public final class Choreographer60FpsContent implements Choreographer.FrameCallb
         fps = Math.max(1, Math.min(fps, TARGET_FPS));
         removeFrameCallback(callback); // remove from any existing group first
         getOrCreateGroup(fps).runnableCallbacks.add(callback);
+        ensureScheduled();
     }
 
     /**
@@ -158,6 +173,7 @@ public final class Choreographer60FpsContent implements Choreographer.FrameCallb
         fps = Math.max(1, Math.min(fps, TARGET_FPS));
         removeFrameCallback(callback); // remove from any existing group first
         getOrCreateGroup(fps).callbacks.add(callback);
+        ensureScheduled();
     }
 
     /**
@@ -210,24 +226,76 @@ public final class Choreographer60FpsContent implements Choreographer.FrameCallb
     // ── Private implementation ────────────────────────────────────────────────
 
     private Choreographer60FpsContent() {
+    }
+
+    private void ensureScheduled() {
+        if (mInDoFrame || mScheduled) {
+            return;
+        }
+        mScheduled = true;
+        mLastVsyncNs = 0;
+        mAccumulatedNs = 0;
         mChoreographer.postFrameCallback(this);
+    }
+
+    private boolean hasPendingWork() {
+        if (!mViewsToInvalidate.isEmpty()
+                || !mDrawablesToInvalidate.isEmpty()
+                || !mDrawablesToInvalidate30fps.isEmpty()) {
+            return true;
+        }
+        for (int i = 0; i < mGroups.size(); i++) {
+            CallbackGroup group = mGroups.valueAt(i);
+            if (!group.callbacks.isEmpty()
+                    || !group.runnableCallbacks.isEmpty()
+                    || (group.runnableCallbacksOnce != null && !group.runnableCallbacksOnce.isEmpty())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override
     public void doFrame(long frameTimeNanos) {
-        if (mLastVsyncNs == 0) {
-            mLastVsyncNs = frameTimeNanos;
-        } else {
-            mAccumulatedNs += frameTimeNanos - mLastVsyncNs;
-            mLastVsyncNs    = frameTimeNanos;
-
-            if (mAccumulatedNs >= FRAME_INTERVAL_NS) {
-                mAccumulatedNs %= FRAME_INTERVAL_NS;
-                dispatchFrame(frameTimeNanos);
+        mScheduled = false;
+        mInDoFrame = true;
+        try {
+            if (!hasPendingWork()) {
+                mLastVsyncNs = 0;
+                mAccumulatedNs = 0;
+                return;
             }
+            if (AndroidUtilities.screenRefreshRate <= 62.5f) {
+                mAccumulatedNs = 0;
+                mLastVsyncNs = frameTimeNanos;
+                dispatchFrame(frameTimeNanos);
+            } else {
+                if (mLastVsyncNs == 0) {
+                    mLastVsyncNs = frameTimeNanos;
+                } else {
+                    final long dt = Math.max(0L, frameTimeNanos - mLastVsyncNs);
+                    mAccumulatedNs += dt;
+                    mLastVsyncNs = frameTimeNanos;
+
+                    if (mAccumulatedNs >= FRAME_INTERVAL_NS - VSYNC_JITTER_TOLERANCE_NS) {
+                        mAccumulatedNs = mAccumulatedNs >= FRAME_INTERVAL_NS
+                                ? mAccumulatedNs % FRAME_INTERVAL_NS
+                                : 0L;
+                        dispatchFrame(frameTimeNanos);
+                    }
+                }
+            }
+        } finally {
+            mInDoFrame = false;
         }
 
-        mChoreographer.postFrameCallback(this);
+        if (!mScheduled && hasPendingWork()) {
+            mScheduled = true;
+            mChoreographer.postFrameCallback(this);
+        } else if (!mScheduled) {
+            mLastVsyncNs = 0;
+            mAccumulatedNs = 0;
+        }
     }
 
     private void dispatchFrame(long frameTimeNanos) {

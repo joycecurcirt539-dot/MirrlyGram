@@ -110,7 +110,7 @@ public class Switch extends View implements Theme.Colorable {
         paint2.setStrokeCap(Paint.Cap.ROUND);
         paint2.setStrokeWidth(AndroidUtilities.dp(2));
 
-        setHapticFeedbackEnabled(true);
+        org.telegram.messenger.mirrly.MirrlyHaptics.setHapticFeedbackEnabled(this, true);
     }
 
     @Keep
@@ -565,5 +565,21 @@ public class Switch extends View implements Theme.Colorable {
         info.setCheckable(true);
         info.setChecked(isChecked);
         //info.setContentDescription(isChecked ? LocaleController.getString(R.string.NotificationsOn) : LocaleController.getString(R.string.NotificationsOff));
+    }
+
+    @Override
+    public boolean performHapticFeedback(int feedbackConstant) {
+        if (org.telegram.messenger.mirrly.MirrlyHaptics.isDisabled()) {
+            return false;
+        }
+        return super.performHapticFeedback(feedbackConstant);
+    }
+
+    @Override
+    public boolean performHapticFeedback(int feedbackConstant, int flags) {
+        if (org.telegram.messenger.mirrly.MirrlyHaptics.isDisabled()) {
+            return false;
+        }
+        return super.performHapticFeedback(feedbackConstant, flags);
     }
 }

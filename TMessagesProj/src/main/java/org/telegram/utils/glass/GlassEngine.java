@@ -14,6 +14,8 @@ import androidx.recyclerview.widget.RecyclerView;
 import androidx.viewpager.widget.ViewPager;
 
 import org.telegram.messenger.LiteMode;
+import org.telegram.messenger.MessagesController;
+import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.postdrawcompat.OnPostDrawListener;
 import org.telegram.messenger.postdrawcompat.ViewOnPostDrawListener;
 import org.telegram.ui.ActionBar.Theme;
@@ -272,6 +274,7 @@ public class GlassEngine {
     private int onDrawUpdateFlags;
 
     private void onDraw() {
+        checkGlassSettings();
         int flags = 0;
         if (lastGlassSettingsGenerationId != glassSettingsGenerationId) {
             lastGlassSettingsGenerationId = glassSettingsGenerationId;
@@ -374,10 +377,13 @@ public class GlassEngine {
                 || BitwiseUtils.hasFlag(flags, FLAG_INVALIDATED_SCROLL_EDGES);
 
             Trace.beginSection("G.UpdateDisplayLists");
+            final long glassStartNs = System.nanoTime();
+            int rebuiltGlassCount = 0;
             for (int a = 0, N = viewPositionStates.size(); a < N; a++) {
                 final ViewPositionState state = viewPositionStates.get(a);
                 if (state.visible && (state.invalidated || invalidateAll || invalidateScroll)) {
                     state.invalidated = false;
+                    rebuiltGlassCount++;
                     if (state.drawable.shouldHaveDisplayList()) {
                         state.drawable.buildDisplayList();
                     } else {
@@ -385,6 +391,15 @@ public class GlassEngine {
                         state.view.invalidate();
                     }
                 }
+            }
+            if (rebuiltGlassCount > 0) {
+                final GlassSettings gs = glassSettings;
+                org.telegram.messenger.mirrly.MirrlyPowerTelemetry.recordGlassRebuild(
+                        rebuiltGlassCount,
+                        System.nanoTime() - glassStartNs,
+                        gs != null && gs.isLiquidGlassEnabled,
+                        gs != null && gs.isLiquidGlassEverywhere
+                );
             }
             Trace.endSection();
         }
@@ -602,17 +617,57 @@ public class GlassEngine {
     private static int glassSettingsGenerationId;
 
     private static void checkGlassSettings() {
-        final boolean isBlurEnabled = LiteMode.isEnabled(LiteMode.FLAG_CHAT_BLUR);
+        boolean isBlurEnabled = LiteMode.isEnabled(LiteMode.FLAG_CHAT_BLUR);
+        if (isBlurEnabled) {
+            try {
+                final boolean isDark = Theme.isCurrentThemeDark();
+                final MessagesController mc = MessagesController.getInstance(UserConfig.selectedAccount);
+                if (mc != null && mc.config != null) {
+                    if (isDark ? mc.config.disableBlurInDarkTheme.get() : mc.config.disableBlurInLightTheme.get()) {
+                        isBlurEnabled = false;
+                    }
+                }
+            } catch (Throwable ignore) {
+            }
+        }
         final boolean isLiquidGlassEnabled = LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS);
+        final boolean isLiquidGlassEverywhere = org.telegram.messenger.mirrly.MirrlyConfig.isLiquidGlassEverywhere();
+        final float blurScale = org.telegram.messenger.mirrly.MirrlyConfig.getGlassBlurScale();
+        final float opacityScale = org.telegram.messenger.mirrly.MirrlyConfig.getGlassOpacityScale();
+        final float saturationScale = org.telegram.messenger.mirrly.MirrlyConfig.getGlassSaturationScale();
+        final float refractScale = org.telegram.messenger.mirrly.MirrlyConfig.getGlassRefractScale();
+        final int thicknessDp = org.telegram.messenger.mirrly.MirrlyConfig.getGlassThicknessDp();
+        final float rimScale = org.telegram.messenger.mirrly.MirrlyConfig.getGlassRimScale();
 
         final boolean glassSettingsInvalidated = glassSettings == null
             || glassSettings.isBlurEnabled != isBlurEnabled
-            || glassSettings.isLiquidGlassEnabled != isLiquidGlassEnabled;
+            || glassSettings.isLiquidGlassEnabled != isLiquidGlassEnabled
+            || glassSettings.isLiquidGlassEverywhere != isLiquidGlassEverywhere
+            || Math.abs(glassSettings.blurScale - blurScale) > 0.001f
+            || Math.abs(glassSettings.opacityScale - opacityScale) > 0.001f
+            || Math.abs(glassSettings.saturationScale - saturationScale) > 0.001f
+            || Math.abs(glassSettings.refractScale - refractScale) > 0.001f
+            || glassSettings.thicknessDp != thicknessDp
+            || Math.abs(glassSettings.rimScale - rimScale) > 0.001f;
 
         if (glassSettingsInvalidated) {
-            glassSettings = new GlassSettings(isBlurEnabled, isLiquidGlassEnabled);
+            glassSettings = new GlassSettings(
+                    isBlurEnabled,
+                    isLiquidGlassEnabled,
+                    isLiquidGlassEverywhere,
+                    blurScale,
+                    opacityScale,
+                    saturationScale,
+                    refractScale,
+                    thicknessDp,
+                    rimScale
+            );
             glassSettingsGenerationId++;
         }
+    }
+
+    public static void notifyGlassSettingsChanged() {
+        checkGlassSettings();
     }
 
     public static GlassSettings getCurrentGlassSettings() {

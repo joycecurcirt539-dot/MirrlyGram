@@ -433,11 +433,11 @@ public class PieChartView extends StackLinearChartView<PieChartViewData> {
 
     public void updatePicker(ChartData chartData, long d) {
         int n = chartData.x.length;
-        long startOfDay = d - d % 86400000L;
+        long target = (chartData.timeStep > 0 && chartData.timeStep < 86400000L) ? d : (d - d % 86400000L);
         int startIndex = 0;
 
         for (int i = 0; i < n; i++) {
-            if (startOfDay >= chartData.x[i]) startIndex = i;
+            if (target >= chartData.x[i]) startIndex = i;
         }
 
         float p;

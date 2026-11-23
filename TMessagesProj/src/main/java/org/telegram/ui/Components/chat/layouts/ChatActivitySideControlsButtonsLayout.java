@@ -101,11 +101,53 @@ public class ChatActivitySideControlsButtonsLayout extends FrameLayout implement
         return false;
     }
 
+    private final float[] buttonAdaptiveFactors = new float[BUTTONS_COUNT];
+
     public void updateColors() {
-        for (ButtonHolder holder : buttonHolders) {
+        for (int i = 0; i < buttonHolders.length; i++) {
+            final ButtonHolder holder = buttonHolders[i];
             if (holder != null) {
                 holder.button.updateColors();
+                holder.button.applyAdaptiveGlassContrast(buttonAdaptiveFactors[i]);
             }
+        }
+    }
+
+    public void updateAdaptiveGlassContrast(
+            @Nullable android.view.ViewGroup container,
+            float fallbackBgLuma,
+            @Nullable Theme.ResourcesProvider resourcesProvider,
+            boolean liquidShaderActive
+    ) {
+        updateSmartAdaptiveGlassContrast(container, null, null, 0, 0, fallbackBgLuma, resourcesProvider, liquidShaderActive);
+    }
+
+    public void updateSmartAdaptiveGlassContrast(
+            @Nullable android.view.ViewGroup container,
+            @Nullable org.telegram.utils.glass.source.GlassSource backdropSource,
+            @Nullable android.graphics.drawable.Drawable backdropDrawable,
+            int viewportW,
+            int viewportH,
+            float fallbackBgLuma,
+            @Nullable Theme.ResourcesProvider resourcesProvider,
+            boolean liquidShaderActive
+    ) {
+        final int baseBgColor = colorProvider != null ? colorProvider.getBackgroundColor() : 0xD8FFFFFF;
+        final int baseIcon = Theme.getColor(Theme.key_glass_defaultIcon, resourcesProvider);
+        for (int i = 0; i < buttonHolders.length; i++) {
+            final ButtonHolder holder = buttonHolders[i];
+            if (holder == null || holder.button == null || holder.button.getVisibility() != VISIBLE || holder.button.getAlpha() <= 0.05f) {
+                continue;
+            }
+            final ChatActivityBlurredRoundPageDownButton btn = holder.button;
+            if (btn.getWidth() <= 0 || btn.getHeight() <= 0) {
+                continue;
+            }
+            final int adapted = org.telegram.utils.glass.GlassContrastHelper.estimateIconAdaptiveColor(
+                    btn, container, baseBgColor, baseIcon,
+                    backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma,
+                    resourcesProvider, false, liquidShaderActive);
+            btn.applyAdaptiveIconColor(adapted);
         }
     }
 

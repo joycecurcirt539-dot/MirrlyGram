@@ -28,6 +28,7 @@ import androidx.annotation.RequiresApi;
 import androidx.core.graphics.ColorUtils;
 import androidx.core.math.MathUtils;
 
+import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.utils.RadiiUtils;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.blur3.Blur3HashImpl;
@@ -380,19 +381,30 @@ public class BlurredBackgroundDrawable extends GlassDrawable implements Theme.Co
         return this;
     }
 
+    private static int scaleRimColor(int color, float rimScale) {
+        if (color == 0 || Math.abs(rimScale - 1.0f) < 0.001f) {
+            return color;
+        }
+        final int alpha = Math.max(0, Math.min(255, Math.round(Color.alpha(color) * rimScale)));
+        return (color & 0x00FFFFFF) | (alpha << 24);
+    }
+
     private GlassRim getRim() {
         if (rim != null) {
             return rim;
         }
         if (rimFromColors == null) {
+            final float rimScale = getGlassSettings().rimScale;
+            final int scaledTop = scaleRimColor(strokeColorTop, rimScale);
+            final int scaledBottom = scaleRimColor(strokeColorBottom, rimScale);
             rimFromColors = evenRim
                 ? GlassRim.evenOf(
-                    boundProps.strokeWidthTop, strokeColorTop,
-                    boundProps.strokeWidthBottom, strokeColorBottom,
+                    boundProps.strokeWidthTop, scaledTop,
+                    boundProps.strokeWidthBottom, scaledBottom,
                     outlineWidth, outlineColor)
                 : GlassRim.of(lightAngle,
-                    boundProps.strokeWidthTop, strokeColorTop,
-                    boundProps.strokeWidthBottom, strokeColorBottom,
+                    boundProps.strokeWidthTop, scaledTop,
+                    boundProps.strokeWidthBottom, scaledBottom,
                     outlineWidth, outlineColor);
         }
         return rimFromColors;
@@ -727,18 +739,32 @@ public class BlurredBackgroundDrawable extends GlassDrawable implements Theme.Co
     /* Liquid glass and the glass settings */
 
     private boolean liquidGlassEffectAllowed;
+    private boolean excludeFromGlobalLiquidGlass;
     private int glassSettingsGeneration = GlassEngine.getGlassSettingsGenerationId();
 
     /** The screen wants the liquid glass here: it is drawn while the glass settings have it on (Android 13+). */
     public void setLiquidGlassEffectAllowed() {
-        if (!liquidGlassEffectAllowed) {
-            liquidGlassEffectAllowed = true;
+        setLiquidGlassEffectAllowed(true);
+    }
+
+    public void setLiquidGlassEffectAllowed(boolean allowed) {
+        if (liquidGlassEffectAllowed != allowed) {
+            liquidGlassEffectAllowed = allowed;
+            implInvalidated = true;
+        }
+    }
+
+    public void setExcludeFromGlobalLiquidGlass(boolean exclude) {
+        if (this.excludeFromGlobalLiquidGlass != exclude) {
+            this.excludeFromGlobalLiquidGlass = exclude;
             implInvalidated = true;
         }
     }
 
     private boolean isLiquidGlassEffectEnabled() {
-        return liquidGlassEffectAllowed && getGlassSettings().isLiquidGlassEnabled && Build.VERSION.SDK_INT >= 33;
+        final GlassSettings gs = getGlassSettings();
+        final boolean allowed = liquidGlassEffectAllowed || (gs.isLiquidGlassEverywhere && !excludeFromGlobalLiquidGlass);
+        return allowed && gs.isLiquidGlassEnabled && Build.VERSION.SDK_INT >= 33;
     }
 
     private GlassSource pickSource() {
@@ -751,17 +777,22 @@ public class BlurredBackgroundDrawable extends GlassDrawable implements Theme.Co
     @Override
     protected void onGlassSettingsChanged(GlassSettings glassSettings) {
         implInvalidated = true;
+        rimFromColors = null;
         // the tint depends on them too
         updateColors();
+        if (renderNodeImpl != null) {
+            renderNodeImpl.invalidate();
+        }
         invalidateSelf();
     }
 
     /** Drawables drawn by hand are not reached by the engine: they see a change of the settings when drawn. */
     private void checkGlassSettings() {
+        final GlassSettings current = GlassEngine.getCurrentGlassSettings();
         final int generation = GlassEngine.getGlassSettingsGenerationId();
         if (glassSettingsGeneration != generation) {
             glassSettingsGeneration = generation;
-            setGlassSettings(GlassEngine.getCurrentGlassSettings());
+            setGlassSettings(current);
         }
     }
 
@@ -867,8 +898,16 @@ public class BlurredBackgroundDrawable extends GlassDrawable implements Theme.Co
             resolvedOpaque = opaque;
 
             final Impl newImpl;
+            // Do not force RenderNode/1x AGSL shader onto bitmap sources via global isLiquidGlassEverywhere;
+            // only opt-in drawables on high-tier devices may promote GlassSourceBitmap to RenderNode.
+            final boolean useRenderNodeForBitmap = unwrapped instanceof GlassSourceBitmap
+                    && liquidGlassEffectAllowed
+                    && getGlassSettings().isLiquidGlassEnabled
+                    && Build.VERSION.SDK_INT >= 33
+                    && SharedConfig.getDevicePerformanceClass() >= SharedConfig.PERFORMANCE_CLASS_HIGH;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && source instanceof BlurredBackgroundDrawableViewFactory.DrawableOwner
-                    && !(unwrapped instanceof GlassSourceColor) && !(unwrapped instanceof GlassSourceBitmap)) {
+                    && !(unwrapped instanceof GlassSourceColor)
+                    && (!(unwrapped instanceof GlassSourceBitmap) || useRenderNodeForBitmap)) {
                 // the source records into its drawables and tells them when to record again
                 if (renderNodeImpl == null) {
                     renderNodeImpl = createRenderNodeImpl();
@@ -1260,8 +1299,12 @@ public class BlurredBackgroundDrawable extends GlassDrawable implements Theme.Co
 
             if (liquidGlassEffect != null && Build.VERSION.SDK_INT >= 33) {
                 final RectF body = boundProps.body;
+                final GlassSettings gs = getGlassSettings();
+                final int baseThickness = boundProps.liquidThickness <= 0
+                    ? dp(gs.thicknessDp)
+                    : Math.round(boundProps.liquidThickness * (gs.thicknessDp / 11f));
                 final int thickness = Math.max(Math.min(
-                    boundProps.liquidThickness <= 0 ? dp(11) : boundProps.liquidThickness,
+                    baseThickness,
                     (int) (Math.min(body.width(), body.height()) / 5)), 1);
 
                 if (boundProps.hasArrow()) {
@@ -1281,7 +1324,7 @@ public class BlurredBackgroundDrawable extends GlassDrawable implements Theme.Co
                     body.left - b.left, body.top - b.top,
                     boundProps.shaderRadii[0], boundProps.shaderRadii[2], boundProps.shaderRadii[4], boundProps.shaderRadii[6],
                     thickness,
-                    boundProps.liquidIntensity,
+                    boundProps.liquidIntensity * gs.refractScale,
                     boundProps.liquidIndex,
                     backgroundColor,
                     originX - sL, originY - sT,

@@ -343,6 +343,7 @@ public class SuggestEmojiView extends FrameLayout implements NotificationCenter.
                 }
             });
         }
+        updateColors();
     }
 
     public void setDelegate(AnchorViewDelegate delegate) {
@@ -379,14 +380,20 @@ public class SuggestEmojiView extends FrameLayout implements NotificationCenter.
     private PorterDuffColorFilter gradientFilter;
     private int gradientFilterColor;
 
-    @Override
-    public void updateColors() {
-        if (backgroundPaint != null) {
-            backgroundPaint.setColor(Theme.getColor(Theme.key_chat_stickersHintPanel, resourcesProvider));
+    private int resolvePanelColor() {
+        final int panelColor = Theme.getColor(Theme.key_chat_stickersHintPanel, resourcesProvider);
+        final boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
+        if (isDark && AndroidUtilities.computePerceivedBrightness(panelColor) > 0.85f) {
+            final int fallback = Theme.getColor(Theme.key_actionBarDefaultSubmenuBackground, resourcesProvider);
+            final float lum = AndroidUtilities.computePerceivedBrightness(fallback);
+            return (lum > 0.02f && lum < 0.5f) ? fallback : 0xFF212121;
         }
-        final int gradientColor = Theme.getColor(Theme.key_chat_stickersHintPanel, resourcesProvider);
-        if (gradientFilter == null || gradientFilterColor != gradientColor) {
-            gradientFilter = new PorterDuffColorFilter(gradientFilterColor = gradientColor, PorterDuff.Mode.MULTIPLY);
+        return panelColor;
+    }
+
+    private void applyGradientFilter(int panelColor) {
+        if (gradientFilter == null || gradientFilterColor != panelColor) {
+            gradientFilter = new PorterDuffColorFilter(gradientFilterColor = panelColor, PorterDuff.Mode.MULTIPLY);
         }
         // the gradient drawables are shared: set the filter again only when someone else changed it
         if (Theme.chat_gradientLeftDrawable != null && Theme.chat_gradientLeftDrawable.getColorFilter() != gradientFilter) {
@@ -394,6 +401,18 @@ public class SuggestEmojiView extends FrameLayout implements NotificationCenter.
         }
         if (Theme.chat_gradientRightDrawable != null && Theme.chat_gradientRightDrawable.getColorFilter() != gradientFilter) {
             Theme.chat_gradientRightDrawable.setColorFilter(gradientFilter);
+        }
+    }
+
+    @Override
+    public void updateColors() {
+        final int panelColor = resolvePanelColor();
+        if (backgroundPaint != null) {
+            backgroundPaint.setColor(panelColor);
+        }
+        applyGradientFilter(panelColor);
+        if (listView != null) {
+            ThemeBind.update(listView);
         }
         if (containerView != null) {
             containerView.invalidate();
@@ -857,12 +876,16 @@ public class SuggestEmojiView extends FrameLayout implements NotificationCenter.
         }
         path.close();
 
+        final int panelColor = resolvePanelColor();
         if (backgroundPaint == null) {
             backgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
             backgroundPaint.setPathEffect(new CornerPathEffect(AndroidUtilities.dp(2)));
             backgroundPaint.setShadowLayer(AndroidUtilities.dp(4.33f), 0, AndroidUtilities.dp(1 / 3f), 0x33000000);
-            backgroundPaint.setColor(Theme.getColor(Theme.key_chat_stickersHintPanel, resourcesProvider));
         }
+        if (backgroundPaint.getColor() != panelColor) {
+            backgroundPaint.setColor(panelColor);
+        }
+        applyGradientFilter(panelColor);
 
         if (showT1 < 1) {
             circlePath.rewind();
@@ -898,14 +921,17 @@ public class SuggestEmojiView extends FrameLayout implements NotificationCenter.
         float bottom = listView.getBottom();
 
         float leftAlpha = leftGradientAlpha.set(listView.canScrollHorizontally(-1) ? 1f : 0f);
-        if (leftAlpha > 0) {
+        float rightAlpha = rightGradientAlpha.set(listView.canScrollHorizontally(1) ? 1f : 0f);
+        if (leftAlpha > 0 || rightAlpha > 0) {
+            applyGradientFilter(resolvePanelColor());
+        }
+        if (leftAlpha > 0 && Theme.chat_gradientRightDrawable != null) {
             Theme.chat_gradientRightDrawable.setBounds((int) left, (int) top, (int) left + AndroidUtilities.dp(32), (int) bottom);
             Theme.chat_gradientRightDrawable.setAlpha((int) (255 * leftAlpha));
             Theme.chat_gradientRightDrawable.draw(canvas);
         }
 
-        float rightAlpha = rightGradientAlpha.set(listView.canScrollHorizontally(1) ? 1f : 0f);
-        if (rightAlpha > 0) {
+        if (rightAlpha > 0 && Theme.chat_gradientLeftDrawable != null) {
             Theme.chat_gradientLeftDrawable.setBounds((int) right - AndroidUtilities.dp(32), (int) top, (int) right, (int) bottom);
             Theme.chat_gradientLeftDrawable.setAlpha((int) (255 * rightAlpha));
             Theme.chat_gradientLeftDrawable.draw(canvas);
@@ -954,6 +980,7 @@ public class SuggestEmojiView extends FrameLayout implements NotificationCenter.
         super.onAttachedToWindow();
         NotificationCenter.getGlobalInstance().addWeakObserver(this, NotificationCenter.emojiLoaded);
         NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.newEmojiSuggestionsAvailable);
+        updateColors();
     }
 
     @Override

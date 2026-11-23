@@ -26,7 +26,11 @@ import org.telegram.ui.Components.CombinedDrawable;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.StorageDiagramView;
+import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
+import org.telegram.ui.Components.blur3.utils.Blur3Utils;
 import org.telegram.ui.Storage.CacheModel;
+import org.telegram.utils.glass.BaseFragmentSimpleGlass;
+import org.telegram.utils.glass.GlassEngine;
 
 public class DialogCacheBottomSheet extends BottomSheetWithRecyclerListView {
 
@@ -39,6 +43,9 @@ public class DialogCacheBottomSheet extends BottomSheetWithRecyclerListView {
 
     LinearLayout linearLayout;
     CachedMediaLayout cachedMediaLayout;
+    FrameLayout tabsContainer;
+    private final GlassEngine sheetGlassEngine = new GlassEngine();
+    private BaseFragmentSimpleGlass sheetSimpleGlass;
     long dialogId;
 
     private final CacheModel cacheModel;
@@ -222,13 +229,22 @@ public class DialogCacheBottomSheet extends BottomSheetWithRecyclerListView {
             lastCreatedCheckbox.setNeedDivider(false);
         }
         circleDiagramView.setData(cacheModel, clearViewData);
-        cachedMediaLayout = new CachedMediaLayout(getContext(), baseFragment, null) {
+        sheetSimpleGlass = new BaseFragmentSimpleGlass(sheetGlassEngine, () -> Theme.getColor(Theme.key_dialogBackground, resourcesProvider));
+        cachedMediaLayout = new CachedMediaLayout(getContext(), baseFragment, sheetGlassEngine) {
             @Override
             protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
                 super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(contentHeight - ActionBar.getCurrentActionBarHeight() - AndroidUtilities.statusBarHeight, MeasureSpec.EXACTLY));
             }
         };
-        cachedMediaLayout.setListPadding(0, AndroidUtilities.dp(80));
+        cachedMediaLayout.setListPadding(AndroidUtilities.dp(56), AndroidUtilities.dp(80));
+        tabsContainer = cachedMediaLayout.takeTabsContainer();
+        tabsContainer.setBackground(sheetSimpleGlass.factory
+                .create(tabsContainer)
+                .setColorProvider(BlurredBackgroundProviderImpl.simpleActionBar(resourcesProvider))
+                .setPadding(AndroidUtilities.dp(9.66f))
+                .setRadius(AndroidUtilities.dp(18)));
+        cachedMediaLayout.addView(tabsContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP, -4, 0, -4, 0));
+        tabsContainer.bringToFront();
         cachedMediaLayout.setCacheModel(cacheModel);
         cachedMediaLayout.setDelegate(new CachedMediaLayout.Delegate() {
             @Override
@@ -291,6 +307,23 @@ public class DialogCacheBottomSheet extends BottomSheetWithRecyclerListView {
     @Override
     public void onViewCreated(FrameLayout containerView) {
         super.onViewCreated(containerView);
+        sheetGlassEngine.setRoot(containerView);
+        sheetGlassEngine.addScrolledView(recyclerListView);
+        if (sheetSimpleGlass != null) {
+            sheetSimpleGlass.setViews(containerView, null, resourcesProvider);
+            sheetSimpleGlass.setCapture((canvas, position) -> {
+                if (cachedMediaLayout != null && cachedMediaLayout.viewPagerFixed != null) {
+                    View[] pages = cachedMediaLayout.viewPagerFixed.getViewPages();
+                    if (pages != null) {
+                        for (View page : pages) {
+                            if (page instanceof RecyclerListView && page.getVisibility() == View.VISIBLE) {
+                                Blur3Utils.captureRelativeParent((RecyclerListView) page, canvas, position, page, containerView);
+                            }
+                        }
+                    }
+                }
+            });
+        }
         recyclerListView.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {

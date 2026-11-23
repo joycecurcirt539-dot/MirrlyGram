@@ -36,6 +36,7 @@ import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.XiaomiUtilities;
+import org.telegram.messenger.mirrly.MirrlyConfig;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.tgnet.tl.TL_phone;
@@ -342,7 +343,7 @@ public class VoIPPreNotificationService { // } extends Service implements AudioM
                 } else {
                     vibrate = prefs.getInt("vibrate_calls", 0);
                 }
-                if ((vibrate != 2 && vibrate != 4 && (am.getRingerMode() == AudioManager.RINGER_MODE_VIBRATE || am.getRingerMode() == AudioManager.RINGER_MODE_NORMAL)) || (vibrate == 4 && am.getRingerMode() == AudioManager.RINGER_MODE_VIBRATE)) {
+                if (!MirrlyConfig.isDisableAllVibrations() && ((vibrate != 2 && vibrate != 4 && (am.getRingerMode() == AudioManager.RINGER_MODE_VIBRATE || am.getRingerMode() == AudioManager.RINGER_MODE_NORMAL)) || (vibrate == 4 && am.getRingerMode() == AudioManager.RINGER_MODE_VIBRATE))) {
                     vibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
                     long duration = 700;
                     if (vibrate == 1) {

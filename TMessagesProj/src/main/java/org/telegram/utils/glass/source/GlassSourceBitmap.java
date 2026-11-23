@@ -10,8 +10,13 @@ import android.graphics.Shader;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
+import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 
-public final class GlassSourceBitmap implements GlassSource {
+import me.vkryl.core.reference.ReferenceList;
+
+
+public final class GlassSourceBitmap implements GlassSource, BlurredBackgroundDrawableViewFactory.DrawableOwner {
     private final Paint bitmapPaint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
     private final Matrix bitmapMatrix = new Matrix();
     private @Nullable BitmapShader bitmapShader;
@@ -36,10 +41,12 @@ public final class GlassSourceBitmap implements GlassSource {
             bitmapPaint.setShader(bitmapShader);
             updateMatrix();
         }
+        invalidateDisplayListForDrawables();
     }
 
     public void setMatrix(Matrix matrix) {
         bitmapMatrix.set(matrix);
+        invalidateDisplayListForDrawables();
     }
 
     public Matrix getMatrix() {
@@ -91,6 +98,7 @@ public final class GlassSourceBitmap implements GlassSource {
     public void endRecording() {
         setBitmap(bitmapInternal);
         bitmapInternal = null;
+        invalidateDisplayListForDrawables();
     }
 
     public boolean inRecording() {
@@ -121,6 +129,7 @@ public final class GlassSourceBitmap implements GlassSource {
         buildCenterCropMatrix(bitmapMatrix,
             bitmap.getWidth(), bitmap.getHeight(),
             parentWidth, parentHeight, actionBarHeight);
+        invalidateDisplayListForDrawables();
     }
 
     private static void buildCenterCropMatrix(
@@ -150,5 +159,25 @@ public final class GlassSourceBitmap implements GlassSource {
 
         m.setScale(scale, scale);
         m.postTranslate(dx, dy + parentPaddingTop);
+    }
+
+    private final ReferenceList<BlurredBackgroundDrawable> drawables = new ReferenceList<>();
+
+    public void invalidateDisplayListForDrawables() {
+        for (BlurredBackgroundDrawable d : drawables) {
+            d.invalidateDisplayList();
+        }
+    }
+
+    @Override
+    public BlurredBackgroundDrawable createDrawable() {
+        final BlurredBackgroundDrawable d = new BlurredBackgroundDrawable(this);
+        attachDrawable(d);
+        return d;
+    }
+
+    @Override
+    public void attachDrawable(BlurredBackgroundDrawable drawable) {
+        drawables.add(drawable);
     }
 }

@@ -150,7 +150,9 @@ public class ProfileActionsView extends View {
 
     private void drawGlass(Canvas canvas, RectF rect, float radius, float alpha) {
         if (glassUsed == glass.size()) {
-            glass.add(glassFactory.create(this, ProfileButtonsGlass.NO_COLORS).setRadius(radius));
+            final BlurredBackgroundDrawable d = glassFactory.create(this, ProfileButtonsGlass.NO_COLORS).setRadius(radius);
+            d.setStrokeWidth(dpf2(0.55f), dpf2(0.55f));
+            glass.add(d);
         }
         final BlurredBackgroundDrawable drawable = glass.get(glassUsed++);
         drawable.setBounds((int) rect.left, (int) rect.top, (int) Math.ceil(rect.right), (int) Math.ceil(rect.bottom));
@@ -364,6 +366,8 @@ public class ProfileActionsView extends View {
 
     private int lastColorFilterColor;
     private ColorFilter lastColorFilter;
+    private int lastHaloTextColor;
+    private boolean lastHaloGlassActive;
 
     private void drawAction(Canvas canvas, Action action, float fraction, float alpha) {
         if (action == null || action.isDeleted) {
@@ -378,6 +382,16 @@ public class ProfileActionsView extends View {
         if (lastColorFilter == null || lastColorFilterColor != textColor) {
             lastColorFilterColor = textColor;
             lastColorFilter = new PorterDuffColorFilter(textColor, PorterDuff.Mode.SRC_IN);
+        }
+        final boolean glassActive = glassFactory != null;
+        if (lastHaloGlassActive != glassActive || lastHaloTextColor != textColor) {
+            lastHaloGlassActive = glassActive;
+            lastHaloTextColor = textColor;
+            org.telegram.utils.glass.GlassContrastHelper.applyOpticalTextHalo(
+                    action.text.paint,
+                    textColor,
+                    glassActive ? 0.45f : 0f
+            );
         }
 
         canvas.save();

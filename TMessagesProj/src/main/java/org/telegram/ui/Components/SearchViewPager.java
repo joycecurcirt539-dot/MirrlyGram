@@ -265,6 +265,7 @@ public class SearchViewPager extends ViewPagerFixed implements FilteredSearchVie
                     .setGravity(LocaleController.isRTL ? Gravity.LEFT : Gravity.RIGHT)
                     .setOnTopOfScrim()
                     .setDrawScrim(false)
+                    .setBlur(true)
                     .show();
             }
         };

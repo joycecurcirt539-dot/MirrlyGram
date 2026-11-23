@@ -1,6 +1,8 @@
 package org.telegram.plugin
 
 import com.android.build.api.artifact.SingleArtifact
+import com.android.build.api.instrumentation.FramesComputationMode
+import com.android.build.api.instrumentation.InstrumentationScope
 import com.android.build.api.variant.AndroidComponentsExtension
 import com.android.build.api.variant.ApplicationVariant
 import com.android.build.gradle.internal.res.LinkApplicationAndroidResourcesTask
@@ -20,6 +22,12 @@ class TelegramBuildAppPlugin : Plugin<Project> {
 
         androidComponents.onVariants { variant ->
             val suffix = variant.name.replaceFirstChar { it.uppercase() }
+
+            variant.instrumentation.transformClassesWith(
+                MirrlyVibrationAsmFactory::class.java,
+                InstrumentationScope.ALL
+            ) {}
+            variant.instrumentation.setAsmFramesComputationMode(FramesComputationMode.COPY_FRAMES)
 
             val task = project.tasks.register<TelegramStringsTask>(
                 "generate${suffix}TelegramStrings"

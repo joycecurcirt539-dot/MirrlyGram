@@ -96,7 +96,7 @@ public class BaseFragmentSimpleGlass {
             factory.setLiquidGlassEffectAllowed(true);
 
             menuGlassSource = new GlassSourceCrossfade(glassBackgroundSourceRenderNode, frostedSourceRenderNode);
-            frostedFactory = new BlurredBackgroundDrawableViewFactory(frostedSourceRenderNode, frostedSourceRenderNode, glassBackgroundSourceColor);
+            frostedFactory = new BlurredBackgroundDrawableViewFactory(glassBackgroundSourceRenderNode, frostedSourceRenderNode, glassBackgroundSourceColor);
             frostedFactory.setGlassEngine(glassEngine);
             menuFactory = new BlurredBackgroundDrawableViewFactory(menuGlassSource, frostedSourceRenderNode, glassBackgroundSourceColor);
             menuFactory.setGlassEngine(glassEngine);
@@ -288,7 +288,9 @@ public class BaseFragmentSimpleGlass {
         }
 
 
-        if (BitwiseUtils.hasFlag(flags, GlassEngine.FLAG_INVALIDATED_POSITIONS) || BitwiseUtils.hasFlag(flags, GlassEngine.FLAG_INVALIDATED_SCROLL_EDGES)) {
+        if (BitwiseUtils.hasFlag(flags, GlassEngine.FLAG_INVALIDATED_POSITIONS)
+                || BitwiseUtils.hasFlag(flags, GlassEngine.FLAG_INVALIDATED_SCROLL_EDGES)
+                || BitwiseUtils.hasFlag(flags, GlassEngine.FLAG_INVALIDATED_LITE_MODE)) {
             GlassPositionsArray glassPositionsArray = glassEngine.getAllVisibleDrawablesWithDisplayListPositionsMerged();
             if (clipView != null) {
                 glassPositionsArray.clip(0, clipView.getY(), contentView.getWidth(), clipView.getY() + clipView.getHeight());

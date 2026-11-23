@@ -12,25 +12,33 @@ import android.view.View;
 import androidx.annotation.NonNull;
 import androidx.core.graphics.ColorUtils;
 
+import org.telegram.messenger.mirrly.MirrlyConfig;
+
 public class DialogsActivityTopBubblesFadeView extends View {
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Matrix matrix = new Matrix();
     private Shader shader;
     private int lastColor;
+    private boolean lastLiquid;
 
     public DialogsActivityTopBubblesFadeView(Context context) {
         super(context);
     }
 
     public void setColor(int color) {
-        if (lastColor != color) {
+        final boolean liquid = MirrlyConfig.isGlassLiquidEnabled();
+        if (lastColor != color || lastLiquid != liquid || shader == null) {
             lastColor = color;
+            lastLiquid = liquid;
 
             final int alpha = Color.alpha(color);
+            final int a0 = liquid ? 0x96 : 0xE8;
+            final int a1 = liquid ? 0x6E : 0xC0;
+            final int a2 = liquid ? 0x3C : 0x90;
             shader = new LinearGradient(0, 0, 0, 1, new int[]{
-                    ColorUtils.setAlphaComponent(color, 0xE8 * alpha / 255),
-                    ColorUtils.setAlphaComponent(color, 0xC0 * alpha / 255),
-                    ColorUtils.setAlphaComponent(color, 0x90 * alpha / 255),
+                    ColorUtils.setAlphaComponent(color, a0 * alpha / 255),
+                    ColorUtils.setAlphaComponent(color, a1 * alpha / 255),
+                    ColorUtils.setAlphaComponent(color, a2 * alpha / 255),
                     ColorUtils.setAlphaComponent(color, 0)
             }, null, Shader.TileMode.CLAMP);
             paint.setShader(shader);
@@ -58,6 +66,9 @@ public class DialogsActivityTopBubblesFadeView extends View {
 
     @Override
     protected void onDraw(@NonNull Canvas canvas) {
+        if (lastLiquid != MirrlyConfig.isGlassLiquidEnabled()) {
+            setColor(lastColor);
+        }
         canvas.drawRect(0, 0, getMeasuredWidth(), fadeStart + fadeHeight, paint);
     }
 }

@@ -20,6 +20,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 
+import org.telegram.messenger.BuildConfig;
 import org.telegram.messenger.utils.RenderNodeEffects;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.blur3.capture.IBlur3Capture;
@@ -182,23 +183,25 @@ public class GlassCaptureSourceCanvas {
             position.capture(capture, frostedFilteredRequested, rootView.getWidth(), rootView.getHeight());
         }
 
-        debugRenderNode.setPosition(0, 0, rootView.getWidth(), rootView.getHeight());
-        final RecordingCanvas recordingCanvas = debugRenderNode.beginRecording();
-        for (int a = 0; a < positionsCount; a++) {
-            final Position position = positions.get(a);
-            recordingCanvas.save();
-            recordingCanvas.clipRect(position.originalPosition);
-            recordingCanvas.translate(
-                    position.normalizedPositionGlassWithOffset.left,
-                    position.normalizedPositionGlassWithOffset.top);
-            recordingCanvas.scale(position.glassDownsample, position.glassDownsample);
-            recordingCanvas.drawRenderNode(position.renderNode);
-            recordingCanvas.restore();
-            recordingCanvas.drawRect(position.originalPosition, Theme.DEBUG_GREEN_STROKE);
-            recordingCanvas.drawRect(
-                    position.normalizedPositionGlassWithOffset, Theme.DEBUG_RED_STROKE);
+        if (BuildConfig.DEBUG_PRIVATE_VERSION) {
+            debugRenderNode.setPosition(0, 0, rootView.getWidth(), rootView.getHeight());
+            final RecordingCanvas recordingCanvas = debugRenderNode.beginRecording();
+            for (int a = 0; a < positionsCount; a++) {
+                final Position position = positions.get(a);
+                recordingCanvas.save();
+                recordingCanvas.clipRect(position.originalPosition);
+                recordingCanvas.translate(
+                        position.normalizedPositionGlassWithOffset.left,
+                        position.normalizedPositionGlassWithOffset.top);
+                recordingCanvas.scale(position.glassDownsample, position.glassDownsample);
+                recordingCanvas.drawRenderNode(position.renderNode);
+                recordingCanvas.restore();
+                recordingCanvas.drawRect(position.originalPosition, Theme.DEBUG_GREEN_STROKE);
+                recordingCanvas.drawRect(
+                        position.normalizedPositionGlassWithOffset, Theme.DEBUG_RED_STROKE);
+            }
+            debugRenderNode.endRecording();
         }
-        debugRenderNode.endRecording();
     }
 
 
@@ -372,7 +375,7 @@ public class GlassCaptureSourceCanvas {
             renderNode = new RenderNode("cap-" + index);
             renderNode.setUseCompositingLayer(true, null);
             renderNodeGlass = new RenderNode("glass-" + index);
-            renderNodeGlass.setRenderEffect(RenderNodeEffects.getSaturationX3RenderEffect());
+            renderNodeGlass.setRenderEffect(RenderNodeEffects.getConfiguredSaturationRenderEffect());
             renderNodeGlassFrosted = new RenderNode("glass-frosted-" + index);
             renderNodeFiltered = new RenderNode("filtered-" + index);
             renderNodeFiltered.setRenderEffect(RenderEffect.createColorFilterEffect(IDENTITY_FILTER));
@@ -411,6 +414,7 @@ public class GlassCaptureSourceCanvas {
 
         private float glassRadius;
         private float frostedGlassRadius;
+        private int lastGlassGeneration = -1;
 
         private int glassOffsetX, glassOffsetY;
         private int frostedGlassOffsetX, frostedGlassOffsetY;
@@ -420,22 +424,37 @@ public class GlassCaptureSourceCanvas {
                 int frostedGlassDownsample,
                 int normalizationDownsample
         ) {
-            if (this.glassDownsample != glassDownsample) {
+            final int currentGen = GlassEngine.getGlassSettingsGenerationId();
+            final boolean glassChanged = lastGlassGeneration != currentGen;
+            if (this.glassDownsample != glassDownsample || glassChanged) {
                 this.glassDownsample = glassDownsample;
-                glassRadius = blurRadiusForDownsample(dpf2(7), glassDownsample);
+                final float blurScale = Math.max(0.25f, Math.min(1.45f, GlassEngine.getCurrentGlassSettings().blurScale));
+                glassRadius = blurRadiusForDownsample(Math.max(0.5f, dpf2(7) * blurScale), Math.max(1, glassDownsample));
                 renderNode.setRenderEffect(RenderEffect.createBlurEffect(
                         glassRadius, glassRadius, Shader.TileMode.CLAMP));
             }
-            if (this.frostedGlassDownsample != frostedGlassDownsample) {
+            if (this.frostedGlassDownsample != frostedGlassDownsample || glassChanged) {
                 this.frostedGlassDownsample = frostedGlassDownsample;
+                final float blurScale = Math.max(0.25f, Math.min(1.45f, GlassEngine.getCurrentGlassSettings().blurScale));
                 frostedGlassRadius = blurRadiusForDownsample(
-                        dpf2(36), frostedGlassDownsample);
+                        Math.max(1.0f, dpf2(36) * blurScale), Math.max(1, frostedGlassDownsample));
                 renderNodeGlassFrosted.setRenderEffect(RenderEffect.createBlurEffect(
                         frostedGlassRadius, frostedGlassRadius, Shader.TileMode.CLAMP));
                 renderNodeFrostedFiltered.setRenderEffect(RenderEffect.createBlurEffect(
                         frostedGlassRadius, frostedGlassRadius, Shader.TileMode.CLAMP));
             }
+            if (glassChanged) {
+                renderNodeGlass.setRenderEffect(RenderNodeEffects.getConfiguredSaturationRenderEffect());
+                lastGlassGeneration = currentGen;
+            }
             this.normalizationDownsample = normalizationDownsample;
+        }
+
+        private void syncGlassEffectsIfNeeded() {
+            GlassEngine.getCurrentGlassSettings();
+            if (lastGlassGeneration != GlassEngine.getGlassSettingsGenerationId() && glassDownsample > 0 && frostedGlassDownsample > 0) {
+                setDownsamples(glassDownsample, frostedGlassDownsample, normalizationDownsample);
+            }
         }
 
         public void setFilteredColorFilter(@Nullable ColorFilter colorFilter) {
@@ -464,6 +483,7 @@ public class GlassCaptureSourceCanvas {
         }
 
         public void capture(IBlur3Capture capture, boolean frostedFiltered, int rootWidth, int rootHeight) {
+            syncGlassEffectsIfNeeded();
             final int padding = blurPadding(glassRadius, glassDownsample)
                     + blurPadding(frostedGlassRadius, frostedGlassDownsample)
                     + normalizationDownsample / 2 + 1;

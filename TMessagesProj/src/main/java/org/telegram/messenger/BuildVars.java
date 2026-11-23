@@ -38,7 +38,10 @@ public class BuildVars {
     public static String HUAWEI_APP_ID = "101184875";
 
     // You can use this flag to disable Google Play Billing (If you're making fork and want it to be in Google Play)
-    public static boolean IS_BILLING_UNAVAILABLE = true;
+    public static boolean IS_BILLING_UNAVAILABLE = false;
+
+    // Route purchases through Telegram's direct invoice / @PremiumBot flow outside Google Play
+    public static boolean FORCE_INVOICE_BILLING = true;
 
     // works only on official app ids, disable on your forks
     public static boolean SUPPORTS_PASSKEYS = false;
@@ -63,7 +66,7 @@ public class BuildVars {
     }
 
     public static boolean useInvoiceBilling() {
-        return BillingController.billingClientEmpty || DEBUG_VERSION && false || ApplicationLoader.isStandaloneBuild() || isBetaApp() && false || isHuaweiStoreApp() || hasDirectCurrency();
+        return FORCE_INVOICE_BILLING || BillingController.billingClientEmpty || DEBUG_VERSION && false || ApplicationLoader.isStandaloneBuild() || isBetaApp() && false || isHuaweiStoreApp() || hasDirectCurrency();
     }
 
     private static boolean hasDirectCurrency() {

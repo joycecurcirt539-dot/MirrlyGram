@@ -5,12 +5,16 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Rect;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.core.math.MathUtils;
+import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
@@ -30,6 +34,9 @@ import org.telegram.ui.Components.UItem;
 import org.telegram.ui.Components.UniversalAdapter;
 import org.telegram.ui.Components.UniversalRecyclerView;
 import org.telegram.ui.Components.WallpaperParallaxEffect;
+import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundProvider;
+import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
+import org.telegram.utils.glass.GlassContrastHelper;
 
 import java.util.ArrayList;
 
@@ -48,6 +55,18 @@ public abstract class MirrlyBaseSettingsFragment extends BaseFragment {
     private boolean actionBarTitleVisible = false;
     private float actionBarTitleFactor = 0f;
     private ValueAnimator actionBarTitleAnimator;
+    private BlurredBackgroundProvider adaptiveBarColors;
+    private final Rect adaptiveBackZoneRect = new Rect();
+    private final Rect adaptiveTitleZoneRect = new Rect();
+    private final Rect adaptiveMenuZoneRect = new Rect();
+    private long lastAdaptiveSampleMs;
+    private float adaptiveBackTarget, adaptiveTitleTarget, adaptiveMenuTarget;
+    private float adaptiveBackFactor, adaptiveTitleFactor, adaptiveMenuFactor;
+    private boolean adaptiveTickPosted;
+    private final Runnable adaptiveTickRunnable = () -> {
+        adaptiveTickPosted = false;
+        updateSimpleActionBarAdaptiveContrast(false);
+    };
 
     @Override
     protected boolean useSimpleActionBar() {
@@ -95,7 +114,9 @@ public abstract class MirrlyBaseSettingsFragment extends BaseFragment {
             @Override
             protected void dispatchDraw(Canvas canvas) {
                 super.dispatchDraw(canvas);
-                glassEngine.invalidate();
+                if (!isPaused) {
+                    glassEngine.invalidate();
+                }
             }
 
             @Override
@@ -139,6 +160,7 @@ public abstract class MirrlyBaseSettingsFragment extends BaseFragment {
 
     @Override
     public void onFragmentDestroy() {
+        cancelAdaptiveTick();
         if (actionBarTitleAnimator != null) {
             actionBarTitleAnimator.cancel();
             actionBarTitleAnimator = null;
@@ -263,12 +285,19 @@ public abstract class MirrlyBaseSettingsFragment extends BaseFragment {
             setSections();
             setSectionsDrawBackground(true);
             setClipToPadding(false);
-            glassEngine.addScrolledView(this);
+            if (getItemAnimator() instanceof DefaultItemAnimator) {
+                DefaultItemAnimator anim = (DefaultItemAnimator) getItemAnimator();
+                anim.setDurations(350);
+                anim.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
+                anim.setDelayAnimations(false);
+                anim.setSupportsChangeAnimations(false);
+            }
 
             addOnScrollListener(new RecyclerView.OnScrollListener() {
                 @Override
                 public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
                     updateActionBarVisible(true);
+                    updateSimpleActionBarAdaptiveContrast(false);
                     if (Math.abs(dy) >= dp(5)) {
                         for (int i = 0, count = getChildCount(); i < count; i++) {
                             View child = getChildAt(i);
@@ -279,6 +308,12 @@ public abstract class MirrlyBaseSettingsFragment extends BaseFragment {
                     }
                 }
             });
+        }
+
+        @Override
+        protected void onLayout(boolean changed, int l, int t, int r, int b) {
+            super.onLayout(changed, l, t, r, b);
+            updateSimpleActionBarAdaptiveContrast(false);
         }
 
         @Override
@@ -295,5 +330,57 @@ public abstract class MirrlyBaseSettingsFragment extends BaseFragment {
         public BaseFragment getMirrlyHeroHost() {
             return MirrlyBaseSettingsFragment.this;
         }
+    }
+
+    private void cancelAdaptiveTick() {
+        if (adaptiveTickPosted && contentView != null) {
+            contentView.removeCallbacks(adaptiveTickRunnable);
+        }
+        adaptiveTickPosted = false;
+    }
+
+    private void updateSimpleActionBarAdaptiveContrast(boolean forceSample) {
+        if (simpleActionBar == null || listView == null || contentView == null) {
+            return;
+        }
+        if (!BlurredBackgroundProviderImpl.checkBlurEnabled(currentAccount, getResourceProvider())) {
+            if (adaptiveBackFactor > 0.001f || adaptiveTitleFactor > 0.001f || adaptiveMenuFactor > 0.001f) {
+                adaptiveBackTarget = adaptiveTitleTarget = adaptiveMenuTarget = 0f;
+                adaptiveBackFactor = adaptiveTitleFactor = adaptiveMenuFactor = 0f;
+                simpleActionBar.applyAdaptiveGlassContrast(0f);
+            }
+            return;
+        }
+
+        final long now = SystemClock.uptimeMillis();
+        if (forceSample || (now - lastAdaptiveSampleMs >= 20L)) {
+            lastAdaptiveSampleMs = now;
+            if (adaptiveBarColors == null) {
+                adaptiveBarColors = BlurredBackgroundProviderImpl.simpleActionBar(getResourceProvider());
+            }
+            final int glassBg = adaptiveBarColors.getBackgroundColor();
+            final float backdropLuma = GlassContrastHelper.computeLuminance(Theme.getColor(Theme.key_windowBackgroundGray, getResourceProvider()));
+            final boolean liquidActive = org.telegram.messenger.mirrly.MirrlyConfig.isGlassLiquidEnabled();
+
+            simpleActionBar.updateSmartAdaptiveGlassContrast(
+                    listView,
+                    glassBg,
+                    null,
+                    null,
+                    contentView.getWidth(),
+                    contentView.getHeight(),
+                    backdropLuma,
+                    liquidActive,
+                    false
+            );
+        }
+    }
+
+    private static float stepAdaptiveFactor(float current, float target, float step) {
+        final float next = current + (target - current) * step;
+        if (Math.abs(target - next) < 0.008f) {
+            return target;
+        }
+        return MathUtils.clamp(next, 0f, 1f);
     }
 }

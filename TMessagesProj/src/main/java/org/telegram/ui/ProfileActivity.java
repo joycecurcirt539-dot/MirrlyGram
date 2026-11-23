@@ -123,6 +123,7 @@ import org.telegram.ui.Components.ScrimOptions;
 import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundColorProvider;
 import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundProvider;
 import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
+import org.telegram.utils.glass.GlassContrastHelper;
 import org.telegram.utils.glass.source.GlassSourceBitmap;
 import org.telegram.ui.Components.blur3.utils.Blur3Utils;
 import org.telegram.ui.Wallet.WalletSendEnterAmount;
@@ -169,6 +170,8 @@ import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
 import org.telegram.messenger.browser.Browser;
+import org.telegram.messenger.mirrly.MirrlyInterfaceConfig;
+import org.telegram.messenger.mirrly.MirrlyPhonePrivacyManager;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.SerializedData;
 import org.telegram.tgnet.TLObject;
@@ -254,6 +257,7 @@ import org.telegram.ui.Components.InstantCameraView;
 import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.JoinGroupAlert;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.MirrlyPhoneEyeDrawable;
 import org.telegram.ui.Components.LinkSpanDrawable;
 import org.telegram.ui.Components.MediaActivity;
 import org.telegram.ui.Components.MessagePrivateSeenView;
@@ -614,6 +618,8 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
     private final static int enable_no_forwards = 46;
     private final static int disable_no_forwards = 47;
     private final static int send_money = 48;
+    private final static int local_phone_rule = 49;
+    private final static int datacenter_status = 50;
 
     private Rect rect = new Rect();
 
@@ -761,6 +767,8 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
     private long reportReactionFromDialogId = 0;
 
     private boolean isFragmentPhoneNumber;
+    private boolean phoneTempRevealed = false;
+    private MirrlyPhoneEyeDrawable phoneEyeDrawable;
 
     private boolean showAddToContacts;
     private String vcardPhone;
@@ -886,6 +894,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
     private ButtonWithCounterView[] bottomButton;
     private Runnable applyBulletin;
     private FrameLayout bottomButton2Container;
+    private View bottomButton2Shadow;
     private ButtonWithCounterView bottomButton2;
 
     public static ProfileActivity of(long dialogId) {
@@ -2137,6 +2146,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             getNotificationCenter().addWeakObserver(this, NotificationCenter.userInfoDidLoad);
             getNotificationCenter().addWeakObserver(this, NotificationCenter.privacyRulesUpdated);
             NotificationCenter.getGlobalInstance().addWeakObserver(this, NotificationCenter.reloadInterface);
+            NotificationCenter.getGlobalInstance().addWeakObserver(this, NotificationCenter.mirrlyPhonePrivacyChanged);
 
             userBlocked = getMessagesController().blockePeers.indexOfKey(userId) >= 0;
             if (user.bot) {
@@ -2244,6 +2254,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         getNotificationCenter().addWeakObserver(this, NotificationCenter.profileMusicUpdated);
         getNotificationCenter().addWeakObserver(this, NotificationCenter.updatedChatRanks);
         NotificationCenter.getGlobalInstance().addWeakObserver(this, NotificationCenter.emojiLoaded);
+        NotificationCenter.getGlobalInstance().addWeakObserver(this, NotificationCenter.mirrlyBottomBarConfigChanged);
         updateRowsIds();
         if (listAdapter != null) {
             listAdapter.notifyDataSetChanged();
@@ -2303,10 +2314,15 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
 
         setActionsMode();
 
-        additionNavigationBarHeight = hasMainTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS) : 0;
-        additionFloatingButtonOffset = hasMainTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN) : 0;
+        updateMainTabsOffsets();
 
         return true;
+    }
+
+    private void updateMainTabsOffsets() {
+        final boolean showTabs = hasMainTabs && !MirrlyInterfaceConfig.isBottomBarCompletelyHidden();
+        additionNavigationBarHeight = showTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS) : 0;
+        additionFloatingButtonOffset = showTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN) : 0;
     }
 
     private void setActionsMode() {
@@ -2362,6 +2378,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
 
     @Override
     public void onFragmentDestroy() {
+        cancelProfileAdaptiveTick();
         super.onFragmentDestroy();
         if (sharedMediaLayout != null) {
             sharedMediaLayout.onDestroy();
@@ -2388,11 +2405,13 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         getNotificationCenter().removeObserver(this, NotificationCenter.botStarsUpdated);
         getNotificationCenter().removeObserver(this, NotificationCenter.botStarsTransactionsLoaded);
         getNotificationCenter().removeObserver(this, NotificationCenter.dialogDeleted);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.mirrlyPhonePrivacyChanged);
         getNotificationCenter().removeObserver(this, NotificationCenter.channelRecommendationsLoaded);
         getNotificationCenter().removeObserver(this, NotificationCenter.starUserGiftsLoaded);
         getNotificationCenter().removeObserver(this, NotificationCenter.profileMusicUpdated);
         getNotificationCenter().removeObserver(this, NotificationCenter.updatedChatRanks);
         NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.emojiLoaded);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.mirrlyBottomBarConfigChanged);
         if (avatarsViewPager != null) {
             avatarsViewPager.onDestroy();
         }
@@ -2588,6 +2607,29 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                     Bundle args = new Bundle();
                     args.putLong("user_id", userId);
                     presentFragment(new ContactAddActivity(args, resourcesProvider));
+                } else if (id == local_phone_rule) {
+                    TLRPC.User user = getMessagesController().getUser(userId);
+                    MirrlyPhonePrivacySheets.showPeerRuleSheet(
+                            ProfileActivity.this,
+                            resourcesProvider,
+                            currentAccount,
+                            user,
+                            userId,
+                            null,
+                            () -> {
+                                phoneTempRevealed = false;
+                                updateRowsIds();
+                                if (listAdapter != null) {
+                                    listAdapter.notifyDataSetChanged();
+                                }
+                                createActionBarMenu(true);
+                            }
+                    );
+                } else if (id == datacenter_status) {
+                    int dc = resolveProfileDatacenterId();
+                    if (dc > 0) {
+                        presentFragment(new MirrlyDatacenterActivity(dc));
+                    }
                 } else if (id == delete_contact) {
                     final TLRPC.User user = getMessagesController().getUser(userId);
                     if (user == null || getParentActivity() == null) {
@@ -3124,6 +3166,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                         avatarsViewPager.resetCurrentItem();
                         avatarsViewPager.setVisibility(View.VISIBLE);
                         if (showStatusButton != null) {
+                            showStatusButton.setGlassRim(buttonsGlass != null && BlurredBackgroundProviderImpl.checkBlurEnabled(currentAccount, resourcesProvider));
                             showStatusButton.setBackgroundColor(0x23ffffff);
                         }
                         if (storyView != null) {
@@ -3817,6 +3860,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             }
         };
         sharedMediaLayout.setLayoutParams(new RecyclerView.LayoutParams(RecyclerView.LayoutParams.MATCH_PARENT, RecyclerView.LayoutParams.MATCH_PARENT));
+        sharedMediaLayout.setOnMediaScrolledCallback(() -> updateProfileSimpleHeaderAdaptiveContrast(false));
 //        sharedMediaLayout.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
         if (userId == 0 || imageUpdater == null || myProfile) {
             musicView = new ProfileMusicView(context, resourcesProvider);
@@ -4637,6 +4681,8 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                 }
             } else if (position == noteRow) {
                 editNotes(view, position);
+            } else if (position == phoneRow) {
+                onPhoneRowTap(view, x, y);
             } else {
                 processOnClickOrPress(position, view, x, y);
             }
@@ -5023,6 +5069,8 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                 } else if (position == noteRow) {
                     editNotes(view, position);
                     return true;
+                } else if (position == phoneRow || position == numberRow) {
+                    return onPhoneRowLongPress(view, position);
                 } else {
                     if (editRow(view, position)) return true;
                     return processOnClickOrPress(position, view, view.getWidth() / 2f, (int) (view.getHeight() * .75f));
@@ -5636,6 +5684,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             writeButton.setVisibility(View.GONE);
         }
         writeButtonSetBackground();
+        updateBottomButton2Glass();
         if (userId != 0) {
             if (imageUpdater != null) {
                 cameraDrawable = new RLottieDrawable(R.raw.camera_outline, AndroidUtilities.dp(56), AndroidUtilities.dp(56), false, null);
@@ -5718,6 +5767,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                 }
                 sharedMediaLayout.setPinnedToTop(sharedMediaLayout.getY() <= 0);
                 updateBottomButtonY();
+                updateProfileSimpleHeaderAdaptiveContrast(false);
             }
         });
 
@@ -5876,19 +5926,21 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         }
 
         bottomButton2Container = new FrameLayout(context);
-        ThemeBind.backgroundColor(bottomButton2Container, Theme.key_windowBackgroundWhite, resourcesProvider);
         View buttonShadow = new View(context);
+        bottomButton2Shadow = buttonShadow;
         ThemeBind.backgroundColor(buttonShadow, Theme.key_divider, resourcesProvider);
         bottomButton2Container.addView(buttonShadow, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 1.0f / AndroidUtilities.density, Gravity.TOP | Gravity.FILL_HORIZONTAL, 0, 0, 0, 0));
         bottomButton2 = new ButtonWithCounterView(context, resourcesProvider);
+        bottomButton2.setRoundRadius(dp(16));
         bottomButton2.setText(getString(R.string.Save), false);
-        bottomButton2Container.addView(bottomButton2, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, Gravity.FILL, 10, 10 + (1.0f / AndroidUtilities.density), 10, 10));
+        bottomButton2Container.addView(bottomButton2, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48, Gravity.FILL, 14, 14, 14, 14));
         bottomButton2.setOnClickListener(v -> {
             stopTabsReorder();
         });
         bottomButton2Container.setVisibility(View.GONE);
         bottomButton2Container.setTranslationY(dp(69));
         contentView.addView(bottomButton2Container, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM | Gravity.FILL_HORIZONTAL));
+        updateBottomButton2Glass();
 
         // the glass of the header's buttons is over the colored header and the avatar as well
         // only the images of the header: its texts (the name, the status) and buttons are over the glass, not under it
@@ -6069,6 +6121,138 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         if (lastHeaderGlassColor != glassColor) {
             lastHeaderGlassColor = glassColor;
             simpleActionBar.updateButtonsGlassColors();
+        }
+        updateShowStatusButtonGlass();
+        updateProfileSimpleHeaderAdaptiveContrast(false);
+    }
+
+    private final Rect profileBackZoneRect = new Rect();
+    private final Rect profileTitleZoneRect = new Rect();
+    private final Rect profileMenuZoneRect = new Rect();
+    private long lastProfileAdaptiveSampleMs;
+    private float profileBackTarget, profileTitleTarget, profileMenuTarget;
+    private float profileBackFactor, profileTitleFactor, profileMenuFactor;
+    private boolean profileAdaptiveTickPosted;
+    private final Runnable profileAdaptiveTickRunnable = () -> {
+        profileAdaptiveTickPosted = false;
+        updateProfileSimpleHeaderAdaptiveContrast(false);
+    };
+
+    private void cancelProfileAdaptiveTick() {
+        if (profileAdaptiveTickPosted && listView != null) {
+            listView.removeCallbacks(profileAdaptiveTickRunnable);
+        }
+        profileAdaptiveTickPosted = false;
+    }
+
+    private void updateProfileSimpleHeaderAdaptiveContrast(boolean forceSample) {
+        if (simpleActionBar == null || listView == null || headerMenuGlassColors == null) {
+            return;
+        }
+        final float simpleFactor = getHeaderSimpleFactor();
+        final float activeWeight = MathUtils.clamp((simpleFactor - 0.45f) / 0.35f, 0f, 1f);
+        if (activeWeight <= 0.005f || !BlurredBackgroundProviderImpl.checkBlurEnabled(currentAccount, resourcesProvider)) {
+            if (profileBackFactor > 0.001f || profileTitleFactor > 0.001f || profileMenuFactor > 0.001f) {
+                profileBackTarget = profileTitleTarget = profileMenuTarget = 0f;
+                profileBackFactor = profileTitleFactor = profileMenuFactor = 0f;
+                simpleActionBar.applyAdaptiveGlassContrast(0f);
+            }
+            return;
+        }
+        final long now = SystemClock.uptimeMillis();
+        if (forceSample || (now - lastProfileAdaptiveSampleMs >= 20L)) {
+            lastProfileAdaptiveSampleMs = now;
+            ViewGroup sampleContainer = listView;
+            if (sharedMediaLayout != null && sharedMediaLayout.getParent() == listView && sharedMediaLayout.isAttachedToWindow()) {
+                final RecyclerListView mediaList = sharedMediaLayout.getPrimaryListView();
+                if (mediaList != null && mediaList.getChildCount() > 0) {
+                    sampleContainer = mediaList;
+                }
+            }
+            final int glassBg = headerButtonsGlassColors.getBackgroundColor();
+            final float backdropLuma = GlassContrastHelper.computeLuminance(getThemedColor(Theme.key_windowBackgroundWhite));
+            final boolean liquidActive = org.telegram.messenger.mirrly.MirrlyConfig.isGlassLiquidEnabled();
+            final boolean expectDark = GlassContrastHelper.computeLuminance(headerIconsColor != 0 ? headerIconsColor : getThemedColor(Theme.key_windowBackgroundWhiteBlackText)) < 0.5f;
+
+            simpleActionBar.getGlassPillZones(profileBackZoneRect, profileTitleZoneRect, profileMenuZoneRect);
+            final float backEff = GlassContrastHelper.computeEffectiveGlassLuminance(glassBg,
+                    GlassContrastHelper.estimateUnderlyingLuminanceInBand(simpleActionBar, sampleContainer,
+                            profileBackZoneRect.left, profileBackZoneRect.top, profileBackZoneRect.right, profileBackZoneRect.bottom,
+                            backdropLuma, resourcesProvider), liquidActive);
+            final float titleEff = GlassContrastHelper.computeEffectiveGlassLuminance(glassBg,
+                    GlassContrastHelper.estimateUnderlyingLuminanceInBand(simpleActionBar, sampleContainer,
+                            profileTitleZoneRect.left, profileTitleZoneRect.top, profileTitleZoneRect.right, profileTitleZoneRect.bottom,
+                            backdropLuma, resourcesProvider), liquidActive);
+            final float menuEff = GlassContrastHelper.computeEffectiveGlassLuminance(glassBg,
+                    GlassContrastHelper.estimateUnderlyingLuminanceInBand(simpleActionBar, sampleContainer,
+                            profileMenuZoneRect.left, profileMenuZoneRect.top, profileMenuZoneRect.right, profileMenuZoneRect.bottom,
+                            backdropLuma, resourcesProvider), liquidActive);
+
+            profileBackTarget = GlassContrastHelper.updateContrastInvertFactor(profileBackTarget, backEff, expectDark, 1f) * activeWeight;
+            profileTitleTarget = GlassContrastHelper.updateContrastInvertFactor(profileTitleTarget, titleEff, expectDark, 1f) * activeWeight;
+            profileMenuTarget = GlassContrastHelper.updateContrastInvertFactor(profileMenuTarget, menuEff, expectDark, 1f) * activeWeight;
+        }
+
+        final float step = forceSample ? 1f : 0.28f;
+        profileBackFactor = stepProfileFactor(profileBackFactor, profileBackTarget, step);
+        profileTitleFactor = stepProfileFactor(profileTitleFactor, profileTitleTarget, step);
+        profileMenuFactor = stepProfileFactor(profileMenuFactor, profileMenuTarget, step);
+
+        simpleActionBar.applyAdaptiveGlassContrast(profileBackFactor, profileTitleFactor, profileMenuFactor);
+
+        final boolean settled = Math.abs(profileBackFactor - profileBackTarget) < 0.006f
+                && Math.abs(profileTitleFactor - profileTitleTarget) < 0.006f
+                && Math.abs(profileMenuFactor - profileMenuTarget) < 0.006f;
+        if (!settled && !profileAdaptiveTickPosted && !finishing) {
+            profileAdaptiveTickPosted = true;
+            listView.postOnAnimation(profileAdaptiveTickRunnable);
+        }
+    }
+
+    private static float stepProfileFactor(float current, float target, float step) {
+        final float next = current + (target - current) * step;
+        if (Math.abs(target - next) < 0.008f) {
+            return target;
+        }
+        return MathUtils.clamp(next, 0f, 1f);
+    }
+
+    private void updateBottomButton2Glass() {
+        if (bottomButton2Container == null) {
+            return;
+        }
+        final boolean useGlass = BlurredBackgroundProviderImpl.checkBlurEnabled(currentAccount, resourcesProvider);
+        if (useGlass) {
+            if (bottomButton2Container.getBackground() instanceof BlurredBackgroundDrawable) {
+                ((BlurredBackgroundDrawable) bottomButton2Container.getBackground()).updateColors();
+            } else {
+                bottomButton2Container.setBackground(getBaseSimpleGlass().factory.create(bottomButton2Container)
+                        .setColorProvider(new BlurredBackgroundColorProviderThemed(resourcesProvider, Theme.key_windowBackgroundWhite))
+                        .setRadius(dp(22))
+                        .setPadding(dp(8)));
+            }
+            if (bottomButton2Shadow != null) {
+                bottomButton2Shadow.setVisibility(View.GONE);
+            }
+        } else {
+            bottomButton2Container.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
+            if (bottomButton2Shadow != null) {
+                bottomButton2Shadow.setVisibility(View.VISIBLE);
+            }
+        }
+    }
+
+    private int getShowStatusButtonBackgroundColor() {
+        final int baseColor = buttonsGlass != null && buttonsGlass.getButtonColor() != 0
+                ? Theme.multAlpha(buttonsGlass.getButtonColor(), 0.72f)
+                : Theme.multAlpha(Theme.adaptHSV(actionBarBackgroundColor, +0.18f, -0.1f), 0.5f);
+        return ColorUtils.blendARGB(baseColor, 0x23ffffff, currentExpandAnimatorValue);
+    }
+
+    private void updateShowStatusButtonGlass() {
+        if (showStatusButton != null) {
+            showStatusButton.setGlassRim(buttonsGlass != null && BlurredBackgroundProviderImpl.checkBlurEnabled(currentAccount, resourcesProvider));
+            showStatusButton.setBackgroundColor(getShowStatusButtonBackgroundColor());
         }
     }
 
@@ -6533,9 +6717,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         }
         needLayoutText(Math.min(1f, diff));
 
-        if (showStatusButton != null) {
-            showStatusButton.setBackgroundColor(ColorUtils.blendARGB(Theme.multAlpha(Theme.adaptHSV(actionBarBackgroundColor, +0.18f, -0.1f), 0.5f), 0x23ffffff, currentExpandAnimatorValue));
-        }
+        updateShowStatusButtonGlass();
 
         nameTextView.setTextColor(peerColor != null ? Color.WHITE : ColorUtils.blendARGB(getThemedColor(Theme.key_profile_title), Color.WHITE, currentExpandAnimatorValue));
         actionBar.setItemsColor(peerColor != null ? Color.WHITE : ColorUtils.blendARGB(getThemedColor(Theme.key_actionBarDefaultIcon), Color.WHITE, value), false);
@@ -7553,21 +7735,42 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         } else if (position == noteRow) {
 
         } else if (position == phoneRow || position == numberRow) {
-            if (editRow(view, position)) return true;
-
             final TLRPC.User user = getMessagesController().getUser(userId);
-            if (user == null || user.phone == null || user.phone.length() == 0 || getParentActivity() == null) {
+            final TLRPC.User effectiveUser = user != null ? user : (userId == getUserConfig().getClientUserId() ? getUserConfig().getCurrentUser() : null);
+            MirrlyPhonePrivacyManager.ResolvedPhone resolved = MirrlyPhonePrivacyManager.resolveUserPhone(currentAccount, effectiveUser, vcardPhone, phoneTempRevealed);
+            if (getParentActivity() == null) {
+                return false;
+            }
+            if (resolved.isSelf) {
+                if (resolved.hiddenLabel) {
+                    if (editRow(view, position)) {
+                        return true;
+                    }
+                    if (position == numberRow) {
+                        presentFragment(new ActionIntroActivity(ActionIntroActivity.ACTION_TYPE_CHANGE_PHONE_NUMBER));
+                        return true;
+                    }
+                    return false;
+                }
+                if (position == phoneRow && editRow(view, position)) {
+                    return true;
+                }
+            }
+            if (!resolved.isSelf && resolved.spoilered) {
+                return showHiddenPeerPhoneOptions(view);
+            }
+            if (!resolved.hasDisplayRow && position == phoneRow) {
                 return false;
             }
 
-            if (position == phoneRow && user.phone.startsWith("888")) {
+            if (position == phoneRow && !resolved.spoofed && resolved.isFragmentNumber && effectiveUser != null && !TextUtils.isEmpty(effectiveUser.phone)) {
                 final TL_fragment.TL_inputCollectiblePhone input = new TL_fragment.TL_inputCollectiblePhone();
-                final String phone = input.phone = user.phone;
+                final String phone = input.phone = effectiveUser.phone;
                 final TL_fragment.TL_getCollectibleInfo req = new TL_fragment.TL_getCollectibleInfo();
                 req.collectible = input;
                 int reqId = getConnectionsManager().sendRequest(req, (res, err) -> AndroidUtilities.runOnUIThread(() -> {
                     if (res instanceof TL_fragment.TL_collectibleInfo) {
-                        FragmentUsernameBottomSheet.open(getContext(), FragmentUsernameBottomSheet.TYPE_PHONE, phone, user, (TL_fragment.TL_collectibleInfo) res, getResourceProvider());
+                        FragmentUsernameBottomSheet.open(getContext(), FragmentUsernameBottomSheet.TYPE_PHONE, phone, effectiveUser, (TL_fragment.TL_collectibleInfo) res, getResourceProvider());
                     } else {
                         BulletinFactory.showError(err);
                     }
@@ -7579,23 +7782,23 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             final ItemOptions o = ItemOptions.makeOptions(this, view);
             o.setScrimViewBackground(listView.getClipBackground(view));
             o.setLongPressSelectionEnabled(false);
-            if (position == phoneRow) {
+            if (position == phoneRow && !resolved.isSelf && !resolved.spoofed && effectiveUser != null && !TextUtils.isEmpty(effectiveUser.phone)) {
                 if (userInfo != null && userInfo.phone_calls_available) {
                     o.add(R.drawable.msg_calls, getString(R.string.CallViaTelegram), () -> {
                         if (getParentActivity() == null) return;
-                        VoIPHelper.startCall(user, false, userInfo != null && userInfo.video_calls_available, getParentActivity(), userInfo, getAccountInstance());
+                        VoIPHelper.startCall(effectiveUser, false, userInfo != null && userInfo.video_calls_available, getParentActivity(), userInfo, getAccountInstance());
                     });
                     if (userInfo.video_calls_available) {
                         o.add(R.drawable.msg_videocall, getString(R.string.VideoCallViaTelegram), () -> {
                             if (getParentActivity() == null) return;
-                            VoIPHelper.startCall(user, true, userInfo != null && userInfo.video_calls_available, getParentActivity(), userInfo, getAccountInstance());
+                            VoIPHelper.startCall(effectiveUser, true, userInfo != null && userInfo.video_calls_available, getParentActivity(), userInfo, getAccountInstance());
                         });
                     }
                 }
                 if (!isFragmentPhoneNumber) {
                     o.add(R.drawable.msg_calls_regular, getString(R.string.Call), () -> {
                         try {
-                            Intent intent = new Intent(Intent.ACTION_DIAL, Uri.parse("tel:+" + user.phone));
+                            Intent intent = new Intent(Intent.ACTION_DIAL, Uri.parse("tel:+" + effectiveUser.phone));
                             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                             getParentActivity().startActivityForResult(intent, 500);
                         } catch (Exception e) {
@@ -7604,19 +7807,41 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                     });
                 }
             }
-            o.add(R.drawable.msg_copy, getString(R.string.Copy), () -> {
-                try {
-                    android.content.ClipboardManager clipboard = (android.content.ClipboardManager) ApplicationLoader.applicationContext.getSystemService(Context.CLIPBOARD_SERVICE);
-                    android.content.ClipData clip = android.content.ClipData.newPlainText("label", "+" + user.phone);
-                    clipboard.setPrimaryClip(clip);
-                    if (AndroidUtilities.shouldShowClipboardToast()) {
-                        BulletinFactory.of(this).createCopyBulletin(LocaleController.getString(R.string.PhoneCopied)).show();
+            if (resolved.canCopy) {
+                o.add(R.drawable.msg_copy, getString(R.string.Copy), () -> {
+                    try {
+                        android.content.ClipboardManager clipboard = (android.content.ClipboardManager) ApplicationLoader.applicationContext.getSystemService(Context.CLIPBOARD_SERVICE);
+                        android.content.ClipData clip = android.content.ClipData.newPlainText("label", resolved.copyValue);
+                        clipboard.setPrimaryClip(clip);
+                        if (AndroidUtilities.shouldShowClipboardToast()) {
+                            BulletinFactory.of(this).createCopyBulletin(LocaleController.getString(R.string.PhoneCopied)).show();
+                        }
+                    } catch (Exception e) {
+                        FileLog.e(e);
                     }
-                } catch (Exception e) {
-                    FileLog.e(e);
-                }
-            });
-            if (isFragmentPhoneNumber) {
+                });
+            }
+            if (!resolved.isSelf && position == phoneRow && effectiveUser != null) {
+                o.add(R.drawable.msg_spoiler, LocaleController.getString(R.string.MirrlyPhonePeerMenuTitle), () -> {
+                    MirrlyPhonePrivacySheets.showPeerRuleSheet(
+                            ProfileActivity.this,
+                            resourcesProvider,
+                            currentAccount,
+                            effectiveUser,
+                            effectiveUser.id,
+                            null,
+                            () -> {
+                                phoneTempRevealed = false;
+                                updateRowsIds();
+                                if (listAdapter != null) {
+                                    listAdapter.notifyDataSetChanged();
+                                }
+                                createActionBarMenu(true);
+                            }
+                    );
+                });
+            }
+            if (!resolved.spoofed && isFragmentPhoneNumber) {
                 final SpannableStringBuilder spanned = new SpannableStringBuilder(AndroidUtilities.replaceTags(LocaleController.getString(R.string.AnonymousNumberNotice)));
                 final int startIndex = TextUtils.indexOf(spanned, '*');
                 final int lastIndex = TextUtils.lastIndexOf(spanned, '*');
@@ -9301,7 +9526,23 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
     @SuppressWarnings("unchecked")
     @Override
     public void didReceivedNotification(int id, int account, final Object... args) {
-        if (id == NotificationCenter.uploadStoryEnd || id == NotificationCenter.chatWasBoostedByUser) {
+        if (id == NotificationCenter.mirrlyBottomBarConfigChanged) {
+            updateMainTabsOffsets();
+            if (bottomButtonsContainer != null) {
+                ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) bottomButtonsContainer.getLayoutParams();
+                final int bottomMargin = navigationBarHeight + additionFloatingButtonOffset;
+                if (lp != null && lp.bottomMargin != bottomMargin) {
+                    lp.bottomMargin = bottomMargin;
+                    bottomButtonsContainer.setLayoutParams(lp);
+                }
+            }
+            if (sharedMediaLayout != null) {
+                applyPagesInsets();
+                if (sharedMediaLayout.giftsContainer != null) {
+                    sharedMediaLayout.giftsContainer.setButtonOffset(navigationBarHeight + additionFloatingButtonOffset);
+                }
+            }
+        } else if (id == NotificationCenter.uploadStoryEnd || id == NotificationCenter.chatWasBoostedByUser) {
             checkCanSendStoryForPosting();
         } else if (id == NotificationCenter.updateInterfaces) {
             int mask = (Integer) args[0];
@@ -9312,9 +9553,17 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                 }
                 if ((mask & MessagesController.UPDATE_MASK_PHONE) != 0) {
                     if (listView != null) {
-                        RecyclerListView.Holder holder = (RecyclerListView.Holder) listView.findViewHolderForPosition(phoneRow);
-                        if (holder != null) {
-                            listAdapter.onBindViewHolder(holder, phoneRow);
+                        if (phoneRow >= 0) {
+                            RecyclerListView.Holder holder = (RecyclerListView.Holder) listView.findViewHolderForPosition(phoneRow);
+                            if (holder != null) {
+                                listAdapter.onBindViewHolder(holder, phoneRow);
+                            }
+                        }
+                        if (numberRow >= 0) {
+                            RecyclerListView.Holder holder = (RecyclerListView.Holder) listView.findViewHolderForPosition(numberRow);
+                            if (holder != null) {
+                                listAdapter.onBindViewHolder(holder, numberRow);
+                            }
                         }
                     }
                 }
@@ -9580,6 +9829,13 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             }
         } else if (id == NotificationCenter.reloadInterface) {
             updateListAnimated(false);
+        } else if (id == NotificationCenter.mirrlyPhonePrivacyChanged) {
+            phoneTempRevealed = false;
+            updateRowsIds();
+            if (listAdapter != null) {
+                listAdapter.notifyDataSetChanged();
+            }
+            createActionBarMenu(false);
         } else if (id == NotificationCenter.newSuggestionsAvailable) {
             final int prevRow1 = passwordSuggestionRow;
             final int prevRow2 = phoneSuggestionRow;
@@ -9873,6 +10129,23 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         }
         if (sharedMediaLayout != null) {
             sharedMediaLayout.onPause();
+        }
+        if (phoneTempRevealed && (userId != getUserConfig().getClientUserId() || MirrlyPhonePrivacyManager.isAutoRehideOnLeave(currentAccount))) {
+            phoneTempRevealed = false;
+            if (listView != null) {
+                if (phoneRow >= 0) {
+                    RecyclerListView.Holder holder = (RecyclerListView.Holder) listView.findViewHolderForPosition(phoneRow);
+                    if (holder != null && listAdapter != null) {
+                        listAdapter.onBindViewHolder(holder, phoneRow);
+                    }
+                }
+                if (numberRow >= 0) {
+                    RecyclerListView.Holder holder = (RecyclerListView.Holder) listView.findViewHolderForPosition(numberRow);
+                    if (holder != null && listAdapter != null) {
+                        listAdapter.onBindViewHolder(holder, numberRow);
+                    }
+                }
+            }
         }
     }
 
@@ -11059,7 +11332,8 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             } else {
                 String username = UserObject.getPublicUsername(user);
                 boolean hasInfo = userInfo != null && !TextUtils.isEmpty(userInfo.about) || user != null && !TextUtils.isEmpty(username);
-                boolean hasPhone = user != null && (!TextUtils.isEmpty(user.phone) || !TextUtils.isEmpty(vcardPhone));
+                boolean hasLocalPeerPhone = user != null && userId != getUserConfig().getClientUserId() && MirrlyPhonePrivacyManager.getPeerRule(currentAccount, user.id) != null;
+                boolean hasPhone = user != null && (!TextUtils.isEmpty(user.phone) || !TextUtils.isEmpty(vcardPhone) || hasLocalPeerPhone);
 
                 if (!isBot && userInfo != null && userInfo.unofficial_security_risk) {
                     unofficialSecurityRiskRow = rowCount++;
@@ -12193,9 +12467,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             }
             onlineTextView.setTextColor(ColorUtils.blendARGB(applyPeerColor(statusColor, true, isOnline[0]), 0xB3FFFFFF, currentExpandAnimatorValue));
         }
-        if (showStatusButton != null) {
-            showStatusButton.setBackgroundColor(ColorUtils.blendARGB(Theme.multAlpha(Theme.adaptHSV(actionBarBackgroundColor, +0.18f, -0.1f), 0.5f), 0x23ffffff, currentExpandAnimatorValue));
-        }
+        updateShowStatusButtonGlass();
         if (actionBar != null) {
             actionBar.setItemsColor(ColorUtils.blendARGB(peerColor != null ? Color.WHITE : getThemedColor(Theme.key_actionBarDefaultIcon), getThemedColor(Theme.key_actionBarActionModeDefaultIcon), mediaHeaderAnimationProgress), false);
             actionBar.setItemsBackgroundColor(ColorUtils.blendARGB(peerColor != null ? Theme.ACTION_BAR_WHITE_SELECTOR_COLOR : peerColor != null ? 0x20ffffff : getThemedColor(Theme.key_avatar_actionBarSelectorBlue), getThemedColor(Theme.key_actionBarActionModeDefaultSelector), mediaHeaderAnimationProgress), false);
@@ -12248,6 +12520,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             sharedMediaLayout.giftsContainer.updateColors();
         }
         writeButtonSetBackground();
+        updateBottomButton2Glass();
         updateEmojiStatusDrawableColor();
         if (storyView != null) {
             storyView.update();
@@ -12435,6 +12708,9 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                 if (!isBot && getContactsController().contactsDict.get(userId) != null) {
                     otherItem.addSubItem(add_shortcut, R.drawable.msg_home, LocaleController.getString(R.string.AddShortcut));
                 }
+                if (!UserObject.isUserSelf(user) && !isBot && !myProfile && getDialogId() != UserObject.VERIFY && userId != 333000 && userId != 777000 && userId != 42777) {
+                    otherItem.addSubItem(local_phone_rule, R.drawable.msg_spoiler, LocaleController.getString(R.string.MirrlyPhonePeerMenuTitle));
+                }
             }
         } else if (chatId != 0) {
             TLRPC.Chat chat = getMessagesController().getChat(chatId);
@@ -12558,6 +12834,10 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             }
         }
 
+        if (resolveProfileDatacenterId() > 0) {
+            otherItem.addSubItem(datacenter_status, R.drawable.msg_stats, LocaleController.getString(R.string.MirrlyDatacenterStatusTitle));
+        }
+
         if (imageUpdater != null) {
             otherItem.addSubItem(set_as_main, R.drawable.msg_openprofile, LocaleController.getString(R.string.SetAsMain));
             otherItem.addSubItem(gallery_menu_save, R.drawable.msg_gallery, LocaleController.getString(R.string.SaveToGallery));
@@ -12619,6 +12899,32 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
 
         updateHeaderItems(animated);
         updateStoriesViewBounds(false);
+    }
+
+    private int resolveProfileDatacenterId() {
+        int dc = 0;
+        if (userId != 0 || userInfo != null) {
+            TLRPC.User user = userInfo != null && userInfo.user != null ? userInfo.user : getMessagesController().getUser(userId);
+            if (user != null) {
+                if (UserObject.isUserSelf(user)) {
+                    dc = getConnectionsManager().getCurrentDatacenterId();
+                } else if (user.photo != null && user.photo.dc_id > 0) {
+                    dc = user.photo.dc_id;
+                }
+            }
+            if (dc <= 0 && userInfo != null && userInfo.profile_photo != null && userInfo.profile_photo.dc_id > 0) {
+                dc = userInfo.profile_photo.dc_id;
+            }
+        } else if (chatId != 0 || chatInfo != null) {
+            TLRPC.Chat chat = getMessagesController().getChat(chatId);
+            if (chat != null && chat.photo != null && chat.photo.dc_id > 0) {
+                dc = chat.photo.dc_id;
+            }
+            if (dc <= 0 && chatInfo != null && chatInfo.chat_photo != null && chatInfo.chat_photo.dc_id > 0) {
+                dc = chatInfo.chat_photo.dc_id;
+            }
+        }
+        return dc >= 1 && dc <= org.telegram.messenger.mirrly.MirrlyDatacenterController.DC_COUNT ? dc : 0;
     }
 
     private void createAutoDeleteItem(Context context) {
@@ -13629,8 +13935,12 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                 case VIEW_TYPE_TEXT_DETAIL_MULTILINE_2:
                 case VIEW_TYPE_TEXT_DETAIL:
                     TextDetailCell detailCell = (TextDetailCell) holder.itemView;
+                    detailCell.textView.animate().cancel();
+                    detailCell.textView.setAlpha(1f);
                     boolean containsQr = false;
                     boolean containsGift = false;
+                    boolean containsPhoneEye = false;
+                    detailCell.textView.allowClickSpoilers = true;
                     if (position == birthdayRow) {
                         TLRPC.UserFull userFull = getMessagesController().getUserFull(userId);
                         if (userFull != null && userFull.birthday != null) {
@@ -13659,21 +13969,20 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                             containsGift = !myProfile && today && !getMessagesController().premiumPurchaseBlocked();
                         }
                     } else if (position == phoneRow) {
-                        String text;
                         TLRPC.User user = getMessagesController().getUser(userId);
-                        String phoneNumber;
-                        if (user != null && !TextUtils.isEmpty(vcardPhone)) {
-                            text = PhoneFormat.getInstance().format("+" + vcardPhone);
-                            phoneNumber = vcardPhone;
-                        } else if (user != null && !TextUtils.isEmpty(user.phone)) {
-                            text = PhoneFormat.getInstance().format("+" + user.phone);
-                            phoneNumber = user.phone;
-                        } else {
-                            text = LocaleController.getString(R.string.PhoneHidden);
-                            phoneNumber = null;
+                        if (user == null && userId == getUserConfig().getClientUserId()) {
+                            user = getUserConfig().getCurrentUser();
                         }
-                        isFragmentPhoneNumber = phoneNumber != null && phoneNumber.matches("888\\d{8}");
-                        detailCell.setTextAndValue(text, LocaleController.getString(isFragmentPhoneNumber ? R.string.AnonymousNumber : R.string.PhoneMobile), false);
+                        MirrlyPhonePrivacyManager.ResolvedPhone baseResolved = MirrlyPhonePrivacyManager.resolveUserPhone(currentAccount, user, vcardPhone, false);
+                        MirrlyPhonePrivacyManager.ResolvedPhone effectiveResolved = MirrlyPhonePrivacyManager.resolveUserPhone(currentAccount, user, vcardPhone, phoneTempRevealed);
+                        isFragmentPhoneNumber = effectiveResolved.isFragmentNumber;
+                        containsPhoneEye = baseResolved.canEyeToggle;
+                        detailCell.textView.allowClickSpoilers = false;
+                        CharSequence displaySeq = baseResolved.spoilered ? baseResolved.displayText : effectiveResolved.displayText;
+                        detailCell.setTextAndValue(displaySeq, LocaleController.getString(isFragmentPhoneNumber ? R.string.AnonymousNumber : R.string.PhoneMobile), false);
+                        if (baseResolved.spoilered) {
+                            detailCell.textView.setSpoilersRevealedImmediate(phoneTempRevealed);
+                        }
                     } else if (position == noteRow) {
                         final TLRPC.UserFull userInfo = getMessagesController().getUserFull(userId);
                         if (userInfo == null) return;
@@ -13758,13 +14067,9 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                         }
                     } else if (position == numberRow) {
                         TLRPC.User user = UserConfig.getInstance(currentAccount).getCurrentUser();
-                        String value;
-                        if (user != null && user.phone != null && user.phone.length() != 0) {
-                            value = PhoneFormat.getInstance().format("+" + user.phone);
-                        } else {
-                            value = LocaleController.getString(R.string.NumberUnknown);
-                        }
-                        detailCell.setTextAndValue(value, LocaleController.getString(R.string.TapToChangePhone), true);
+                        MirrlyPhonePrivacyManager.ResolvedPhone resolved = MirrlyPhonePrivacyManager.resolveSelfPhone(currentAccount, user, phoneTempRevealed);
+                        containsPhoneEye = resolved.canEyeToggle;
+                        detailCell.setTextAndValue(resolved.displayText, LocaleController.getString(R.string.TapToChangePhone), true);
                         detailCell.setContentDescriptionValueFirst(false);
                     } else if (position == setUsernameRow) {
                         TLRPC.User user = UserConfig.getInstance(currentAccount).getCurrentUser();
@@ -13816,6 +14121,15 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
                         qrRowIconDrawable = drawable;
                         detailCell.setImage(drawable, LocaleController.getString(R.string.GetQRCode));
                         detailCell.setImageClickListener(ProfileActivity.this::onTextDetailCellImageClicked);
+                    } else if (containsPhoneEye) {
+                        if (phoneEyeDrawable == null) {
+                            phoneEyeDrawable = new MirrlyPhoneEyeDrawable(18);
+                        }
+                        phoneEyeDrawable.setColor(dontApplyPeerColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayIcon), false));
+                        boolean animateEye = detailCell.getImageView().getDrawable() == phoneEyeDrawable;
+                        phoneEyeDrawable.setSlashed(phoneTempRevealed, animateEye);
+                        detailCell.setImage(phoneEyeDrawable, LocaleController.getString(phoneTempRevealed ? R.string.MirrlyPhoneHideDesc : R.string.MirrlyPhoneShowDesc));
+                        detailCell.setImageClickListener(v -> togglePhoneRowVisibility(detailCell));
                     } else {
                         detailCell.setImage(null);
                         detailCell.setImageClickListener(null);
@@ -15630,6 +15944,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
     public void onBecomeFullyVisible() {
         super.onBecomeFullyVisible();
         writeButtonSetBackground();
+        updateBottomButton2Glass();
         fullyVisible = true;
         createBirthdayEffect();
         // a main tab that appears without a transition (animations off, or a tab switch done in one frame)
@@ -15644,8 +15959,76 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
     private View writeButtonBgFor;
     private final int[] writeButtonBgColors = new int[3];
 
+    private @Nullable BlurredBackgroundDrawable writeButtonGlassDrawable;
+    private boolean writeButtonUsingGlass;
+
     private void writeButtonSetBackground() {
         if (writeButton == null) return;
+        final boolean useGlass = BlurredBackgroundProviderImpl.checkBlurEnabled(currentAccount, resourcesProvider);
+        if (useGlass) {
+            final int baseBg = getThemedColor(Theme.key_profile_actionBackground);
+            final boolean usePeerColor = peerColor != null && Theme.hasHue(baseBg);
+            final int glassBg = usePeerColor ? Theme.adaptHSV(peerColor.getBgColor1(false), +.05f, -.04f) : baseBg;
+            final int glassIconColor = usePeerColor ? Color.WHITE : getThemedColor(Theme.key_profile_actionIcon);
+            if (writeButtonGlassDrawable == null) {
+                final BlurredBackgroundColorProviderThemed fallbackProvider = new BlurredBackgroundColorProviderThemed(resourcesProvider, Theme.key_profile_actionBackground);
+                writeButtonGlassDrawable = getBaseSimpleGlass().factory.create(writeButton)
+                        .setColorProvider(new BlurredBackgroundColorProvider() {
+                            @Override
+                            public int getShadowColor() {
+                                return fallbackProvider.getShadowColor();
+                            }
+
+                            @Override
+                            public int getBackgroundColor() {
+                                final int curBase = getThemedColor(Theme.key_profile_actionBackground);
+                                if (peerColor != null && Theme.hasHue(curBase)) {
+                                    final int adapted = Theme.adaptHSV(peerColor.getBgColor1(false), +.05f, -.04f);
+                                    final float alpha = org.telegram.messenger.LiteMode.isEnabled(org.telegram.messenger.LiteMode.FLAG_LIQUID_GLASS) ? 0.85f : 0.76f;
+                                    return Theme.multAlpha(adapted, org.telegram.messenger.mirrly.MirrlyConfig.getEffectiveGlassAlpha(alpha));
+                                }
+                                return fallbackProvider.getBackgroundColor();
+                            }
+
+                            @Override
+                            public int getStrokeColorTop() {
+                                return fallbackProvider.getStrokeColorTop();
+                            }
+
+                            @Override
+                            public int getStrokeColorBottom() {
+                                return fallbackProvider.getStrokeColorBottom();
+                            }
+                        })
+                        .setRadius(dp(28))
+                        .setPadding(dp(2));
+            }
+            writeButtonGlassDrawable.clearColorFilter();
+            writeButtonGlassDrawable.updateColors();
+            if (!writeButtonUsingGlass || writeButton.getBackground() != writeButtonGlassDrawable) {
+                writeButton.setBackground(writeButtonGlassDrawable);
+                if (Build.VERSION.SDK_INT >= 23) {
+                    writeButton.setForeground(Theme.createInsetRoundRectDrawable(Theme.multAlpha(getThemedColor(Theme.key_listSelector), 0.7f), dp(28), dp(2)));
+                }
+            } else if (Build.VERSION.SDK_INT >= 23 && writeButton.getForeground() != null) {
+                Theme.setSelectorDrawableColor(writeButton.getForeground(), Theme.multAlpha(getThemedColor(Theme.key_listSelector), 0.7f), true);
+            }
+            writeButtonUsingGlass = true;
+            writeButtonBgFor = null;
+            if (writeButtonBgColors[0] != glassBg || writeButtonBgColors[2] != glassIconColor) {
+                writeButtonBgColors[0] = glassBg;
+                writeButtonBgColors[2] = glassIconColor;
+            }
+            writeButton.setColorFilter(new PorterDuffColorFilter(glassIconColor, PorterDuff.Mode.MULTIPLY));
+            return;
+        }
+        if (writeButtonUsingGlass) {
+            writeButtonUsingGlass = false;
+            writeButtonBgFor = null;
+            if (Build.VERSION.SDK_INT >= 23) {
+                writeButton.setForeground(null);
+            }
+        }
         try {
             int color1 = getThemedColor(Theme.key_profile_actionBackground);
             int color2 = getThemedColor(Theme.key_profile_actionPressedBackground);
@@ -16138,7 +16521,7 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         if (showStatusButton == null) {
             showStatusButton = new ShowDrawable(LocaleController.getString(R.string.StatusHiddenShow));
             showStatusButton.setAlpha((int) (0xFF * Math.min(1f, extraHeight / getHeaderExtraHeight())));
-            showStatusButton.setBackgroundColor(ColorUtils.blendARGB(Theme.multAlpha(Theme.adaptHSV(actionBarBackgroundColor, +0.18f, -0.1f), 0.5f), 0x23ffffff, currentExpandAnimatorValue));
+            updateShowStatusButtonGlass();
         }
         return showStatusButton;
     }
@@ -16147,6 +16530,15 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
 
         public final AnimatedTextView.AnimatedTextDrawable textDrawable;
         public final Paint backgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private Paint strokePaint;
+        private boolean glassRim;
+
+        public void setGlassRim(boolean glassRim) {
+            if (this.glassRim != glassRim) {
+                this.glassRim = glassRim;
+                invalidateSelf();
+            }
+        }
 
         public ShowDrawable(String string) {
             textDrawable = new AnimatedTextView.AnimatedTextDrawable();
@@ -16200,6 +16592,16 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             backgroundPaint.setAlpha((int) (wasAlpha * alpha));
             canvas.drawRoundRect(AndroidUtilities.rectTmp, dp(20), dp(20), backgroundPaint);
             backgroundPaint.setAlpha(wasAlpha);
+            if (glassRim) {
+                if (strokePaint == null) {
+                    strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    strokePaint.setStyle(Paint.Style.STROKE);
+                    strokePaint.setStrokeWidth(AndroidUtilities.dpf2(0.66f));
+                }
+                strokePaint.setColor(0x28FFFFFF);
+                strokePaint.setAlpha((int) (0x28 * alpha));
+                canvas.drawRoundRect(AndroidUtilities.rectTmp, dp(20), dp(20), strokePaint);
+            }
             textDrawable.setTextColor(textColor);
             textDrawable.setAlpha((int) (0xFF * alpha));
             textDrawable.setBounds((int) AndroidUtilities.rectTmp.left, (int) AndroidUtilities.rectTmp.top, (int) AndroidUtilities.rectTmp.right, (int) AndroidUtilities.rectTmp.bottom);
@@ -16390,6 +16792,184 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
         return true;
     }
 
+    private void onPhoneRowTap(View view, float x, float y) {
+        TLRPC.User user = getMessagesController().getUser(userId);
+        if (user == null && userId == getUserConfig().getClientUserId()) {
+            user = getUserConfig().getCurrentUser();
+        }
+        MirrlyPhonePrivacyManager.ResolvedPhone resolved = MirrlyPhonePrivacyManager.resolveUserPhone(currentAccount, user, vcardPhone, phoneTempRevealed);
+        if (resolved.isSelf) {
+            if (resolved.hiddenLabel) {
+                editRow(view, phoneRow);
+                return;
+            }
+            if (resolved.canCopy) {
+                AndroidUtilities.vibrateCursor(view);
+                MirrlyUiKit.copyTextWithBulletin(ProfileActivity.this, resolved.copyValue, getString(R.string.PhoneCopied), null, resourcesProvider);
+            }
+            return;
+        }
+        if (resolved.spoilered && view instanceof TextDetailCell) {
+            TextDetailCell cell = (TextDetailCell) view;
+            if (!cell.textView.isSpoilerAnimating()) {
+                AndroidUtilities.vibrateCursor(view);
+                phoneTempRevealed = true;
+                float rx = x - cell.textView.getLeft();
+                float ry = y - cell.textView.getTop();
+                cell.textView.revealAt(rx, ry);
+                MirrlyPhonePrivacyManager.ResolvedPhone revealedResolved = MirrlyPhonePrivacyManager.resolveUserPhone(currentAccount, user, vcardPhone, true);
+                isFragmentPhoneNumber = revealedResolved.isFragmentNumber;
+                if (phoneEyeDrawable != null) {
+                    phoneEyeDrawable.setSlashed(true, true);
+                    cell.setImage(phoneEyeDrawable, LocaleController.getString(R.string.MirrlyPhoneHideDesc));
+                }
+            }
+            return;
+        }
+        processOnClickOrPress(phoneRow, view, x, y);
+    }
+
+    private boolean onPhoneRowLongPress(View view, int position) {
+        TLRPC.User user = getMessagesController().getUser(userId);
+        if (user == null && userId == getUserConfig().getClientUserId()) {
+            user = getUserConfig().getCurrentUser();
+        }
+        MirrlyPhonePrivacyManager.ResolvedPhone resolved = MirrlyPhonePrivacyManager.resolveUserPhone(currentAccount, user, vcardPhone, phoneTempRevealed);
+        if (resolved.isSelf) {
+            if (editRow(view, position)) {
+                return true;
+            }
+            if (resolved.hiddenLabel) {
+                return false;
+            }
+            return processOnClickOrPress(position, view, view.getWidth() / 2f, (int) (view.getHeight() * .75f));
+        }
+        if (resolved.spoilered) {
+            return showHiddenPeerPhoneOptions(view);
+        }
+        return processOnClickOrPress(position, view, view.getWidth() / 2f, (int) (view.getHeight() * .75f));
+    }
+
+    private boolean showHiddenPeerPhoneOptions(View view) {
+        if (getParentActivity() == null) {
+            return false;
+        }
+        final TLRPC.User user = getMessagesController().getUser(userId);
+        ItemOptions o = ItemOptions.makeOptions(this, view);
+        o.setScrimViewBackground(listView.getClipBackground(view));
+        o.setLongPressSelectionEnabled(false);
+        if (view instanceof TextDetailCell) {
+            TextDetailCell cell = (TextDetailCell) view;
+            o.add(R.drawable.msg_spoiler_off, LocaleController.getString(R.string.MirrlyPhonePeerReveal), () -> {
+                if (!cell.textView.isSpoilerAnimating()) {
+                    AndroidUtilities.vibrateCursor(cell);
+                    phoneTempRevealed = true;
+                    cell.textView.reveal();
+                    MirrlyPhonePrivacyManager.ResolvedPhone revealedResolved = MirrlyPhonePrivacyManager.resolveUserPhone(currentAccount, user, vcardPhone, true);
+                    isFragmentPhoneNumber = revealedResolved.isFragmentNumber;
+                    if (phoneEyeDrawable != null) {
+                        phoneEyeDrawable.setSlashed(true, true);
+                        cell.setImage(phoneEyeDrawable, LocaleController.getString(R.string.MirrlyPhoneHideDesc));
+                    }
+                }
+            });
+        }
+        if (user != null) {
+            o.add(R.drawable.msg_edit, LocaleController.getString(R.string.MirrlyPhonePeerMenuTitle), () -> {
+                MirrlyPhonePrivacySheets.showPeerRuleSheet(
+                        ProfileActivity.this,
+                        resourcesProvider,
+                        currentAccount,
+                        user,
+                        user.id,
+                        null,
+                        () -> {
+                            phoneTempRevealed = false;
+                            updateRowsIds();
+                            if (listAdapter != null) {
+                                listAdapter.notifyDataSetChanged();
+                            }
+                            createActionBarMenu(true);
+                        }
+                );
+            });
+        }
+        o.show();
+        return true;
+    }
+
+    private void togglePhoneRowVisibility(TextDetailCell detailCell) {
+        if (detailCell == null) {
+            return;
+        }
+        TLRPC.User user = getMessagesController().getUser(userId);
+        if (user == null && userId == getUserConfig().getClientUserId()) {
+            user = getUserConfig().getCurrentUser();
+        }
+        MirrlyPhonePrivacyManager.ResolvedPhone baseResolved = MirrlyPhonePrivacyManager.resolveUserPhone(currentAccount, user, vcardPhone, false);
+        if (baseResolved.isSelf) {
+            phoneTempRevealed = !phoneTempRevealed;
+            AndroidUtilities.vibrateCursor(detailCell.getImageView());
+            MirrlyPhonePrivacyManager.ResolvedPhone resolved = MirrlyPhonePrivacyManager.resolveSelfPhone(currentAccount, user, phoneTempRevealed);
+            isFragmentPhoneNumber = resolved.isFragmentNumber;
+            if (phoneEyeDrawable != null) {
+                phoneEyeDrawable.setSlashed(phoneTempRevealed, true);
+                detailCell.getImageView().setContentDescription(LocaleController.getString(
+                        phoneTempRevealed ? R.string.MirrlyPhoneHideDesc : R.string.MirrlyPhoneShowDesc
+                ));
+            }
+            if (SharedConfig.animationsEnabled()) {
+                detailCell.textView.animate().cancel();
+                detailCell.textView.animate()
+                        .alpha(0f)
+                        .setDuration(85)
+                        .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
+                        .withEndAction(() -> {
+                            Object tag = detailCell.getTag();
+                            if (tag instanceof Integer && (int) tag == numberRow) {
+                                detailCell.setTextAndValue(resolved.displayText, LocaleController.getString(R.string.TapToChangePhone), true);
+                            } else {
+                                detailCell.setTextAndValue(resolved.displayText, LocaleController.getString(isFragmentPhoneNumber ? R.string.AnonymousNumber : R.string.PhoneMobile), false);
+                            }
+                            detailCell.textView.animate()
+                                    .alpha(1f)
+                                    .setDuration(165)
+                                    .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
+                                    .start();
+                        })
+                        .start();
+            } else {
+                Object tag = detailCell.getTag();
+                if (tag instanceof Integer && (int) tag == numberRow) {
+                    detailCell.setTextAndValue(resolved.displayText, LocaleController.getString(R.string.TapToChangePhone), true);
+                } else {
+                    detailCell.setTextAndValue(resolved.displayText, LocaleController.getString(isFragmentPhoneNumber ? R.string.AnonymousNumber : R.string.PhoneMobile), false);
+                }
+            }
+            return;
+        }
+        if (baseResolved.spoilered && !detailCell.textView.isSpoilerAnimating()) {
+            AndroidUtilities.vibrateCursor(detailCell.getImageView());
+            float rx = detailCell.getImageView().getLeft() + detailCell.getImageView().getWidth() / 2f - detailCell.textView.getLeft();
+            float ry = detailCell.getImageView().getTop() + detailCell.getImageView().getHeight() / 2f - detailCell.textView.getTop();
+            if (!phoneTempRevealed) {
+                phoneTempRevealed = true;
+                detailCell.textView.revealAt(rx, ry);
+            } else {
+                phoneTempRevealed = false;
+                detailCell.textView.hideWithRipple(rx, ry);
+            }
+            MirrlyPhonePrivacyManager.ResolvedPhone effectiveResolved = MirrlyPhonePrivacyManager.resolveUserPhone(currentAccount, user, vcardPhone, phoneTempRevealed);
+            isFragmentPhoneNumber = effectiveResolved.isFragmentNumber;
+            if (phoneEyeDrawable != null) {
+                phoneEyeDrawable.setSlashed(phoneTempRevealed, true);
+                detailCell.getImageView().setContentDescription(LocaleController.getString(
+                        phoneTempRevealed ? R.string.MirrlyPhoneHideDesc : R.string.MirrlyPhoneShowDesc
+                ));
+            }
+        }
+    }
+
     private boolean editRow(View view, int position) {
         if (!myProfile) return false;
 
@@ -16423,7 +17003,8 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             copyButton = getString(R.string.ProfileCopyUsername);
             copiedText = getString(R.string.UsernameCopied);
         } else if (position == phoneRow) {
-            textToCopy = user.phone;
+            MirrlyPhonePrivacyManager.ResolvedPhone resolved = MirrlyPhonePrivacyManager.resolveSelfPhone(currentAccount, user, phoneTempRevealed);
+            textToCopy = resolved.canCopy ? resolved.copyValue : null;
             copiedText = getString(R.string.PhoneCopied);
         } else if (position == birthdayRow) {
             textToCopy = UserInfoActivity.birthdayString(userInfo.birthday);
@@ -16524,6 +17105,12 @@ public class ProfileActivity extends BaseFragment implements NotificationCenter.
             itemOptions.add(R.drawable.menu_storage_path, getString(R.string.ProfilePhoneEdit), () -> {
                 presentFragment(new ActionIntroActivity(ActionIntroActivity.ACTION_TYPE_CHANGE_PHONE_NUMBER));
             });
+            MirrlyPhonePrivacyManager.ResolvedPhone resolved = MirrlyPhonePrivacyManager.resolveSelfPhone(currentAccount, user, phoneTempRevealed);
+            if (!resolved.hiddenLabel) {
+                itemOptions.add(R.drawable.msg_spoiler, LocaleController.getString(R.string.MirrlySettingsProfileTitle), () -> {
+                    presentFragment(new MirrlyProfileSettingsActivity());
+                });
+            }
         } else if (position == birthdayRow) {
             itemOptions.add(R.drawable.msg_edit, getString(R.string.ProfileBirthdayChange), () -> {
                 showDialog(AlertsCreator.createBirthdayPickerDialog(getContext(), getString(R.string.EditProfileBirthdayTitle), getString(R.string.EditProfileBirthdayButton), userFull.birthday, birthday -> {

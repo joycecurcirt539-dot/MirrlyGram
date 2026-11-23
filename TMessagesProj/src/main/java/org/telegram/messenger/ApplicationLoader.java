@@ -252,6 +252,7 @@ public class ApplicationLoader extends Application {
         }
 
         LiteMode.registerBatteryReceiver();
+        org.telegram.messenger.mirrly.MirrlyPowerTelemetry.init(applicationContext);
 
         try {
             PowerManager pm = (PowerManager) ApplicationLoader.applicationContext.getSystemService(Context.POWER_SERVICE);
@@ -368,7 +369,16 @@ public class ApplicationLoader extends Application {
                 if (wasInBackground) {
                     ensureCurrentNetworkGet(true);
                     org.telegram.messenger.mirrly.MirrlyEngineController.notifyScreenWake();
+                    org.telegram.messenger.mirrly.MirrlyPowerTelemetry.onAppForegroundChanged(true);
                     AndroidUtilities.runOnUIThread(ApplicationLoader::startPushService);
+                }
+            }
+
+            @Override
+            public void onActivityStopped(Activity activity) {
+                super.onActivityStopped(activity);
+                if (isBackground()) {
+                    org.telegram.messenger.mirrly.MirrlyPowerTelemetry.onAppForegroundChanged(false);
                 }
             }
         };

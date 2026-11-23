@@ -27,6 +27,9 @@ public class MirrlyNetworkSettingsActivity extends MirrlyBaseSettingsFragment im
     private static final int ID_TLS_SHADOW = 5;
     private static final int ID_SOFT_RECONNECT = 7;
     private static final int ID_OPEN_PROXY_LIST = 8;
+    private static final int ID_OPEN_DATACENTER_STATUS = 9;
+    private static final int ID_FLOWSEAL_PER_DC = 10;
+    private static final int ID_FLOWSEAL_PER_DC_SHADOW = 11;
 
     private boolean pollingStats = false;
 
@@ -140,6 +143,20 @@ public class MirrlyNetworkSettingsActivity extends MirrlyBaseSettingsFragment im
                 LocaleController.getString(MirrlyConfig.tlsEnabled ? R.string.MirrlyNetworkTlsHintOn : R.string.MirrlyNetworkTlsHintOff)
         ));
 
+        items.add(UItem.asHeader(LocaleController.getString(R.string.MirrlyNetworkFlowsealPerDcHeader)));
+        items.add(MirrlyUiKit.IconSwitchCell.Factory.of(
+                ID_FLOWSEAL_PER_DC,
+                R.drawable.msg_language,
+                LocaleController.getString(R.string.MirrlyNetworkFlowsealPerDcEnable),
+                MirrlyConfig.flowsealPerDcEnabled
+        ));
+        items.add(UItem.asShadow(
+                ID_FLOWSEAL_PER_DC_SHADOW,
+                LocaleController.getString(MirrlyConfig.flowsealPerDcEnabled
+                        ? R.string.MirrlyNetworkFlowsealPerDcHintOn
+                        : R.string.MirrlyNetworkFlowsealPerDcHintOff)
+        ));
+
         items.add(UItem.asHeader(LocaleController.getString(R.string.MirrlyNetworkControlHeader)));
         items.add(UItem.asButton(
                 ID_SOFT_RECONNECT,
@@ -150,6 +167,11 @@ public class MirrlyNetworkSettingsActivity extends MirrlyBaseSettingsFragment im
                 ID_OPEN_PROXY_LIST,
                 R.drawable.msg_settings,
                 LocaleController.getString(R.string.MirrlyNetworkProxyList)
+        ));
+        items.add(UItem.asButton(
+                ID_OPEN_DATACENTER_STATUS,
+                R.drawable.msg_stats,
+                LocaleController.getString(R.string.MirrlyDatacenterStatusTitle)
         ));
     }
 
@@ -172,6 +194,9 @@ public class MirrlyNetworkSettingsActivity extends MirrlyBaseSettingsFragment im
             case ID_TLS_ENABLED:
                 boolean nextTls = !MirrlyConfig.tlsEnabled;
                 MirrlyConfig.setTlsEnabled(nextTls);
+                if (view instanceof org.telegram.ui.Cells.TextCell) {
+                    ((org.telegram.ui.Cells.TextCell) view).setChecked(nextTls);
+                }
                 refreshAll(true);
                 BulletinFactory.of(this).createSimpleBulletin(
                         R.raw.info,
@@ -180,8 +205,30 @@ public class MirrlyNetworkSettingsActivity extends MirrlyBaseSettingsFragment im
                 break;
 
             case ID_TLS_SPLIT:
-                MirrlyConfig.setTlsClientHelloSplit(!MirrlyConfig.tlsClientHelloSplit);
+                boolean nextSplit = !MirrlyConfig.tlsClientHelloSplit;
+                MirrlyConfig.setTlsClientHelloSplit(nextSplit);
+                if (view instanceof org.telegram.ui.Cells.TextCell) {
+                    ((org.telegram.ui.Cells.TextCell) view).setChecked(nextSplit);
+                }
+                if (listView != null && listView.adapter != null) {
+                    listView.adapter.updateWithoutNotify();
+                }
+                break;
+
+            case ID_FLOWSEAL_PER_DC:
+                boolean nextPerDc = !MirrlyConfig.flowsealPerDcEnabled;
+                MirrlyConfig.setFlowsealPerDcEnabled(nextPerDc);
+                if (view instanceof org.telegram.ui.Cells.TextCell) {
+                    ((org.telegram.ui.Cells.TextCell) view).setChecked(nextPerDc);
+                }
                 refreshAll(true);
+                refreshHeroSubtitles(buildHeroSubtitles(MirrlyUiKit.EngineSnapshot.capture()), true);
+                BulletinFactory.of(this).createSimpleBulletin(
+                        R.raw.info,
+                        LocaleController.getString(nextPerDc
+                                ? R.string.MirrlyNetworkFlowsealPerDcOnToast
+                                : R.string.MirrlyNetworkFlowsealPerDcOffToast)
+                ).show();
                 break;
 
             case ID_SOFT_RECONNECT:
@@ -196,6 +243,10 @@ public class MirrlyNetworkSettingsActivity extends MirrlyBaseSettingsFragment im
             case ID_OPEN_PROXY_LIST:
                 presentFragment(new ProxyListActivity());
                 break;
+
+            case ID_OPEN_DATACENTER_STATUS:
+                presentFragment(new MirrlyDatacenterActivity());
+                break;
         }
     }
 
@@ -208,8 +259,18 @@ public class MirrlyNetworkSettingsActivity extends MirrlyBaseSettingsFragment im
 
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
-        if (id == NotificationCenter.proxySettingsChanged || id == NotificationCenter.didSetNewTheme) {
-            refreshAll(id == NotificationCenter.proxySettingsChanged);
+        if (id == NotificationCenter.proxySettingsChanged) {
+            refreshAll(true);
+        } else if (id == NotificationCenter.didSetNewTheme && listView != null && listView.adapter != null) {
+            refreshHeroSubtitles(buildHeroSubtitles(MirrlyUiKit.EngineSnapshot.capture()), false);
+            listView.adapter.updateWithoutNotify();
+            for (int i = 0; i < listView.getChildCount(); i++) {
+                View child = listView.getChildAt(i);
+                if (child instanceof org.telegram.ui.ActionBar.Theme.Colorable) {
+                    ((org.telegram.ui.ActionBar.Theme.Colorable) child).updateColors();
+                }
+            }
+            listView.invalidate();
         }
     }
 }

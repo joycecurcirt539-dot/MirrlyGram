@@ -10,9 +10,12 @@ import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.SystemClock;
@@ -56,6 +59,8 @@ import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Stories.recorder.HintView2;
+import org.telegram.utils.glass.GlassEngine;
+import org.telegram.utils.glass.GlassSettings;
 
 import java.util.ArrayList;
 
@@ -2013,7 +2018,66 @@ public class ViewPagerFixed extends FrameLayout {
             overrideFromW = lastDrawnIndicatorW;
         }
 
+        private static final float[] GLASS_PILL_RIM_POSITIONS = new float[]{0f, 0.52f, 1f};
         private final Paint selectorPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint glassPillFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint glassPillRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF glassPillRect = new RectF();
+        private final Matrix glassPillMatrix = new Matrix();
+        private final int[] glassPillRimColors = new int[3];
+        private LinearGradient glassPillFillShader;
+        private LinearGradient glassPillRimShader;
+        private boolean glassPillShaderIsDark;
+        private float glassPillShaderRimScale = -1f;
+
+        private void drawActiveTabGlassLens(Canvas canvas, float left, float top, float right, float bottom, float radius, float alphaFactor) {
+            final GlassSettings gs = GlassEngine.getCurrentGlassSettings();
+            if (gs == null || !gs.isLiquidGlassEnabled || gs.rimScale <= 0.001f || alphaFactor <= 0.001f) {
+                return;
+            }
+            final float h = bottom - top;
+            if (h <= 1f || right <= left) {
+                return;
+            }
+            final boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
+            final float rimScale = gs.rimScale;
+            if (glassPillFillShader == null || glassPillRimShader == null || glassPillShaderIsDark != isDark || Math.abs(glassPillShaderRimScale - rimScale) > 0.001f) {
+                glassPillShaderIsDark = isDark;
+                glassPillShaderRimScale = rimScale;
+
+                final int fillTop = isDark ? 0x18FFFFFF : 0x26FFFFFF;
+                final int fillBottom = isDark ? 0x04FFFFFF : 0x06FFFFFF;
+                glassPillFillShader = new LinearGradient(0f, 0f, 0f, 1f, fillTop, fillBottom, Shader.TileMode.CLAMP);
+                glassPillFillPaint.setStyle(Paint.Style.FILL);
+                glassPillFillPaint.setShader(glassPillFillShader);
+
+                glassPillRimColors[0] = Theme.multAlpha(isDark ? 0x33FFFFFF : 0xD9FFFFFF, rimScale);
+                glassPillRimColors[1] = Theme.multAlpha(isDark ? 0x0CFFFFFF : 0x26FFFFFF, rimScale);
+                glassPillRimColors[2] = Theme.multAlpha(isDark ? 0x16FFFFFF : 0x33FFFFFF, rimScale);
+                glassPillRimShader = new LinearGradient(0f, 0f, 0f, 1f, glassPillRimColors, GLASS_PILL_RIM_POSITIONS, Shader.TileMode.CLAMP);
+                glassPillRimPaint.setStyle(Paint.Style.STROKE);
+                glassPillRimPaint.setShader(glassPillRimShader);
+            }
+
+            glassPillMatrix.reset();
+            glassPillMatrix.setScale(1f, h);
+            glassPillMatrix.postTranslate(0f, top);
+            glassPillFillShader.setLocalMatrix(glassPillMatrix);
+            glassPillRimShader.setLocalMatrix(glassPillMatrix);
+
+            final int paintAlpha = Math.round(255f * MathUtils.clamp(alphaFactor, 0f, 1f));
+            glassPillFillPaint.setAlpha(paintAlpha);
+            glassPillRect.set(left, top, right, bottom);
+            canvas.drawRoundRect(glassPillRect, radius, radius, glassPillFillPaint);
+
+            final float strokeW = AndroidUtilities.dpf2(0.55f) * rimScale;
+            glassPillRimPaint.setStrokeWidth(strokeW);
+            glassPillRimPaint.setAlpha(paintAlpha);
+            final float halfStroke = strokeW * 0.5f;
+            glassPillRect.inset(halfStroke, halfStroke);
+            final float insetRadius = Math.max(0f, radius - halfStroke);
+            canvas.drawRoundRect(glassPillRect, insetRadius, insetRadius, glassPillRimPaint);
+        }
 
         @Override
         protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
@@ -2078,7 +2142,17 @@ public class ViewPagerFixed extends FrameLayout {
                         selectorPaint.setColor(Theme.multAlpha(textPaint.getColor(), .15f));
                         final float cy = height / 2f, h = dp(26);
                         AndroidUtilities.rectTmp.set(indicatorX - dp(12), cy - h / 2f, indicatorX + indicatorWidth + dp(12), cy + h / 2f);
-                        canvas.drawRoundRect(AndroidUtilities.rectTmp, AndroidUtilities.rectTmp.height() / 2f, AndroidUtilities.rectTmp.height() / 2f, selectorPaint);
+                        final float rad = AndroidUtilities.rectTmp.height() / 2f;
+                        canvas.drawRoundRect(AndroidUtilities.rectTmp, rad, rad, selectorPaint);
+                        drawActiveTabGlassLens(
+                            canvas,
+                            AndroidUtilities.rectTmp.left,
+                            AndroidUtilities.rectTmp.top,
+                            AndroidUtilities.rectTmp.right,
+                            AndroidUtilities.rectTmp.bottom,
+                            rad,
+                            listView.getAlpha() * (1f - hideProgress)
+                        );
                     } else {
                         lastDrawnIndicatorX = indicatorX;
                         lastDrawnIndicatorW = indicatorWidth;
@@ -2090,12 +2164,21 @@ public class ViewPagerFixed extends FrameLayout {
                             final float TAB_INTERNAL_PADDING = 12.5f;
                             final float add = additionalTabWidth / 2f;
                             final int y = height / 2 - dp(14);
-                            selectorDrawable.setBounds(
-                                (int) (indicatorX - dp(TAB_INTERNAL_PADDING) - add), y,
-                                (int) (indicatorX + indicatorWidth + dp(TAB_INTERNAL_PADDING) + add),
-                                y + dp(28));
+                            final int pillL = (int) (indicatorX - dp(TAB_INTERNAL_PADDING) - add);
+                            final int pillR = (int) (indicatorX + indicatorWidth + dp(TAB_INTERNAL_PADDING) + add);
+                            final int pillB = y + dp(28);
+                            selectorDrawable.setBounds(pillL, y, pillR, pillB);
                             selectorDrawable.setAlpha(31);
                             selectorDrawable.draw(canvas);
+                            drawActiveTabGlassLens(
+                                canvas,
+                                pillL,
+                                y,
+                                pillR,
+                                pillB,
+                                AndroidUtilities.dpf2(13),
+                                listView.getAlpha() * (1f - hideProgress)
+                            );
                         } else {
                             selectorDrawable.setBounds(indicatorX, (int) (height - AndroidUtilities.dpr(4) + hideProgress * AndroidUtilities.dpr(4)), indicatorX + indicatorWidth, (int) (height + hideProgress * AndroidUtilities.dpr(4)));
                             selectorDrawable.draw(canvas);
@@ -2130,6 +2213,8 @@ public class ViewPagerFixed extends FrameLayout {
 
         @Override
         public void updateColors() {
+            glassPillFillShader = null;
+            glassPillRimShader = null;
             if (blurredBackgroundDrawable != null) {
                 blurredBackgroundDrawable.updateColors();
             }

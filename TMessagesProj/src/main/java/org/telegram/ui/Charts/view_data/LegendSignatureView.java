@@ -189,7 +189,8 @@ public class LegendSignatureView extends FrameLayout {
                     h.root.requestLayout();
                 }
                 h.root.setVisibility(View.VISIBLE);
-                h.value.setText(formatWholeNumber(l.line.y[index], formatter, formatterIndex, h.value, k));
+                int effectiveFormatter = (formatter == ChartData.FORMATTER_DUAL_UNIT && l.line.unitType != 0) ? l.line.unitType : formatter;
+                h.value.setText(formatWholeNumber(l.line.y[index], effectiveFormatter, formatterIndex, h.value, k));
                 if (formatter == ChartData.FORMATTER_TON) {
                     h.signature.setText(LocaleController.formatString(formatterIndex == 0 ? R.string.ChartInTON : R.string.ChartInUSD, l.line.name));
                 } else if (formatter == ChartData.FORMATTER_XTR) {
@@ -240,7 +241,30 @@ public class LegendSignatureView extends FrameLayout {
 
     private DecimalFormat formatterTON;
     public CharSequence formatWholeNumber(long v, int formatter, int formatterIndex, TextView textView, float k) {
-        if (formatter == ChartData.FORMATTER_TON) {
+        if (formatter == ChartData.FORMATTER_ENERGY_MAH_TENTHS) {
+            String unit = LocaleController.getString(R.string.MirrlyPowerUnitMah);
+            if (v <= 0) {
+                return "0 " + unit;
+            }
+            if (v < 1000) {
+                return String.format(Locale.US, "%.1f %s", v / 10.0, unit);
+            }
+            return String.format(Locale.US, "%d %s", Math.round(v / 10.0), unit);
+        } else if (formatter == ChartData.FORMATTER_ENERGY_PCT_TENTHS) {
+            if (v <= 0) {
+                return "0%";
+            }
+            return String.format(Locale.US, "%.1f%%", v / 10.0);
+        } else if (formatter == ChartData.FORMATTER_ENERGY_MW) {
+            long clamped = Math.max(0L, v);
+            if (clamped >= 10_000L) {
+                return String.format(Locale.US, "%.1f %s", clamped / 1000.0, LocaleController.getString(R.string.MirrlyPowerUnitW));
+            }
+            return clamped + " " + LocaleController.getString(R.string.MirrlyPowerUnitMw);
+        } else if (formatter == ChartData.FORMATTER_BATTERY_PCT) {
+            long clamped = Math.max(0L, Math.min(100L, v));
+            return clamped + "%";
+        } else if (formatter == ChartData.FORMATTER_TON) {
             if (formatterIndex == 0) {
                 if (formatterTON == null) {
                     DecimalFormatSymbols symbols = new DecimalFormatSymbols(Locale.US);

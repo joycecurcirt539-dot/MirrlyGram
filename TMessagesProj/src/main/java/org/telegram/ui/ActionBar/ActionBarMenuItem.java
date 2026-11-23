@@ -2899,4 +2899,20 @@ public class ActionBarMenuItem extends FrameLayout {
         cell.setLayoutParams(layoutParams);
         return cell;
     }
+
+    @Override
+    public boolean performHapticFeedback(int feedbackConstant) {
+        if (org.telegram.messenger.mirrly.MirrlyHaptics.isDisabled()) {
+            return false;
+        }
+        return super.performHapticFeedback(feedbackConstant);
+    }
+
+    @Override
+    public boolean performHapticFeedback(int feedbackConstant, int flags) {
+        if (org.telegram.messenger.mirrly.MirrlyHaptics.isDisabled()) {
+            return false;
+        }
+        return super.performHapticFeedback(feedbackConstant, flags);
+    }
 }

@@ -42,6 +42,7 @@ import org.checkerframework.checker.units.qual.A;
 import org.checkerframework.checker.units.qual.C;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.utils.glass.GlassContrastHelper;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -330,6 +331,10 @@ public class AnimatedTextView extends View {
                         final float s = snapScaleToIdentity(lerp(1f - scaleAmplitude, 1f, localT));
                         canvas.scale(s, s, current.width / 2f, current.layout.getHeight() / 2f);
                     }
+                    if (adaptiveGradientActive && adaptiveGradientShader != null) {
+                        adaptiveGradientMatrix.setTranslate(-(bounds.left + x - adaptiveGradientOriginX), 0f);
+                        adaptiveGradientShader.setLocalMatrix(adaptiveGradientMatrix);
+                    }
                     current.draw(canvas, j >= 0 ? 1f : localT);
                     canvas.restore();
                 }
@@ -362,6 +367,10 @@ public class AnimatedTextView extends View {
                         final float s = snapScaleToIdentity(lerp(1f, 1f - scaleAmplitude, localT));
                         canvas.scale(s, s, old.width / 2f, old.layout.getHeight() / 2f);
                     }
+                    if (adaptiveGradientActive && adaptiveGradientShader != null) {
+                        adaptiveGradientMatrix.setTranslate(-(bounds.left + x - adaptiveGradientOriginX), 0f);
+                        adaptiveGradientShader.setLocalMatrix(adaptiveGradientMatrix);
+                    }
                     old.draw(canvas, 1f - localT);
                     canvas.restore();
                 }
@@ -386,6 +395,10 @@ public class AnimatedTextView extends View {
                             }
                         }
                         canvas.translate(x, currentBaseline - current.baseline);
+                        if (adaptiveGradientActive && adaptiveGradientShader != null) {
+                            adaptiveGradientMatrix.setTranslate(-(bounds.left + x - adaptiveGradientOriginX), 0f);
+                            adaptiveGradientShader.setLocalMatrix(adaptiveGradientMatrix);
+                        }
                         current.draw(canvas, 1f);
                         canvas.restore();
                     }
@@ -1055,6 +1068,61 @@ public class AnimatedTextView extends View {
         private boolean shadowed = false;
         private float shadowRadius, shadowDx, shadowDy;
         private int shadowColor;
+        private boolean adaptiveGradientActive = false;
+        private LinearGradient adaptiveGradientShader;
+        private Matrix adaptiveGradientMatrix;
+        private int[] adaptiveGradientColors;
+        private float[] adaptiveGradientPositions;
+        private int adaptiveGradientWidth;
+        private float adaptiveGradientOriginX;
+
+        public void setAdaptiveHorizontalGradient(@Nullable GlassContrastHelper.HorizontalAdaptiveBand band, float originX) {
+            if (band == null || !band.useGradient || band.gradientWidth <= 0) {
+                clearAdaptiveHorizontalGradient();
+                return;
+            }
+            final int n = GlassContrastHelper.HorizontalAdaptiveBand.SAMPLE_COUNT;
+            boolean changed = !adaptiveGradientActive || adaptiveGradientShader == null || Math.abs(adaptiveGradientWidth - band.gradientWidth) > 2;
+            if (adaptiveGradientColors == null) {
+                adaptiveGradientColors = new int[n];
+                adaptiveGradientPositions = new float[n];
+                changed = true;
+            }
+            if (!changed) {
+                for (int i = 0; i < n; i++) {
+                    if (adaptiveGradientColors[i] != band.colors[i]) {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            final boolean originChanged = Math.abs(this.adaptiveGradientOriginX - originX) > 0.5f;
+            this.adaptiveGradientOriginX = originX;
+            this.adaptiveGradientActive = true;
+            if (changed) {
+                System.arraycopy(band.colors, 0, adaptiveGradientColors, 0, n);
+                System.arraycopy(band.positions, 0, adaptiveGradientPositions, 0, n);
+                adaptiveGradientWidth = Math.max(1, band.gradientWidth);
+                adaptiveGradientShader = new LinearGradient(0f, 0f, adaptiveGradientWidth, 0f,
+                        adaptiveGradientColors, adaptiveGradientPositions, Shader.TileMode.CLAMP);
+                if (adaptiveGradientMatrix == null) {
+                    adaptiveGradientMatrix = new Matrix();
+                }
+                textPaint.setShader(adaptiveGradientShader);
+                invalidateSelf();
+            } else if (originChanged) {
+                invalidateSelf();
+            }
+        }
+
+        public void clearAdaptiveHorizontalGradient() {
+            if (adaptiveGradientActive || textPaint.getShader() != null) {
+                adaptiveGradientActive = false;
+                textPaint.setShader(null);
+                invalidateSelf();
+            }
+        }
+
         public void setShadowLayer(float radius, float dx, float dy, int shadowColor) {
             shadowed = true;
             textPaint.setShadowLayer(shadowRadius = radius, shadowDx = dx, shadowDy = dy, this.shadowColor = shadowColor);
@@ -1481,5 +1549,15 @@ public class AnimatedTextView extends View {
 
     public void setAllowCancel(boolean allow) {
         this.drawable.setAllowCancel(allow);
+    }
+
+    public void setAdaptiveHorizontalGradient(@Nullable GlassContrastHelper.HorizontalAdaptiveBand band, float originX) {
+        drawable.setAdaptiveHorizontalGradient(band, originX);
+        invalidate();
+    }
+
+    public void clearAdaptiveHorizontalGradient() {
+        drawable.clearAdaptiveHorizontalGradient();
+        invalidate();
     }
 }

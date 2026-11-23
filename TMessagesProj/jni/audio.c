@@ -732,6 +732,113 @@ JNIEXPORT jbyteArray Java_org_telegram_messenger_MediaController_getWaveform(JNI
     return result;
 }
 
+JNIEXPORT jboolean Java_org_telegram_messenger_MediaController_decodeOpusToPcm16(JNIEnv *env, jclass clazz, jstring srcPathJ, jstring dstPathJ, jint targetSampleRate) {
+    if (srcPathJ == NULL || dstPathJ == NULL || targetSampleRate <= 0) {
+        return JNI_FALSE;
+    }
+    const char *srcPath = (*env)->GetStringUTFChars(env, srcPathJ, 0);
+    const char *dstPath = (*env)->GetStringUTFChars(env, dstPathJ, 0);
+    if (srcPath == NULL || dstPath == NULL) {
+        if (srcPath != NULL) (*env)->ReleaseStringUTFChars(env, srcPathJ, srcPath);
+        if (dstPath != NULL) (*env)->ReleaseStringUTFChars(env, dstPathJ, dstPath);
+        return JNI_FALSE;
+    }
+
+    jboolean success = JNI_FALSE;
+    int error = OPUS_OK;
+    OggOpusFile *opusFile = op_open_file(srcPath, &error);
+    if (opusFile != NULL && error == OPUS_OK) {
+        FILE *outFile = fopen(dstPath, "wb");
+        if (outFile != NULL) {
+            const int pcmCap = 4096 * 2;
+            int16_t *pcmBuf = (int16_t *) malloc(pcmCap * sizeof(int16_t));
+            int16_t *outChunk = (int16_t *) malloc(4096 * sizeof(int16_t));
+            if (pcmBuf != NULL && outChunk != NULL) {
+                const double step = 48000.0 / (double) targetSampleRate;
+                double sampleAccum = 0.0;
+                int32_t boxSum = 0;
+                int32_t boxCount = 0;
+                uint64_t totalOut = 0;
+                int ioFailed = 0;
+                int li = 0;
+
+                while (1) {
+                    int readFrames = op_read(opusFile, pcmBuf, pcmCap, &li);
+                    if (readFrames < 0) {
+                        LOGE("decodeOpusToPcm16: op_read failed: %d", readFrames);
+                        ioFailed = 1;
+                        break;
+                    }
+                    if (readFrames == 0) {
+                        break;
+                    }
+                    int channels = op_channel_count(opusFile, li);
+                    if (channels < 1) {
+                        channels = 1;
+                    }
+                    int outIdx = 0;
+                    for (int i = 0; i < readFrames; i++) {
+                        int32_t mono;
+                        if (channels == 1) {
+                            mono = pcmBuf[i];
+                        } else {
+                            int64_t chSum = 0;
+                            for (int c = 0; c < channels; c++) {
+                                chSum += pcmBuf[i * channels + c];
+                            }
+                            mono = (int32_t) (chSum / channels);
+                        }
+                        boxSum += mono;
+                        boxCount++;
+                        sampleAccum += 1.0;
+                        if (sampleAccum >= step) {
+                            sampleAccum -= step;
+                            int32_t avg = boxCount > 0 ? (boxSum / boxCount) : mono;
+                            if (avg > 32767) avg = 32767;
+                            if (avg < -32768) avg = -32768;
+                            outChunk[outIdx++] = (int16_t) avg;
+                            boxSum = 0;
+                            boxCount = 0;
+                            if (outIdx >= 4096) {
+                                if (fwrite(outChunk, sizeof(int16_t), outIdx, outFile) != (size_t) outIdx) {
+                                    ioFailed = 1;
+                                    break;
+                                }
+                                totalOut += (uint64_t) outIdx;
+                                outIdx = 0;
+                            }
+                        }
+                    }
+                    if (ioFailed) {
+                        break;
+                    }
+                    if (outIdx > 0) {
+                        if (fwrite(outChunk, sizeof(int16_t), outIdx, outFile) != (size_t) outIdx) {
+                            ioFailed = 1;
+                            break;
+                        }
+                        totalOut += (uint64_t) outIdx;
+                    }
+                }
+                if (!ioFailed && totalOut > 0) {
+                    success = JNI_TRUE;
+                }
+            }
+            if (pcmBuf != NULL) free(pcmBuf);
+            if (outChunk != NULL) free(outChunk);
+            fclose(outFile);
+            if (!success) {
+                remove(dstPath);
+            }
+        }
+        op_free(opusFile);
+    }
+
+    (*env)->ReleaseStringUTFChars(env, srcPathJ, srcPath);
+    (*env)->ReleaseStringUTFChars(env, dstPathJ, dstPath);
+    return success;
+}
+
 JNIEXPORT void JNICALL Java_org_telegram_ui_Stories_recorder_FfmpegAudioWaveformLoader_init(JNIEnv *env, jobject obj, jstring pathJStr, jint count) {
     const char *path = (*env)->GetStringUTFChars(env, pathJStr, 0);
     if (path == NULL) {

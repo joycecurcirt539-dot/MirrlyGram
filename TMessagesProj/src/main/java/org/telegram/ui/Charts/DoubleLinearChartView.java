@@ -79,10 +79,14 @@ public class DoubleLinearChartView extends BaseChartView<DoubleLinearChartData, 
                 int localStart = Math.max(0, startXIndex - additionalPoints);
                 int localEnd = Math.min(chartData.xPercentage.length - 1, endXIndex + additionalPoints);
 
+                float ySpan = currentMaxHeight - currentMinHeight;
+                if (ySpan <= 0f) {
+                    ySpan = 1f;
+                }
                 for (int i = localStart; i <= localEnd; i++) {
                     if (y[i] < 0) continue;
                     float xPoint = chartData.xPercentage[i] * fullWidth - offset;
-                    float yPercentage = ((float) y[i] * chartData.linesK[k] - currentMinHeight) / (currentMaxHeight - currentMinHeight);
+                    float yPercentage = ((float) y[i] * chartData.linesK[k] - currentMinHeight) / ySpan;
                     float padding = line.paint.getStrokeWidth() / 2f;
                     float yPoint = getMeasuredHeight() - chartBottom - padding - (yPercentage) * (getMeasuredHeight() - chartBottom - SIGNATURE_TEXT_HEIGHT - padding);
 
@@ -145,6 +149,9 @@ public class DoubleLinearChartView extends BaseChartView<DoubleLinearChartData, 
 
                     float xPoint = chartData.xPercentage[i] * pickerWidth;
                     float h = ANIMATE_PICKER_SIZES ? pickerMaxHeight : chartData.maxValue;
+                    if (h <= 0f) {
+                        h = 1f;
+                    }
 
                     float yPercentage = (float) y[i] * chartData.linesK[k] / h;
                     float yPoint = (1f - yPercentage) * (bottom - top);
@@ -197,11 +204,15 @@ public class DoubleLinearChartView extends BaseChartView<DoubleLinearChartData, 
         selectedLinePaint.setAlpha(alpha);
         canvas.drawLine(xPoint, 0, xPoint, chartArea.bottom, selectedLinePaint);
 
+        float ySpan = currentMaxHeight - currentMinHeight;
+        if (ySpan <= 0f) {
+            ySpan = 1f;
+        }
         tmpN = lines.size();
         for (tmpI = 0; tmpI < tmpN; tmpI++) {
             LineViewData line = lines.get(tmpI);
             if (!line.enabled && line.alpha == 0) continue;
-            float yPercentage = ((float) line.line.y[selectedIndex] * chartData.linesK[tmpI] - currentMinHeight) / (currentMaxHeight - currentMinHeight);
+            float yPercentage = ((float) line.line.y[selectedIndex] * chartData.linesK[tmpI] - currentMinHeight) / ySpan;
             float yPoint = getMeasuredHeight() - chartBottom - (yPercentage) * (getMeasuredHeight() - chartBottom - SIGNATURE_TEXT_HEIGHT);
 
             line.selectionPaint.setAlpha((int) (255 * line.alpha * selectionA));
@@ -326,11 +337,24 @@ public class DoubleLinearChartView extends BaseChartView<DoubleLinearChartData, 
     @Override
     protected ChartHorizontalLinesData createHorizontalLinesData(long newMaxHeight, long newMinHeight, int formatter) {
         float k;
+        int leftUnit = 0;
+        int rightUnit = 0;
         if (chartData.linesK.length < 2) {
             k = 1;
+            if (!lines.isEmpty()) {
+                leftUnit = lines.get(0).line.unitType;
+            }
         } else {
             int rightIndex = chartData.linesK[0] == 1 ? 1 : 0;
+            int leftIndex = (rightIndex + 1) % 2;
             k = chartData.linesK[rightIndex];
+            if (lines.size() >= 2) {
+                leftUnit = lines.get(leftIndex).line.unitType;
+                rightUnit = lines.get(rightIndex).line.unitType;
+            }
+        }
+        if (formatter == ChartData.FORMATTER_DUAL_UNIT) {
+            return new ChartHorizontalLinesData(newMaxHeight, newMinHeight, useMinHeight, k, formatter, leftUnit, rightUnit, signaturePaint, signaturePaint2);
         }
         return new ChartHorizontalLinesData(newMaxHeight, newMinHeight, useMinHeight, k, formatter, signaturePaint, signaturePaint2);
     }

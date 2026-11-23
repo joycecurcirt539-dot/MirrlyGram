@@ -54,11 +54,13 @@ import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.hardware.display.DisplayManager;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 import android.os.SystemClock;
@@ -154,6 +156,7 @@ import com.google.android.gms.tasks.Task;
 
 import org.telegram.PhoneFormat.PhoneFormat;
 import org.telegram.messenger.browser.Browser;
+import org.telegram.messenger.mirrly.MirrlyHaptics;
 import org.telegram.utils.proxy.ProxySettings;
 import org.telegram.messenger.utils.CustomHtml;
 import org.telegram.messenger.utils.DebugRecordingCanvas;
@@ -298,6 +301,8 @@ public class AndroidUtilities {
     public static float screenRefreshRate = 60;
     public static float screenMaxRefreshRate = 60;
     public static float screenRefreshTime = 1000 / screenRefreshRate;
+    private static boolean displayListenerRegistered;
+    private static DisplayManager.DisplayListener displayListener;
     public static int roundMessageSize;
     public static int roundPlayingMessageSize;
     public static int roundSidePlayingMessageSize;
@@ -2875,25 +2880,13 @@ public class AndroidUtilities {
             }
             // usingHardwareInput = false; just for test
             usingHardwareInput = configuration.keyboard != Configuration.KEYBOARD_NOKEYS && configuration.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO;
-            WindowManager manager = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
-            if (manager != null) {
-                Display display = manager.getDefaultDisplay();
-                if (display != null) {
-                    display.getMetrics(displayMetrics);
-                    display.getSize(displaySize);
-                    screenRefreshRate = display.getRefreshRate();
-                    screenMaxRefreshRate = screenRefreshRate;
-                    float[] rates = display.getSupportedRefreshRates();
-                    if (rates != null) {
-                        for (int i = 0; i < rates.length; ++i) {
-                            if (rates[i] > screenMaxRefreshRate) {
-                                screenMaxRefreshRate = rates[i];
-                            }
-                        }
-                    }
-                    screenRefreshTime = 1000 / screenRefreshRate;
-                }
+            Display display = resolveDisplayForContext(context);
+            if (display != null) {
+                display.getMetrics(displayMetrics);
+                display.getSize(displaySize);
+                updateDisplayRefreshRate(display);
             }
+            ensureDisplayListener(context);
             if (configuration.screenWidthDp != Configuration.SCREEN_WIDTH_DP_UNDEFINED) {
                 int newSize = (int) Math.ceil(configuration.screenWidthDp * density);
                 if (Math.abs(displaySize.x - newSize) > 3) {
@@ -2930,6 +2923,179 @@ public class AndroidUtilities {
         }
     }
 
+    @Nullable
+    private static Display resolveDisplayForContext(@Nullable Context context) {
+        if (context == null) {
+            return null;
+        }
+        if (Build.VERSION.SDK_INT >= 30 && context instanceof Activity) {
+            try {
+                Display display = context.getDisplay();
+                if (display != null) {
+                    return display;
+                }
+            } catch (Throwable ignore) {
+            }
+        }
+        DisplayManager dm = (DisplayManager) context.getSystemService(Context.DISPLAY_SERVICE);
+        if (dm != null) {
+            Display display = dm.getDisplay(Display.DEFAULT_DISPLAY);
+            if (display != null) {
+                return display;
+            }
+        }
+        WindowManager manager = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        return manager != null ? manager.getDefaultDisplay() : null;
+    }
+
+    private static void updateDisplayRefreshRate(@Nullable Display display) {
+        if (display == null) {
+            return;
+        }
+        float currentRate = display.getRefreshRate();
+        if (currentRate >= 1f) {
+            screenRefreshRate = currentRate;
+            screenRefreshTime = 1000f / screenRefreshRate;
+        }
+        float maxRate = screenRefreshRate;
+        if (Build.VERSION.SDK_INT >= 23) {
+            Display.Mode activeMode = display.getMode();
+            Display.Mode[] modes = display.getSupportedModes();
+            if (modes != null) {
+                for (Display.Mode m : modes) {
+                    if (m == null) {
+                        continue;
+                    }
+                    if (activeMode == null || (m.getPhysicalWidth() == activeMode.getPhysicalWidth() && m.getPhysicalHeight() == activeMode.getPhysicalHeight())) {
+                        if (m.getRefreshRate() > maxRate) {
+                            maxRate = m.getRefreshRate();
+                        }
+                    }
+                }
+            }
+        } else {
+            float[] rates = display.getSupportedRefreshRates();
+            if (rates != null) {
+                for (float r : rates) {
+                    if (r > maxRate) {
+                        maxRate = r;
+                    }
+                }
+            }
+        }
+        screenMaxRefreshRate = maxRate;
+    }
+
+    private static void ensureDisplayListener(@Nullable Context context) {
+        if (displayListenerRegistered) {
+            return;
+        }
+        Context appContext = ApplicationLoader.applicationContext != null
+                ? ApplicationLoader.applicationContext
+                : (context != null ? context.getApplicationContext() : null);
+        if (appContext == null) {
+            return;
+        }
+        DisplayManager dm = (DisplayManager) appContext.getSystemService(Context.DISPLAY_SERVICE);
+        if (dm == null) {
+            return;
+        }
+        displayListenerRegistered = true;
+        displayListener = new DisplayManager.DisplayListener() {
+            @Override
+            public void onDisplayAdded(int displayId) {
+            }
+
+            @Override
+            public void onDisplayRemoved(int displayId) {
+            }
+
+            @Override
+            public void onDisplayChanged(int displayId) {
+                if (displayId == Display.DEFAULT_DISPLAY) {
+                    updateDisplayRefreshRate(dm.getDisplay(Display.DEFAULT_DISPLAY));
+                }
+            }
+        };
+        try {
+            dm.registerDisplayListener(displayListener, new Handler(Looper.getMainLooper()));
+        } catch (Throwable e) {
+            displayListenerRegistered = false;
+            FileLog.e(e);
+        }
+    }
+
+    @Nullable
+    private static Display resolveDisplayForWindow(@NonNull Window window, @Nullable WindowManager wm) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            try {
+                Display display = window.getContext().getDisplay();
+                if (display != null) {
+                    return display;
+                }
+            } catch (Throwable ignore) {
+            }
+        }
+        if (wm != null) {
+            try {
+                Display display = wm.getDefaultDisplay();
+                if (display != null) {
+                    return display;
+                }
+            } catch (Throwable ignore) {
+            }
+        }
+        return resolveDisplayForContext(window.getContext());
+    }
+
+    @SuppressLint("NewApi")
+    @Nullable
+    private static Display.Mode resolvePreferredDisplayMode(@Nullable Display display, float rate) {
+        if (display == null || Build.VERSION.SDK_INT < 23) {
+            return null;
+        }
+        final Display.Mode activeMode = display.getMode();
+        final Display.Mode[] modes = display.getSupportedModes();
+        if (modes == null || modes.length == 0) {
+            return activeMode;
+        }
+        final float target = rate > 0f ? rate : screenMaxRefreshRate;
+        Display.Mode bestMatch = null;
+        Display.Mode bestMax = null;
+        for (Display.Mode m : modes) {
+            if (m == null) {
+                continue;
+            }
+            if (activeMode != null && (m.getPhysicalWidth() != activeMode.getPhysicalWidth() || m.getPhysicalHeight() != activeMode.getPhysicalHeight())) {
+                continue;
+            }
+            if (bestMax == null || m.getRefreshRate() > bestMax.getRefreshRate()) {
+                bestMax = m;
+            }
+            final float rr = m.getRefreshRate();
+            if (rr >= target - 0.5f) {
+                if (bestMatch == null || Math.abs(rr - target) < Math.abs(bestMatch.getRefreshRate() - target)) {
+                    bestMatch = m;
+                }
+            }
+        }
+        if (bestMatch != null) {
+            return bestMatch;
+        }
+        return bestMax != null ? bestMax : activeMode;
+    }
+
+    @SuppressLint("NewApi")
+    public static void setHighFrameRateCategory(@Nullable View view, boolean high) {
+        if (view == null || Build.VERSION.SDK_INT < 35) {
+            return;
+        }
+        final float target = high ? View.REQUESTED_FRAME_RATE_CATEGORY_HIGH : View.REQUESTED_FRAME_RATE_CATEGORY_DEFAULT;
+        if (Float.compare(view.getRequestedFrameRate(), target) != 0) {
+            view.setRequestedFrameRate(target);
+        }
+    }
+
     public static void setPreferredMaxRefreshRate(Window window) {
         setPreferredMaxRefreshRate(window, screenMaxRefreshRate);
     }
@@ -2937,26 +3103,80 @@ public class AndroidUtilities {
     public static void setPreferredMaxRefreshRate(Window window, float rate) {
         if (window == null) return;
         final WindowManager wm = window.getWindowManager();
-        if (wm == null) return;
-        WindowManager.LayoutParams params = window.getAttributes();
-        params.preferredRefreshRate = rate;
+        final WindowManager.LayoutParams params = window.getAttributes();
+        if (params == null) return;
+        float targetRate = rate > 0f ? rate : screenMaxRefreshRate;
+        if (Build.VERSION.SDK_INT >= 23) {
+            final Display display = resolveDisplayForWindow(window, wm);
+            final Display.Mode bestMode = resolvePreferredDisplayMode(display, targetRate);
+            int targetModeId = params.preferredDisplayModeId;
+            if (bestMode != null) {
+                targetRate = bestMode.getRefreshRate();
+                targetModeId = bestMode.getModeId();
+            }
+            if (params.preferredDisplayModeId == targetModeId && Math.abs(params.preferredRefreshRate - targetRate) < 0.2f) {
+                return;
+            }
+            params.preferredDisplayModeId = targetModeId;
+        } else {
+            if (Math.abs(params.preferredRefreshRate - targetRate) < 0.2f) {
+                return;
+            }
+        }
+        params.preferredRefreshRate = targetRate;
         try {
-            wm.updateViewLayout(window.getDecorView(), params);
+            window.setAttributes(params);
         } catch (Exception e) {
             FileLog.e(e);
         }
     }
 
     public static void setPreferredMaxRefreshRate(WindowManager wm, View windowView, WindowManager.LayoutParams params) {
-        if (wm == null) return;
-        if (Math.abs(params.preferredRefreshRate - screenMaxRefreshRate) > 0.2) {
-            params.preferredRefreshRate = screenMaxRefreshRate;
-            if (windowView.isAttachedToWindow()) {
+        if (wm == null || params == null) return;
+        float targetRate = screenMaxRefreshRate;
+        final boolean changed;
+        if (Build.VERSION.SDK_INT >= 23) {
+            Display display = null;
+            if (Build.VERSION.SDK_INT >= 30 && windowView != null) {
                 try {
-                    wm.updateViewLayout(windowView, params);
-                } catch (Exception e) {
-                    FileLog.e(e);
+                    display = windowView.getDisplay();
+                } catch (Throwable ignore) {
                 }
+                if (display == null) {
+                    try {
+                        display = windowView.getContext().getDisplay();
+                    } catch (Throwable ignore) {
+                    }
+                }
+            }
+            if (display == null) {
+                try {
+                    display = wm.getDefaultDisplay();
+                } catch (Throwable ignore) {
+                }
+            }
+            final Display.Mode bestMode = resolvePreferredDisplayMode(display, targetRate);
+            int targetModeId = params.preferredDisplayModeId;
+            if (bestMode != null) {
+                targetRate = bestMode.getRefreshRate();
+                targetModeId = bestMode.getModeId();
+            }
+            changed = params.preferredDisplayModeId != targetModeId || Math.abs(params.preferredRefreshRate - targetRate) > 0.2f;
+            if (changed) {
+                params.preferredDisplayModeId = targetModeId;
+                params.preferredRefreshRate = targetRate;
+            }
+        } else {
+            changed = Math.abs(params.preferredRefreshRate - targetRate) > 0.2f;
+            if (changed) {
+                params.preferredRefreshRate = targetRate;
+            }
+        }
+        if (changed && windowView != null && windowView.isAttachedToWindow()) {
+            try {
+                wm.updateViewLayout(windowView, params);
+            } catch (Exception e) {
+                FileLog.e(e);
             }
         }
     }
@@ -3769,7 +3989,7 @@ public class AndroidUtilities {
         }
         File storageDir = null;
         if (Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState())) {
-            storageDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Telegram");
+            storageDir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "MirrlyGram");
             if (!storageDir.mkdirs()) {
                 if (!storageDir.exists()) {
                     if (BuildVars.LOGS_ENABLED) {
@@ -6903,6 +7123,7 @@ public class AndroidUtilities {
 
     public static void vibrateCursor(View view) {
         try {
+            if (MirrlyHaptics.isDisabled()) return;
             if (view == null || view.getContext() == null) return;
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
             if (!((Vibrator) view.getContext().getSystemService(Context.VIBRATOR_SERVICE)).hasAmplitudeControl()) return;
@@ -6912,6 +7133,7 @@ public class AndroidUtilities {
 
     public static void vibrate(View view) {
         try {
+            if (MirrlyHaptics.isDisabled()) return;
             if (view == null || view.getContext() == null) return;
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
             if (!((Vibrator) view.getContext().getSystemService(Context.VIBRATOR_SERVICE)).hasAmplitudeControl()) return;

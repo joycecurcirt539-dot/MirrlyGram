@@ -207,15 +207,29 @@ public class TranscribeButton {
         }
         clickedToOpen = false;
         boolean processClick, toOpen = !shouldBeOpen;
+        final MessageObject msgObj = parent.getMessageObject();
         if (!shouldBeOpen) {
+            if (loading && msgObj != null && org.telegram.messenger.mirrly.MirrlySttEngine.getInstance(parent.currentAccount).isTranscribing(msgObj)) {
+                setLoading(false, true);
+                org.telegram.messenger.mirrly.MirrlySttEngine.getInstance(parent.currentAccount).cancel(msgObj);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && selectorDrawable instanceof RippleDrawable) {
+                    selectorDrawable.setState(StateSet.NOTHING);
+                    parent.invalidate();
+                }
+                pressed = false;
+                return;
+            }
             processClick = !loading;
-            if ((premium || canTranscribeTrial(parent.getMessageObject())) && parent.getMessageObject().isSent()) {
+            if ((premium || canTranscribeTrial(msgObj) || org.telegram.messenger.mirrly.MirrlyConfig.isFreeSttEnabled()) && msgObj != null && msgObj.isSent()) {
                 setLoading(true, true);
             }
         } else {
             processClick = true;
             setOpen(false, true);
             setLoading(false, true);
+            if (msgObj != null) {
+                org.telegram.messenger.mirrly.MirrlySttEngine.getInstance(parent.currentAccount).cancel(msgObj);
+            }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && selectorDrawable instanceof RippleDrawable) {
             selectorDrawable.setState(StateSet.NOTHING);
@@ -223,9 +237,17 @@ public class TranscribeButton {
         }
         pressed = false;
         if (processClick) {
-            if (!premium && toOpen) {
-                if (canTranscribeTrial(parent.getMessageObject()) || parent.getMessageObject() != null && parent.getMessageObject().messageOwner != null && !TextUtils.isEmpty(parent.getMessageObject().messageOwner.voiceTranscription)) {
-                    transcribePressed(parent.getMessageObject(), toOpen, parent.getDelegate());
+            final boolean hasCached = msgObj != null && msgObj.messageOwner != null && !TextUtils.isEmpty(msgObj.messageOwner.voiceTranscription);
+            if (toOpen && !hasCached && org.telegram.messenger.mirrly.MirrlyConfig.isFreeSttEnabled()
+                    && (org.telegram.messenger.mirrly.MirrlyConfig.getFreeSttMode() == org.telegram.messenger.mirrly.MirrlyConfig.STT_MODE_ALWAYS
+                    || (!premium && !canTranscribeTrial(msgObj)))) {
+                clickedToOpen = true;
+                openVideoTranscription(msgObj);
+                org.telegram.messenger.mirrly.MirrlySttEngine.getInstance(parent.currentAccount).transcribeMessage(msgObj);
+            } else if (!premium && toOpen) {
+                if (canTranscribeTrial(msgObj) || hasCached) {
+                    clickedToOpen = true;
+                    transcribePressed(msgObj, toOpen, parent.getDelegate());
                 } else {
                     if (parent.getDelegate() != null) {
                         if (MessagesController.getInstance(parent.currentAccount).transcribeAudioTrialWeeklyNumber > 0) {
@@ -239,7 +261,7 @@ public class TranscribeButton {
                 if (toOpen) {
                     clickedToOpen = true;
                 }
-                transcribePressed(parent.getMessageObject(), toOpen, parent.getDelegate());
+                transcribePressed(msgObj, toOpen, parent.getDelegate());
             }
         }
     }
@@ -249,16 +271,12 @@ public class TranscribeButton {
     }
 
     public void setColor(int color, int grayColor, boolean isOut, float bgBack) {
-        boolean disabled = !premium;
-//        if (disabled) {
-//            color = ColorUtils.blendARGB(color, grayColor, isOut ? .6f : .8f);
-//            color = ColorUtils.setAlphaComponent(color, (int) (Color.alpha(color) * .6f));
-//        }
-        boolean newColor = this.color != color;
-        this.iconColor = this.color = color;
-        this.backgroundColor = ColorUtils.setAlphaComponent(color, (int) (Color.alpha(color) * 0.156f));
+        final int opaqueIcon = Color.alpha(color) > 0 ? ColorUtils.setAlphaComponent(color, 255) : color;
+        boolean newColor = this.color != opaqueIcon;
+        this.iconColor = this.color = opaqueIcon;
+        this.backgroundColor = ColorUtils.setAlphaComponent(opaqueIcon, Math.round(255 * 0.17f));
         this.backgroundBack = bgBack;
-        this.rippleColor = Theme.blendOver(this.backgroundColor, ColorUtils.setAlphaComponent(color, (int) (Color.alpha(color) * (Theme.isCurrentThemeDark() ? .3f : .2f))));
+        this.rippleColor = Theme.blendOver(this.backgroundColor, ColorUtils.setAlphaComponent(opaqueIcon, (int) (255 * (Theme.isCurrentThemeDark() ? .3f : .2f))));
         if (backgroundPaint == null) {
             backgroundPaint = new Paint();
         }
@@ -274,20 +292,20 @@ public class TranscribeButton {
             inIconDrawable.commitApplyLayerColors();
             inIconDrawable.setAllowDecodeSingleFrame(true);
             inIconDrawable.updateCurrentFrame(0, false);
-            inIconDrawable.setAlpha(inIconDrawableAlpha = (int) (Color.alpha(color)));
+            inIconDrawable.setAlpha(inIconDrawableAlpha = Color.alpha(opaqueIcon));
             outIconDrawable.beginApplyLayerColors();
             outIconDrawable.setLayerColor("Artboard Outlines", this.iconColor);
             outIconDrawable.commitApplyLayerColors();
             outIconDrawable.setAllowDecodeSingleFrame(true);
             outIconDrawable.updateCurrentFrame(0, false);
-            outIconDrawable.setAlpha(outIconDrawableAlpha = (int) (Color.alpha(color)));
+            outIconDrawable.setAlpha(outIconDrawableAlpha = Color.alpha(opaqueIcon));
         }
         if (strokePaint == null) {
             strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
             strokePaint.setStyle(Paint.Style.STROKE);
             strokePaint.setStrokeCap(Paint.Cap.ROUND);
         }
-        strokePaint.setColor(color);
+        strokePaint.setColor(opaqueIcon);
     }
 
     private final FastOutSlowInInterpolator interpolator = new FastOutSlowInInterpolator();
@@ -312,6 +330,10 @@ public class TranscribeButton {
 
     public int height() {
         return this.bounds.height();
+    }
+
+    public Rect getBounds() {
+        return bounds;
     }
 
     public void draw(Canvas canvas, float alpha) {
@@ -650,7 +672,7 @@ public class TranscribeButton {
     }
 
     public static boolean isVideoTranscriptionOpen(MessageObject messageObject) {
-        return videoTranscriptionsOpen != null && (!messageObject.isRoundVideo() || videoTranscriptionsOpen.contains(reqInfoHash(messageObject)));
+        return messageObject == null || !messageObject.isRoundVideo() || (videoTranscriptionsOpen != null && videoTranscriptionsOpen.contains(reqInfoHash(messageObject)));
     }
 
     public static void resetVideoTranscriptionsOpen() {
@@ -662,7 +684,8 @@ public class TranscribeButton {
     public static boolean isTranscribing(MessageObject messageObject) {
         return (
             (transcribeOperationsByDialogPosition != null && (transcribeOperationsByDialogPosition.containsValue(messageObject) || transcribeOperationsByDialogPosition.containsKey((Integer) reqInfoHash(messageObject)))) ||
-            (transcribeOperationsById != null && messageObject != null && messageObject.messageOwner != null && transcribeOperationsById.containsKey(messageObject.messageOwner.voiceTranscriptionId))
+            (transcribeOperationsById != null && messageObject != null && messageObject.messageOwner != null && transcribeOperationsById.containsKey(messageObject.messageOwner.voiceTranscriptionId)) ||
+            (messageObject != null && org.telegram.messenger.mirrly.MirrlySttEngine.getInstance(messageObject.currentAccount).isTranscribing(messageObject))
         );
     }
 
@@ -733,11 +756,27 @@ public class TranscribeButton {
                                     if (transcribeOperationsByDialogPosition != null) {
                                         transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
                                     }
+                                    if (org.telegram.messenger.mirrly.MirrlyConfig.isFreeSttEnabled()) {
+                                        TranscribeButton.openVideoTranscription(messageObject);
+                                        org.telegram.messenger.mirrly.MirrlySttEngine.getInstance(account).transcribeMessage(messageObject);
+                                        return;
+                                    }
                                     if (delegate != null) {
                                         delegate.needShowPremiumBulletin(3);
                                     }
                                     NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.voiceTranscriptionUpdate, messageObject);
                                     NotificationCenter.getInstance(account).postNotificationName(NotificationCenter.updateTranscriptionLock);
+                                });
+                                return;
+                            }
+                            if (org.telegram.messenger.mirrly.MirrlyConfig.isFreeSttEnabled()
+                                    && !err.text.contains("CANCEL")) {
+                                AndroidUtilities.runOnUIThread(() -> {
+                                    if (transcribeOperationsByDialogPosition != null) {
+                                        transcribeOperationsByDialogPosition.remove((Integer) reqInfoHash(messageObject));
+                                    }
+                                    TranscribeButton.openVideoTranscription(messageObject);
+                                    org.telegram.messenger.mirrly.MirrlySttEngine.getInstance(account).transcribeMessage(messageObject);
                                 });
                                 return;
                             }
@@ -866,6 +905,9 @@ public class TranscribeButton {
         ConnectionsManager cc = ConnectionsManager.getInstance(messageObject.currentAccount);
         MessagesController mc = MessagesController.getInstance(messageObject.currentAccount);
         if (UserConfig.getInstance(messageObject.currentAccount).isPremium()) {
+            return false;
+        }
+        if (org.telegram.messenger.mirrly.MirrlyConfig.isFreeSttEnabled()) {
             return false;
         }
         return mc.transcribeAudioTrialCooldownUntil != 0 && cc.getCurrentTime() <= mc.transcribeAudioTrialCooldownUntil && mc.transcribeAudioTrialCurrentNumber <= 0;

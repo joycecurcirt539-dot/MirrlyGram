@@ -15,6 +15,7 @@ import android.view.MotionEvent;
 import android.view.View;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ChatObject;
@@ -29,6 +30,7 @@ import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.ChatActivity;
 import org.telegram.ui.Components.Forum.ForumUtilities;
+import org.telegram.utils.glass.GlassContrastHelper;
 
 public class TopicSeparator {
 
@@ -38,6 +40,24 @@ public class TopicSeparator {
     private final boolean withDots;
 
     public Text text;
+    private int overrideTextColor = 0;
+    private @Nullable GlassContrastHelper.HorizontalAdaptiveBand adaptiveBand;
+
+    public void setOverrideTextColor(int color) {
+        this.overrideTextColor = color;
+        this.adaptiveBand = null;
+        if (text != null) {
+            text.setAdaptiveHorizontalGradient(null);
+        }
+    }
+
+    public void setOverrideAdaptiveStyle(int solidColor, @Nullable GlassContrastHelper.HorizontalAdaptiveBand band) {
+        this.overrideTextColor = solidColor;
+        this.adaptiveBand = band;
+        if (text != null) {
+            text.setAdaptiveHorizontalGradient(band);
+        }
+    }
     public final AvatarDrawable avatarDrawable = new AvatarDrawable();
     public final ImageReceiver image;
     public AnimatedEmojiDrawable emojiImage;
@@ -211,12 +231,17 @@ public class TopicSeparator {
                 image.setAlpha(alpha);
                 image.draw(canvas);
             }
-            final int textColor = Theme.getColor(Theme.isCompactMode(resourcesProvider) ? Theme.key_chat_compact_topicSeparatorText : Theme.key_chat_serviceText, resourcesProvider);
+            final int baseColor = Theme.getColor(Theme.isCompactMode(resourcesProvider) ? Theme.key_chat_compact_topicSeparatorText : Theme.key_chat_serviceText, resourcesProvider);
+            final int textColor = overrideTextColor != 0 ? overrideTextColor : baseColor;
+            text.setAdaptiveHorizontalGradient(adaptiveBand);
             text.draw(canvas, sideMenuWidth / 2f + left + dp(27.66f), top + dp(16.5f), textColor, alpha);
 
+            final int arrowColor = adaptiveBand != null && adaptiveBand.useGradient
+                    ? adaptiveBand.colors[GlassContrastHelper.HorizontalAdaptiveBand.SAMPLE_COUNT - 1]
+                    : textColor;
             canvas.save();
             canvas.translate(sideMenuWidth / 2f + left + width - dp(11.25f), top + dp(16.5f));
-            arrowPaint.setColor(Theme.multAlpha(textColor, .75f * alpha));
+            arrowPaint.setColor(Theme.multAlpha(arrowColor, .75f * alpha));
             arrowPaint.setStrokeWidth(dp(1.66f));
             canvas.drawPath(arrowPath, arrowPaint);
             canvas.restore();

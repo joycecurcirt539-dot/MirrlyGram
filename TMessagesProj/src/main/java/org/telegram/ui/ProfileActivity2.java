@@ -56,6 +56,7 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.mirrly.MirrlyPhonePrivacyManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.tgnet.tl.TL_fragment;
 import org.telegram.ui.ActionBar.ActionBar;
@@ -205,7 +206,10 @@ public class ProfileActivity2 extends BaseFragment implements
         getNotificationCenter().updateObserver(add, this, NotificationCenter.updateInterfaces);
         getNotificationCenter().updateObserver(add, this, NotificationCenter.userInfoDidLoad);
         getNotificationCenter().updateObserver(add, this, NotificationCenter.chatInfoDidLoad);
+        NotificationCenter.getGlobalInstance().updateObserver(add, this, NotificationCenter.mirrlyPhonePrivacyChanged);
     }
+
+    private boolean phoneTempRevealed;
 
     private UniversalRecyclerView listView;
     private LinearSnapHelper snapHelper;
@@ -567,24 +571,16 @@ public class ProfileActivity2 extends BaseFragment implements
 
         final String username = UserObject.getPublicUsername(user);
         final boolean hasInfo = userInfo != null && !TextUtils.isEmpty(userInfo.about) || user != null && !TextUtils.isEmpty(username);
-        final boolean hasPhone = user != null && (!TextUtils.isEmpty(user.phone) || !TextUtils.isEmpty(vcardPhone));
+        final boolean hasLocalPeerPhone = !self && MirrlyPhonePrivacyManager.getPeerRule(currentAccount, user.id) != null;
+        final boolean hasPhone = user != null && (!TextUtils.isEmpty(user.phone) || !TextUtils.isEmpty(vcardPhone) || hasLocalPeerPhone);
         if (user.bot || !hasPhone || !hasInfo)
             return;
 
-        final String phoneNumber;
-        if (!TextUtils.isEmpty(vcardPhone)) {
-            phoneNumber = vcardPhone;
-        } else if (!TextUtils.isEmpty(user.phone)) {
-            phoneNumber = user.phone;
-        } else {
-            phoneNumber = null;
-        }
-
-        final boolean isFragment = phoneNumber != null && phoneNumber.matches("888\\d{8}");
+        final MirrlyPhonePrivacyManager.ResolvedPhone resolved = MirrlyPhonePrivacyManager.resolveUserPhone(currentAccount, user, vcardPhone, phoneTempRevealed);
         items.add(TextDetailCell.Factory.of(
             ID_PHONE,
-            phoneNumber != null ? PhoneFormat.getInstance().format("+" + phoneNumber) : getString(R.string.PhoneHidden),
-            isFragment ? getString(R.string.AnonymousNumber) : getString(R.string.PhoneMobile)
+            resolved.displayText,
+            resolved.isFragmentNumber ? getString(R.string.AnonymousNumber) : getString(R.string.PhoneMobile)
         ));
     }
     private void addUsernameRow(ArrayList<UItem> items) {
@@ -734,10 +730,47 @@ public class ProfileActivity2 extends BaseFragment implements
         if (item.id == ID_BIZ_HOURS) {
             hoursExpanded = !hoursExpanded;
             listView.adapter.update(true);
+        } else if (item.id == ID_PHONE && user != null) {
+            MirrlyPhonePrivacyManager.ResolvedPhone resolved = MirrlyPhonePrivacyManager.resolveUserPhone(currentAccount, user, vcardPhone, phoneTempRevealed);
+            if (resolved.isSelf) {
+                if (resolved.hiddenLabel) {
+                    presentFragment(new ActionIntroActivity(ActionIntroActivity.ACTION_TYPE_CHANGE_PHONE_NUMBER));
+                } else if (resolved.canCopy) {
+                    AndroidUtilities.vibrateCursor(view);
+                    MirrlyUiKit.copyTextWithBulletin(this, resolved.copyValue, getString(R.string.PhoneCopied), null, resourceProvider);
+                }
+            } else if (resolved.spoilered && view instanceof TextDetailCell) {
+                TextDetailCell cell = (TextDetailCell) view;
+                if (!cell.textView.isSpoilerAnimating()) {
+                    AndroidUtilities.vibrateCursor(view);
+                    phoneTempRevealed = true;
+                    cell.textView.revealAt(x - cell.textView.getLeft(), y - cell.textView.getTop());
+                }
+            } else if (resolved.canCopy) {
+                AndroidUtilities.vibrateCursor(view);
+                MirrlyUiKit.copyTextWithBulletin(this, resolved.copyValue, getString(R.string.PhoneCopied), null, resourceProvider);
+            }
         }
     }
 
     private boolean onLongClick(UItem item, View view, int position, float x, float y) {
+        if (item.id == ID_PHONE && user != null && !self) {
+            MirrlyPhonePrivacySheets.showPeerRuleSheet(
+                    this,
+                    resourceProvider,
+                    currentAccount,
+                    user,
+                    user.id,
+                    null,
+                    () -> {
+                        phoneTempRevealed = false;
+                        if (listView != null && listView.adapter != null) {
+                            listView.adapter.update(true);
+                        }
+                    }
+            );
+            return true;
+        }
         return false;
     }
 
@@ -899,6 +932,11 @@ public class ProfileActivity2 extends BaseFragment implements
             }
             if (avatarsViewPager != null) {
                 avatarsViewPager.setChatInfo(chatInfo);
+            }
+        } else if (id == NotificationCenter.mirrlyPhonePrivacyChanged) {
+            phoneTempRevealed = false;
+            if (listView != null && listView.adapter != null) {
+                listView.adapter.update(true);
             }
         }
     }

@@ -187,6 +187,7 @@ import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundColorPro
 import org.telegram.ui.Components.chat.SendButtonBlockedByTypingView;
 import org.telegram.ui.Components.chat.layouts.ChatActivitySideControlsButtonsLayout;
 import org.telegram.ui.Components.inset.WindowInsetsInAppController;
+import org.telegram.utils.glass.GlassContrastHelper;
 import org.telegram.ui.ContentPreviewViewer;
 import org.telegram.ui.DialogsActivity;
 import org.telegram.ui.Gifts.GiftSheet;
@@ -4845,6 +4846,7 @@ public class ChatActivityEnterView extends FrameLayout implements
     }
 
     private ActionBarMenuSubItem actionScheduleButton;
+    private ActionBarMenuSubItem translateSendButton;
     private boolean onSendLongClick(View view) {
         if (isInScheduleMode() || parentFragment != null && parentFragment.getChatMode() == ChatActivity.MODE_QUICK_REPLIES || animatorEphemeralMessageVisibility.getValue()) {
             return false;
@@ -4929,6 +4931,18 @@ public class ChatActivityEnterView extends FrameLayout implements
                     });
                     sendPopupLayout.addView(sendWithoutSoundButton, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, DEFAULT_HEIGHT));
                 }
+                if (!isStories) {
+                    translateSendButton = new ActionBarMenuSubItem(getContext(), !scheduleButtonValue && !sendWithoutSoundButtonValue, true, resourcesProvider);
+                    translateSendButton.setTextAndIcon(LocaleController.getString(R.string.MirrlyTranslateSendShort), R.drawable.msg_translate);
+                    translateSendButton.setMinimumWidth(dp(196));
+                    translateSendButton.setOnClickListener(v -> {
+                        if (sendPopupWindow != null && sendPopupWindow.isShowing()) {
+                            sendPopupWindow.dismiss();
+                        }
+                        openMirrlyTranslateSendSheet();
+                    });
+                    sendPopupLayout.addView(translateSendButton, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, DEFAULT_HEIGHT));
+                }
                 sendPopupWindow = new ActionBarPopupWindow(sendPopupLayout, LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT) {
                     @Override
                     public void dismiss() {
@@ -4951,6 +4965,10 @@ public class ChatActivityEnterView extends FrameLayout implements
             }
             if (actionScheduleButton != null) {
                 actionScheduleButton.setVisibility(voiceOnce ? View.GONE : View.VISIBLE);
+            }
+            if (translateSendButton != null) {
+                boolean hasDraftText = messageEditText != null && !TextUtils.isEmpty(messageEditText.getText()) && !TextUtils.isEmpty(messageEditText.getText().toString().trim());
+                translateSendButton.setVisibility(hasDraftText && !isStories ? View.VISIBLE : View.GONE);
             }
 
             if (sendWhenOnlineButton != null) {
@@ -5206,6 +5224,17 @@ public class ChatActivityEnterView extends FrameLayout implements
                 }
             });
         }
+        if (containsSendMessage && audioToSend == null && richDraftMessage == null && !isStories
+                && messageEditText != null && !TextUtils.isEmpty(messageEditText.getText())
+                && !TextUtils.isEmpty(messageEditText.getText().toString().trim())) {
+            options.add(R.drawable.msg_translate, LocaleController.getString(R.string.MirrlyTranslateSendShort), () -> {
+                if (messageSendPreview != null) {
+                    messageSendPreview.dismiss(false);
+                    messageSendPreview = null;
+                }
+                openMirrlyTranslateSendSheet();
+            });
+        }
         options.setupSelectors();
         if (sendWhenOnlineButton != null) {
             TLRPC.User user = parentFragment == null ? null : parentFragment.getCurrentUser();
@@ -5224,6 +5253,53 @@ public class ChatActivityEnterView extends FrameLayout implements
         } catch (Exception ignore) {}
 
         return false;
+    }
+
+    private void openMirrlyTranslateSendSheet() {
+        if (parentActivity == null || messageEditText == null || TextUtils.isEmpty(messageEditText.getText())) {
+            return;
+        }
+        final CharSequence draft = messageEditText.getTextToUse();
+        if (TextUtils.isEmpty(draft) || TextUtils.isEmpty(draft.toString().trim())) {
+            return;
+        }
+        final boolean self = parentFragment != null && UserObject.isUserSelf(parentFragment.getCurrentUser());
+        final boolean canSchedule = parentFragment != null && parentFragment.canScheduleMessage();
+        final boolean canSilent = !(self || slowModeTimer > 0 && !isInScheduleMode());
+        MirrlyTranslateSendSheet sheet = new MirrlyTranslateSendSheet(
+                parentActivity,
+                dialog_id,
+                draft,
+                canSilent,
+                canSchedule,
+                resourcesProvider,
+                new MirrlyTranslateSendSheet.Delegate() {
+                    @Override
+                    public void onSendTranslated(@NonNull String translatedText, boolean notify, int scheduleDate) {
+                        if (messageEditText != null) {
+                            messageEditText.setText(translatedText);
+                            messageEditText.setSelection(messageEditText.length());
+                        }
+                        if (scheduleDate == -1 && parentFragment != null) {
+                            AlertsCreator.createScheduleDatePickerDialog(parentActivity, parentFragment.getDialogId(), (schedNotify, schedDate, schedRepeat) -> {
+                                sendMessageInternal(schedNotify, schedDate, schedRepeat, 0, true);
+                            }, resourcesProvider);
+                        } else {
+                            sendMessageInternal(notify, scheduleDate, 0, 0, true);
+                        }
+                    }
+
+                    @Override
+                    public void onApplyTranslatedToInput(@NonNull String translatedText) {
+                        if (messageEditText != null) {
+                            messageEditText.setText(translatedText);
+                            messageEditText.setSelection(messageEditText.length());
+                            openKeyboard();
+                        }
+                    }
+                }
+        );
+        sheet.show();
     }
 
     private void createBotCommandsMenuContainer() {
@@ -10597,11 +10673,255 @@ public class ChatActivityEnterView extends FrameLayout implements
                 deleteRichDraftButton.setBackground(Theme.createInsetRoundRectDrawable(selectorColor, dp(19), dp(1), dp(3)));
             }
         }
+        if (adaptiveContrastApplied) {
+            final float factor = lastAdaptiveInvertFactor;
+            lastAdaptiveInvertFactor = -1f;
+            applyAdaptiveGlassContrast(factor);
+        }
     }
 
     private int lastDoneCheckColor, lastAudioVideoColor, lastEmojiSelectorColor;
     private Drawable lastDoneCheckDrawable;
     private boolean audioVideoColorApplied, emojiSelectorApplied;
+    private boolean adaptiveContrastApplied;
+    private float lastAdaptiveInvertFactor = -1f;
+    private int lastAdaptiveIconColor;
+    private PorterDuffColorFilter adaptiveIconMultiplyFilter;
+    private final GlassContrastHelper.HorizontalAdaptiveBand enterAdaptiveBand = new GlassContrastHelper.HorizontalAdaptiveBand();
+    private LinearGradient enterGradientShader;
+    private Matrix enterGradientMatrix;
+    private int[] enterGradientColors;
+    private float[] enterGradientPositions;
+    private int enterGradientWidth;
+    private final int[] perViewAdaptiveColors = new int[11];
+    private final PorterDuffColorFilter[] perViewAdaptiveFilters = new PorterDuffColorFilter[11];
+
+    private int applyPerButtonAdaptiveContrast(
+            int slot,
+            @Nullable ImageView view,
+            @Nullable ViewGroup sampleTarget,
+            int glassBgColor,
+            int baseIcon,
+            @Nullable org.telegram.utils.glass.source.GlassSource backdropSource,
+            @Nullable Drawable backdropDrawable,
+            int viewportW,
+            int viewportH,
+            float fallbackBgLuma,
+            boolean liquidShaderActive
+    ) {
+        if (view == null || view.getVisibility() != VISIBLE || view.getWidth() <= 0 || view.getHeight() <= 0) {
+            return baseIcon;
+        }
+        final int color = GlassContrastHelper.estimateIconAdaptiveColor(
+                view, sampleTarget, glassBgColor, baseIcon,
+                backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma,
+                resourcesProvider, false, liquidShaderActive
+        );
+        if (perViewAdaptiveFilters[slot] == null || perViewAdaptiveColors[slot] != color) {
+            perViewAdaptiveColors[slot] = color;
+            perViewAdaptiveFilters[slot] = new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN);
+        }
+        view.setColorFilter(perViewAdaptiveFilters[slot]);
+        if (slot == 9 && view.getDrawable() instanceof CombinedDrawable) {
+            Drawable calBg = ((CombinedDrawable) view.getDrawable()).getBackground();
+            if (calBg != null) {
+                calBg.setColorFilter(perViewAdaptiveFilters[slot]);
+            }
+        }
+        return color;
+    }
+
+    public void updateSmartAdaptiveGlassContrast(
+            @Nullable ViewGroup sampleTarget,
+            int glassBgColor,
+            @Nullable org.telegram.utils.glass.source.GlassSource backdropSource,
+            @Nullable Drawable backdropDrawable,
+            int viewportW,
+            int viewportH,
+            float fallbackBgLuma,
+            boolean liquidShaderActive,
+            boolean resetToBase
+    ) {
+        if (resetToBase) {
+            applyAdaptiveGlassContrast(0f);
+            return;
+        }
+        adaptiveContrastApplied = true;
+        if (messageEditText != null && messageEditText.getWidth() > 0 && messageEditText.getHeight() > 0) {
+            final int baseText = getThemedColor(Theme.key_chat_messagePanelText);
+            final int baseHint = getThemedColor(Theme.key_chat_messagePanelHint);
+            final int baseCursor = getThemedColor(Theme.key_chat_messagePanelCursor);
+            final float bandSpan = Math.max(messageEditText.getWidth(), dp(48));
+            GlassContrastHelper.computeHorizontalAdaptiveBand(
+                    messageEditText, sampleTarget,
+                    0f, 0f, bandSpan, messageEditText.getHeight(),
+                    glassBgColor, baseText, backdropSource, backdropDrawable,
+                    viewportW, viewportH, fallbackBgLuma, resourcesProvider,
+                    false, false, liquidShaderActive, enterAdaptiveBand
+            );
+            final float underCenter = GlassContrastHelper.estimateUnderlyingLuminanceInBand(
+                    messageEditText, sampleTarget,
+                    0f, 0f, bandSpan, messageEditText.getHeight(),
+                    backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma, resourcesProvider
+            );
+            final float centerWcag = GlassContrastHelper.computeCompositeWcagLuminance(glassBgColor, underCenter);
+            final int adaptedHint = GlassContrastHelper.resolveAdaptiveColorFromWcag(baseHint, centerWcag, true, false);
+            final int adaptedCursor = GlassContrastHelper.resolveAdaptiveColorFromWcag(baseCursor, centerWcag, false, false);
+            messageEditText.setTextColor(enterAdaptiveBand.solidColor);
+            messageEditText.setHintTextColor(adaptedHint);
+            messageEditText.setCursorColor(adaptedCursor);
+            GlassContrastHelper.applyOpticalTextHalo(messageEditText.getPaint(), enterAdaptiveBand.solidColor, enterAdaptiveBand.haloStrength);
+
+            if (enterAdaptiveBand.useGradient && enterAdaptiveBand.gradientWidth > 0) {
+                final int n = GlassContrastHelper.HorizontalAdaptiveBand.SAMPLE_COUNT;
+                boolean changed = enterGradientShader == null || Math.abs(enterGradientWidth - enterAdaptiveBand.gradientWidth) > 2;
+                if (enterGradientColors == null) {
+                    enterGradientColors = new int[n];
+                    enterGradientPositions = new float[n];
+                    changed = true;
+                }
+                if (!changed) {
+                    for (int i = 0; i < n; i++) {
+                        if (enterGradientColors[i] != enterAdaptiveBand.colors[i]) {
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+                if (changed) {
+                    System.arraycopy(enterAdaptiveBand.colors, 0, enterGradientColors, 0, n);
+                    System.arraycopy(enterAdaptiveBand.positions, 0, enterGradientPositions, 0, n);
+                    enterGradientWidth = Math.max(1, enterAdaptiveBand.gradientWidth);
+                    enterGradientShader = new LinearGradient(0f, 0f, enterGradientWidth, 0f,
+                            enterGradientColors, enterGradientPositions, Shader.TileMode.CLAMP);
+                    if (enterGradientMatrix == null) {
+                        enterGradientMatrix = new Matrix();
+                    }
+                }
+                messageEditText.getPaint().setShader(enterGradientShader);
+            } else if (messageEditText.getPaint().getShader() != null) {
+                messageEditText.getPaint().setShader(null);
+            }
+            messageEditText.invalidate();
+        }
+
+        final int baseIcon = getThemedColor(Theme.key_glass_defaultIcon);
+        final int emojiCol = applyPerButtonAdaptiveContrast(0, emojiButton, sampleTarget, glassBgColor, baseIcon, backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma, liquidShaderActive);
+        applyPerButtonAdaptiveContrast(1, deleteRichDraftButton, sampleTarget, glassBgColor, baseIcon, backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma, liquidShaderActive);
+        applyPerButtonAdaptiveContrast(2, notifyButton, sampleTarget, glassBgColor, baseIcon, backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma, liquidShaderActive);
+        final int attachCol = applyPerButtonAdaptiveContrast(3, attachButton, sampleTarget, glassBgColor, baseIcon, backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma, liquidShaderActive);
+        applyPerButtonAdaptiveContrast(4, aiButton, sampleTarget, glassBgColor, baseIcon, backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma, liquidShaderActive);
+        applyPerButtonAdaptiveContrast(5, richButton, sampleTarget, glassBgColor, baseIcon, backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma, liquidShaderActive);
+        applyPerButtonAdaptiveContrast(6, giftButton, sampleTarget, glassBgColor, baseIcon, backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma, liquidShaderActive);
+        applyPerButtonAdaptiveContrast(7, suggestButton, sampleTarget, glassBgColor, baseIcon, backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma, liquidShaderActive);
+        applyPerButtonAdaptiveContrast(8, botButton, sampleTarget, glassBgColor, baseIcon, backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma, liquidShaderActive);
+        applyPerButtonAdaptiveContrast(9, scheduledButton, sampleTarget, glassBgColor, baseIcon, backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma, liquidShaderActive);
+
+        if (slowModeButton != null) {
+            slowModeButton.setTextColor(attachCol);
+        }
+        if (stickersArrow != null) {
+            stickersArrow.setColor(emojiCol);
+        }
+        if (audioVideoSendButton != null && audioVideoButtonContainerForbidden) {
+            final int avColor = applyPerButtonAdaptiveContrast(10, audioVideoSendButton, sampleTarget, glassBgColor, baseIcon, backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma, liquidShaderActive);
+            lastAudioVideoColor = avColor;
+        }
+    }
+
+    public void applyAdaptiveGlassContrast(float invertFactor) {
+        final float clamped = Math.max(0f, Math.min(1f, invertFactor));
+        if (clamped <= 0.001f) {
+            if (!adaptiveContrastApplied) {
+                return;
+            }
+            adaptiveContrastApplied = false;
+            lastAdaptiveInvertFactor = 0f;
+            if (messageEditText != null) {
+                final int baseText = getThemedColor(Theme.key_chat_messagePanelText);
+                messageEditText.getPaint().setShader(null);
+                ThemeBind.textColor(messageEditText, Theme.key_chat_messagePanelText, resourcesProvider);
+                ThemeBind.editHintColor(messageEditText, Theme.key_chat_messagePanelHint, resourcesProvider);
+                ThemeBind.cursorColor(messageEditText, Theme.key_chat_messagePanelCursor, resourcesProvider);
+                GlassContrastHelper.applyOpticalTextHalo(messageEditText.getPaint(), baseText, 0f);
+            }
+            applyAdaptiveIconColorToViews(getThemedColor(Theme.key_glass_defaultIcon), true);
+            return;
+        }
+        if (adaptiveContrastApplied && Math.abs(lastAdaptiveInvertFactor - clamped) < 0.008f) {
+            return;
+        }
+        adaptiveContrastApplied = true;
+        lastAdaptiveInvertFactor = clamped;
+
+        if (messageEditText != null) {
+            final int baseText = getThemedColor(Theme.key_chat_messagePanelText);
+            final int baseHint = getThemedColor(Theme.key_chat_messagePanelHint);
+            final int baseCursor = getThemedColor(Theme.key_chat_messagePanelCursor);
+            final int adaptedText = GlassContrastHelper.blendAdaptiveTextColor(baseText, clamped, false);
+            final int adaptedHint = GlassContrastHelper.blendAdaptiveHintColor(baseHint, clamped);
+            final int adaptedCursor = GlassContrastHelper.blendAdaptiveTextColor(baseCursor, clamped, false);
+            messageEditText.setTextColor(adaptedText);
+            messageEditText.setHintTextColor(adaptedHint);
+            messageEditText.setCursorColor(adaptedCursor);
+            GlassContrastHelper.applyOpticalTextHalo(messageEditText.getPaint(), adaptedText, Math.max(0.40f, clamped * 0.72f));
+        }
+
+        final int baseIcon = getThemedColor(Theme.key_glass_defaultIcon);
+        final int adaptedIcon = GlassContrastHelper.blendAdaptiveIconColor(baseIcon, clamped);
+        applyAdaptiveIconColorToViews(adaptedIcon, false);
+    }
+
+    private void applyAdaptiveIconColorToViews(int color, boolean resetBindings) {
+        if (resetBindings) {
+            if (emojiButton != null) ThemeBind.colorFilter(emojiButton, Theme.key_glass_defaultIcon, resourcesProvider, PorterDuff.Mode.MULTIPLY);
+            if (deleteRichDraftButton != null) ThemeBind.colorFilter(deleteRichDraftButton, Theme.key_glass_defaultIcon, resourcesProvider, PorterDuff.Mode.MULTIPLY);
+            if (notifyButton != null) ThemeBind.colorFilter(notifyButton, Theme.key_glass_defaultIcon, resourcesProvider, PorterDuff.Mode.MULTIPLY);
+            if (attachButton != null) ThemeBind.colorFilter(attachButton, Theme.key_glass_defaultIcon, resourcesProvider, PorterDuff.Mode.MULTIPLY);
+            if (aiButton != null) ThemeBind.colorFilter(aiButton, Theme.key_glass_defaultIcon, resourcesProvider, PorterDuff.Mode.MULTIPLY);
+            if (richButton != null) ThemeBind.colorFilter(richButton, Theme.key_glass_defaultIcon, resourcesProvider, PorterDuff.Mode.MULTIPLY);
+            if (giftButton != null) ThemeBind.colorFilter(giftButton, Theme.key_glass_defaultIcon, resourcesProvider, PorterDuff.Mode.MULTIPLY);
+            if (suggestButton != null) ThemeBind.colorFilter(suggestButton, Theme.key_glass_defaultIcon, resourcesProvider, PorterDuff.Mode.MULTIPLY);
+            if (scheduledButton != null && scheduledButton.getDrawable() instanceof CombinedDrawable) {
+                Drawable calBg = ((CombinedDrawable) scheduledButton.getDrawable()).getBackground();
+                if (calBg != null) {
+                    ThemeBind.drawableColorFilter(this, calBg, Theme.key_glass_defaultIcon, resourcesProvider, PorterDuff.Mode.MULTIPLY);
+                }
+            }
+        } else {
+            if (adaptiveIconMultiplyFilter == null || lastAdaptiveIconColor != color) {
+                lastAdaptiveIconColor = color;
+                adaptiveIconMultiplyFilter = new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN);
+            }
+            if (emojiButton != null) emojiButton.setColorFilter(adaptiveIconMultiplyFilter);
+            if (deleteRichDraftButton != null) deleteRichDraftButton.setColorFilter(adaptiveIconMultiplyFilter);
+            if (notifyButton != null) notifyButton.setColorFilter(adaptiveIconMultiplyFilter);
+            if (attachButton != null) attachButton.setColorFilter(adaptiveIconMultiplyFilter);
+            if (aiButton != null) aiButton.setColorFilter(adaptiveIconMultiplyFilter);
+            if (richButton != null) richButton.setColorFilter(adaptiveIconMultiplyFilter);
+            if (giftButton != null) giftButton.setColorFilter(adaptiveIconMultiplyFilter);
+            if (suggestButton != null) suggestButton.setColorFilter(adaptiveIconMultiplyFilter);
+            if (botButton != null) botButton.setColorFilter(adaptiveIconMultiplyFilter);
+            if (scheduledButton != null && scheduledButton.getDrawable() instanceof CombinedDrawable) {
+                Drawable calBg = ((CombinedDrawable) scheduledButton.getDrawable()).getBackground();
+                if (calBg != null) {
+                    calBg.setColorFilter(adaptiveIconMultiplyFilter);
+                }
+            }
+        }
+        if (slowModeButton != null) {
+            slowModeButton.setTextColor(color);
+        }
+        if (stickersArrow != null) {
+            stickersArrow.setColor(color);
+        }
+        if (audioVideoSendButton != null && audioVideoButtonContainerForbidden) {
+            lastAudioVideoColor = color;
+            audioVideoSendButton.setColorFilter(adaptiveIconMultiplyFilter != null && !resetBindings
+                    ? adaptiveIconMultiplyFilter
+                    : new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
+        }
+    }
     @Override
     public void addColorKeys(HashSet<Integer> colors) {
         colors.add(Theme.key_chat_messagePanelBackground);

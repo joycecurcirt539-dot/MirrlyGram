@@ -1,6 +1,7 @@
 package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
+import static org.telegram.messenger.AndroidUtilities.dpf2;
 
 import android.animation.ValueAnimator;
 import android.content.Context;
@@ -24,6 +25,7 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.LayerDrawable;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.util.TypedValue;
@@ -32,6 +34,7 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
+import android.view.ViewParent;
 import android.view.animation.OvershootInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -76,6 +79,7 @@ import org.telegram.ui.Components.UniversalAdapter;
 import org.telegram.ui.Components.UniversalRecyclerView;
 import org.telegram.ui.Components.voip.CellFlickerDrawable;
 import org.telegram.ui.Stories.recorder.ButtonWithCounterView;
+import org.telegram.utils.glass.GlassEngine;
 
 import java.lang.ref.WeakReference;
 import java.util.Arrays;
@@ -90,6 +94,40 @@ import java.util.Objects;
 public final class MirrlyUiKit {
 
     private MirrlyUiKit() {
+    }
+
+    public static void attachDisallowInterceptTouch(@NonNull View view) {
+        view.setOnTouchListener(new View.OnTouchListener() {
+            private float downX, downY;
+            private final int touchSlop = ViewConfiguration.get(view.getContext()).getScaledTouchSlop();
+
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                ViewParent parent = v.getParent();
+                if (parent == null) {
+                    return false;
+                }
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downX = event.getRawX();
+                        downY = event.getRawY();
+                        parent.requestDisallowInterceptTouchEvent(true);
+                        break;
+                    case MotionEvent.ACTION_MOVE:
+                        float dx = Math.abs(event.getRawX() - downX);
+                        float dy = Math.abs(event.getRawY() - downY);
+                        if (dx > touchSlop * 2 || dy > touchSlop * 2) {
+                            parent.requestDisallowInterceptTouchEvent(false);
+                        }
+                        break;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        parent.requestDisallowInterceptTouchEvent(false);
+                        break;
+                }
+                return false;
+            }
+        });
     }
 
     public static String formatClientVersion() {
@@ -121,6 +159,190 @@ public final class MirrlyUiKit {
                     : (fragment != null ? BulletinFactory.of(fragment) : BulletinFactory.global());
             factory.createSimpleBulletin(R.raw.copy, toastMessage).show();
         }
+    }
+
+    /**
+     * Resolves a translucent tinted surface fill suited for cards placed inside FrostedBottomSheet.
+     */
+    public static int resolveTranslucentSurfaceColor(@Nullable Theme.ResourcesProvider resourcesProvider) {
+        int dialogBg = Theme.getColor(Theme.key_dialogBackground, resourcesProvider);
+        int textColor = Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider);
+        int surfaceGray = Theme.getColor(Theme.key_dialogBackgroundGray, resourcesProvider);
+        boolean isDark = AndroidUtilities.computePerceivedBrightness(dialogBg) < 0.5f;
+        int fillRgb = surfaceGray != dialogBg
+                ? ColorUtils.blendARGB(surfaceGray, isDark ? Color.WHITE : textColor, isDark ? 0.05f : 0.025f)
+                : ColorUtils.blendARGB(dialogBg, isDark ? Color.WHITE : textColor, isDark ? 0.12f : 0.06f);
+        return ColorUtils.setAlphaComponent(fillRgb, isDark ? 0x7A : 0x6A);
+    }
+
+    /**
+     * Resolves a crisp 0.5dp hairline border color adapting across Light, Dark, AMOLED, and Monet themes.
+     */
+    public static int resolveSurfaceHairlineColor(@Nullable Theme.ResourcesProvider resourcesProvider) {
+        int dialogBg = Theme.getColor(Theme.key_dialogBackground, resourcesProvider);
+        int textColor = Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider);
+        boolean isDark = AndroidUtilities.computePerceivedBrightness(dialogBg) < 0.5f;
+        int baseColor = isDark ? Color.WHITE : textColor;
+        int baseAlpha = isDark ? 0x1E : 0x16;
+        float rimScale = Utilities.clamp(MirrlyConfig.getGlassRimScale(), 1.5f, 0.5f);
+        return ColorUtils.setAlphaComponent(baseColor, Math.min(255, Math.round(baseAlpha * rimScale)));
+    }
+
+    /**
+     * Builds a translucent rounded surface drawable with an anti-aliased 0.5dp hairline rim.
+     */
+    public static Drawable createTintedSurfaceDrawable(
+            int radiusDp,
+            @Nullable Theme.ResourcesProvider resourcesProvider
+    ) {
+        return createTintedSurfaceDrawable(radiusDp, resourcesProvider, false);
+    }
+
+    /**
+     * Builds a translucent rounded surface drawable with a 0.5dp hairline rim and optional ripple selector.
+     */
+    public static Drawable createTintedSurfaceDrawable(
+            int radiusDp,
+            @Nullable Theme.ResourcesProvider resourcesProvider,
+            boolean interactive
+    ) {
+        return createTintedSurfaceDrawable(
+                radiusDp,
+                resolveTranslucentSurfaceColor(resourcesProvider),
+                resolveSurfaceHairlineColor(resourcesProvider),
+                resourcesProvider,
+                interactive
+        );
+    }
+
+    /**
+     * Builds a rounded surface drawable with custom fill, directional 0.55dp specular hairline rim,
+     * subtle vertical lens sheen, and optional ripple selector.
+     */
+    public static Drawable createTintedSurfaceDrawable(
+            int radiusDp,
+            int fillColor,
+            int borderColor,
+            @Nullable Theme.ResourcesProvider resourcesProvider,
+            boolean interactive
+    ) {
+        final boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
+        Drawable surface = new Drawable() {
+            private final Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint sheenPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final RectF rect = new RectF();
+            private final float radiusPx = dp(radiusDp);
+            private int drawableAlpha = 255;
+            private int lastGradTop = Integer.MIN_VALUE;
+            private int lastGradBottom = Integer.MIN_VALUE;
+            private int lastGlassGen = -1;
+            private float currentStrokeWidth = dpf2(0.55f);
+
+            {
+                fillPaint.setColor(fillColor);
+                strokePaint.setStyle(Paint.Style.STROKE);
+                strokePaint.setStrokeWidth(currentStrokeWidth);
+                strokePaint.setColor(borderColor);
+            }
+
+            private void ensureGradients(int top, int bottom) {
+                int gen = GlassEngine.getGlassSettingsGenerationId();
+                if (top == lastGradTop && bottom == lastGradBottom && gen == lastGlassGen) {
+                    return;
+                }
+                lastGradTop = top;
+                lastGradBottom = bottom;
+                lastGlassGen = gen;
+
+                float rimScale = Utilities.clamp(MirrlyConfig.getGlassRimScale(), 1.6f, 0.25f);
+                currentStrokeWidth = dpf2(0.55f) * Utilities.clamp(rimScale, 1.45f, 0.45f);
+                strokePaint.setStrokeWidth(currentStrokeWidth);
+
+                float h = Math.max(1f, bottom - top);
+                int baseBorderAlpha = Color.alpha(borderColor);
+                if (baseBorderAlpha > 0) {
+                    int topHighlight = ColorUtils.blendARGB(borderColor, Color.WHITE, isDark ? 0.38f : 0.52f);
+                    int topAlpha = Math.min(255, Math.round(baseBorderAlpha * 1.35f * rimScale));
+                    int midAlpha = Math.min(255, Math.round(baseBorderAlpha * 0.65f * rimScale));
+                    int bottomAlpha = Math.min(255, Math.round(baseBorderAlpha * 0.85f * rimScale));
+                    strokePaint.setShader(new LinearGradient(
+                            0f, top, 0f, bottom,
+                            new int[]{
+                                    ColorUtils.setAlphaComponent(topHighlight, topAlpha),
+                                    ColorUtils.setAlphaComponent(borderColor, midAlpha),
+                                    ColorUtils.setAlphaComponent(borderColor, bottomAlpha)
+                            },
+                            new float[]{0f, 0.55f, 1f},
+                            Shader.TileMode.CLAMP
+                    ));
+
+                    int sheenAlpha = Math.min(255, Math.round((isDark ? 0x12 : 0x22) * Utilities.clamp(rimScale, 1.35f, 0f)));
+                    sheenPaint.setShader(new LinearGradient(
+                            0f, top, 0f, top + h * 0.65f,
+                            ColorUtils.setAlphaComponent(Color.WHITE, sheenAlpha),
+                            0x00FFFFFF,
+                            Shader.TileMode.CLAMP
+                    ));
+                } else {
+                    strokePaint.setShader(null);
+                    sheenPaint.setShader(null);
+                }
+            }
+
+            @Override
+            public void draw(@NonNull Canvas canvas) {
+                Rect bounds = getBounds();
+                if (bounds.isEmpty()) {
+                    return;
+                }
+                ensureGradients(bounds.top, bounds.bottom);
+                rect.set(bounds);
+                float r = Math.min(radiusPx, Math.min(rect.width(), rect.height()) * 0.5f);
+                if (Color.alpha(fillColor) > 0) {
+                    canvas.drawRoundRect(rect, r, r, fillPaint);
+                }
+                if (Color.alpha(borderColor) > 0) {
+                    if (sheenPaint.getShader() != null) {
+                        canvas.drawRoundRect(rect, r, r, sheenPaint);
+                    }
+                    float inset = currentStrokeWidth * 0.5f;
+                    rect.inset(inset, inset);
+                    canvas.drawRoundRect(rect, Math.max(0f, r - inset), Math.max(0f, r - inset), strokePaint);
+                }
+            }
+
+            @Override
+            public void setAlpha(int alpha) {
+                drawableAlpha = alpha;
+                float factor = alpha / 255f;
+                fillPaint.setAlpha(Math.round(Color.alpha(fillColor) * factor));
+                sheenPaint.setAlpha(alpha);
+                strokePaint.setAlpha(Math.round(255 * factor));
+                invalidateSelf();
+            }
+
+            @Override
+            public void setColorFilter(@Nullable ColorFilter colorFilter) {
+                fillPaint.setColorFilter(colorFilter);
+                sheenPaint.setColorFilter(colorFilter);
+                strokePaint.setColorFilter(colorFilter);
+                invalidateSelf();
+            }
+
+            @Override
+            public int getOpacity() {
+                return PixelFormat.TRANSLUCENT;
+            }
+        };
+        if (!interactive) {
+            return surface;
+        }
+        int rippleColor = Theme.getColor(Theme.key_listSelector, resourcesProvider);
+        return new LayerDrawable(new Drawable[]{
+                surface,
+                Theme.createRadSelectorDrawable(rippleColor, radiusDp, radiusDp)
+        });
     }
 
     public static BottomSheet createFrostedBottomSheet(
@@ -166,7 +388,7 @@ public final class MirrlyUiKit {
             fixNavigationBar(Color.TRANSPARENT);
             behindKeyboardColorKey = -1;
             behindKeyboardColor = Color.TRANSPARENT;
-            setDimBehindAlpha(isDark ? 88 : 58);
+            setDimBehindAlpha(isDark ? 78 : 42);
         }
 
         @Override
@@ -175,15 +397,17 @@ public final class MirrlyUiKit {
             if (containerView != null) {
                 containerView.setBackground(new FrostedSheetDrawable());
             }
-            if (SharedConfig.chatBlurEnabled()) {
+            if (SharedConfig.chatBlurEnabled() && MirrlyConfig.isGlassBlurEnabled()) {
+                final int blurRadius = Math.max(4, Math.min(28, Math.round(12f * MirrlyConfig.getGlassBlurScale())));
                 AndroidUtilities.makeGlobalBlurBitmap(bitmap -> {
                     if (bitmap == null) {
                         return;
                     }
                     int dialogBg = Theme.getColor(Theme.key_dialogBackground, frostedProvider);
                     boolean isDark = AndroidUtilities.computePerceivedBrightness(dialogBg) < 0.5f;
+                    float satScale = Utilities.clamp(MirrlyConfig.getGlassSaturationScale(), 1.50f, 0.50f);
                     ColorMatrix cm = new ColorMatrix();
-                    AndroidUtilities.adjustSaturationColorMatrix(cm, isDark ? 0.10f : 0.24f);
+                    AndroidUtilities.adjustSaturationColorMatrix(cm, Utilities.clamp((isDark ? 0.14f : 0.28f) * satScale, 0.85f, 0.0f));
                     Bitmap styled = AndroidUtilities.applyColorMatrix(bitmap, cm);
                     if (styled != null) {
                         bitmap.recycle();
@@ -197,7 +421,7 @@ public final class MirrlyUiKit {
                     if (containerView != null) {
                         containerView.invalidate();
                     }
-                }, BLUR_DOWNSCALE, 12, null, container != null ? Collections.singletonList(container) : null);
+                }, BLUR_DOWNSCALE, blurRadius, null, container != null ? Collections.singletonList(container) : null);
             }
         }
 
@@ -227,6 +451,9 @@ public final class MirrlyUiKit {
             private final float[] topRadii = new float[8];
             private int lastSheenTop = Integer.MIN_VALUE;
             private boolean lastSheenDark;
+            private int lastRimTop = Integer.MIN_VALUE;
+            private int lastRimAlpha = -1;
+            private boolean lastRimDark;
 
             @Override
             public void draw(@NonNull Canvas canvas) {
@@ -263,7 +490,8 @@ public final class MirrlyUiKit {
                 canvas.save();
                 canvas.clipPath(glassPath);
 
-                if (blurShader != null && blurMatrix != null && containerView != null) {
+                boolean blurActive = blurShader != null && blurMatrix != null && containerView != null && MirrlyConfig.isGlassBlurEnabled();
+                if (blurActive) {
                     containerView.getLocationOnScreen(screenLocation);
                     blurMatrix.reset();
                     blurMatrix.postScale(BLUR_DOWNSCALE, BLUR_DOWNSCALE);
@@ -272,7 +500,11 @@ public final class MirrlyUiKit {
                     canvas.drawRect(cardRect, blurPaint);
                 }
 
-                int overlayAlpha = blurShader != null ? (isDark ? 0xBD : 0xCA) : 0xF5;
+                float baseAlpha = isDark ? (0xCD / 255f) : (0xD6 / 255f);
+                float effectiveAlpha = Math.max(isDark ? 0.78f : 0.80f, MirrlyConfig.getEffectiveGlassAlpha(baseAlpha));
+                int overlayAlpha = blurActive
+                        ? Math.round(Utilities.clamp(effectiveAlpha, 1f, isDark ? 0.78f : 0.80f) * 255f)
+                        : 0xF5;
                 tintPaint.setColor(ColorUtils.setAlphaComponent(dialogBg, overlayAlpha));
                 canvas.drawRect(cardRect, tintPaint);
 
@@ -285,7 +517,7 @@ public final class MirrlyUiKit {
                             t,
                             0f,
                             t + dp(56),
-                            isDark ? 0x18FFFFFF : 0x44FFFFFF,
+                            isDark ? 0x20FFFFFF : 0x58FFFFFF,
                             0x00FFFFFF,
                             Shader.TileMode.CLAMP
                     ));
@@ -293,13 +525,33 @@ public final class MirrlyUiKit {
                 canvas.drawRect(l, t, r, t + dp(56), sheenPaint);
                 canvas.restore();
 
-                borderPaint.setStyle(Paint.Style.STROKE);
-                borderPaint.setStrokeWidth(dp(0.8f));
-                borderPaint.setColor(isDark ? 0x2BFFFFFF : 0x72FFFFFF);
-                cardRect.inset(dp(0.4f), dp(0.4f));
-                glassPath.rewind();
-                glassPath.addRoundRect(cardRect, topRadii, Path.Direction.CW);
-                canvas.drawPath(glassPath, borderPaint);
+                float rimScale = Utilities.clamp(MirrlyConfig.getGlassRimScale(), 2.0f, 0.0f);
+                int rimAlpha = Math.min(255, Math.round((isDark ? 0x36 : 0x82) * rimScale));
+                if (rimAlpha > 0) {
+                    float strokeW = dpf2(0.85f) * Utilities.clamp(rimScale, 1.45f, 0.45f);
+                    borderPaint.setStyle(Paint.Style.STROKE);
+                    borderPaint.setStrokeWidth(strokeW);
+                    if (lastRimTop != sheenTopInt || lastRimAlpha != rimAlpha || lastRimDark != isDark) {
+                        lastRimTop = sheenTopInt;
+                        lastRimAlpha = rimAlpha;
+                        lastRimDark = isDark;
+                        int softAlpha = Math.max(0, Math.round(rimAlpha * (isDark ? 0.28f : 0.36f)));
+                        borderPaint.setShader(new LinearGradient(
+                                0f,
+                                t,
+                                0f,
+                                t + dp(110),
+                                ColorUtils.setAlphaComponent(Color.WHITE, rimAlpha),
+                                ColorUtils.setAlphaComponent(Color.WHITE, softAlpha),
+                                Shader.TileMode.CLAMP
+                        ));
+                    }
+                    float inset = strokeW * 0.5f;
+                    cardRect.inset(inset, inset);
+                    glassPath.rewind();
+                    glassPath.addRoundRect(cardRect, topRadii, Path.Direction.CW);
+                    canvas.drawPath(glassPath, borderPaint);
+                }
 
                 float handleW = dp(36);
                 float handleH = dp(4);
@@ -428,6 +680,9 @@ public final class MirrlyUiKit {
         options.add(R.drawable.msg_stats, LocaleController.getString(R.string.MirrlyQuickOpenDiagnostics), () ->
                 showEngineDiagnosticsSheet(fragment, resourcesProvider, onActionComplete)
         );
+        options.add(R.drawable.msg_info, LocaleController.getString(R.string.MirrlyDatacenterStatusTitle), () ->
+                fragment.presentFragment(new MirrlyDatacenterActivity())
+        );
         options.add(R.drawable.msg_copy, LocaleController.getString(R.string.MirrlyDiagCopyReport), () ->
                 copyTextWithBulletin(
                         fragment,
@@ -440,6 +695,7 @@ public final class MirrlyUiKit {
         if (scrimBg != null) {
             options.setScrimViewBackground(scrimBg);
         }
+        options.setBlur(true);
         options.show();
     }
 
@@ -497,10 +753,7 @@ public final class MirrlyUiKit {
         LinearLayout metricsCard = new LinearLayout(context);
         metricsCard.setOrientation(LinearLayout.VERTICAL);
         metricsCard.setPadding(dp(16), dp(10), dp(16), dp(10));
-        metricsCard.setBackground(Theme.createRoundRectDrawable(
-                dp(14),
-                Theme.getColor(Theme.key_dialogBackgroundGray, resourcesProvider)
-        ));
+        metricsCard.setBackground(createTintedSurfaceDrawable(14, resourcesProvider));
 
         AnimatedTextView endpointVal = addDiagRow(metricsCard, context, resourcesProvider, LocaleController.getString(R.string.MirrlyDiagAddressLabel));
         AnimatedTextView uptimeVal = addDiagRow(metricsCard, context, resourcesProvider, LocaleController.getString(R.string.MirrlyDiagUptimeLabel));
@@ -1143,6 +1396,7 @@ public final class MirrlyUiKit {
             subtitleView.setGravity(Gravity.CENTER);
             subtitleView.setPadding(dp(12), dp(4), dp(12), dp(4));
             ScaleStateListAnimator.apply(subtitleView, 0.04f, 1.0f);
+            attachDisallowInterceptTouch(subtitleView);
 
             subtitleView.setOnClickListener(v -> cycleSubtitle());
             subtitleView.setOnLongClickListener(v -> {
@@ -1387,14 +1641,37 @@ public final class MirrlyUiKit {
             canvas.drawCircle(cx, cy, radius, glowPaint);
         }
 
+        public boolean isIdleAnimationRunning() {
+            if (!isAttachedToWindow() || getVisibility() != View.VISIBLE) {
+                return false;
+            }
+            if (particlesView != null && particlesView.getVisibility() == View.VISIBLE
+                    && LiteMode.isEnabled(LiteMode.FLAG_PARTICLES)
+                    && (particlesView.drawable == null || !particlesView.drawable.paused)) {
+                return true;
+            }
+            if (brandEmblemView != null && brandEmblemView.getVisibility() == View.VISIBLE
+                    && SharedConfig.animationsEnabled()
+                    && LiteMode.isEnabled(LiteMode.FLAG_PARTICLES)) {
+                return true;
+            }
+            return lottieView != null && lottieView.getVisibility() == View.VISIBLE && lottieView.isPlaying();
+        }
+
         @Override
         public void updateColors() {
             titleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider));
             int accentColor = Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4, resourcesProvider);
+            boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
+            int pillFill = ColorUtils.setAlphaComponent(accentColor, Math.round((isDark ? 0x22 : 0x18) * MirrlyConfig.getEffectiveGlassAlpha(1f)));
+            int pillRim = ColorUtils.setAlphaComponent(ColorUtils.blendARGB(accentColor, Color.WHITE, isDark ? 0.45f : 0.25f), isDark ? 0x42 : 0x4C);
             subtitleView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText, resourcesProvider));
-            subtitleView.setSizeableBackground(Theme.createRoundRectDrawable(
-                    dp(14),
-                    ColorUtils.setAlphaComponent(accentColor, 0x16)
+            subtitleView.setSizeableBackground(createTintedSurfaceDrawable(
+                    14,
+                    pillFill,
+                    pillRim,
+                    resourcesProvider,
+                    false
             ));
             brandEmblemView.updateColors();
             particlesView.updateColors();
@@ -1918,6 +2195,8 @@ public final class MirrlyUiKit {
      */
     public static class IconSwitchCell extends TextCell {
         int boundItemId = Integer.MIN_VALUE;
+        CharSequence boundText;
+        int boundIconResId;
 
         public IconSwitchCell(Context context, Theme.ResourcesProvider resourcesProvider) {
             super(context, 20, false, true, resourcesProvider);
@@ -1928,9 +2207,15 @@ public final class MirrlyUiKit {
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             super.onMeasure(widthMeasureSpec, heightMeasureSpec);
             int leftInset = imageView.getVisibility() == VISIBLE ? dp(offsetFromImage) : dp(leftPadding);
-            int rightReserve = dp(37 + 22 + 16);
+            int rightReserve = dp(37 + 18);
             int maxTextWidth = Math.max(0, getMeasuredWidth() - leftInset - rightReserve);
-            if (textView.getMeasuredWidth() > maxTextWidth) {
+            if (textView.getTextWidth() > maxTextWidth && textView.getTextPaint().getTextSize() > dp(14)) {
+                textView.setTextSize(14);
+                textView.measure(
+                        MeasureSpec.makeMeasureSpec(maxTextWidth, MeasureSpec.AT_MOST),
+                        MeasureSpec.makeMeasureSpec(dp(20), MeasureSpec.EXACTLY)
+                );
+            } else if (textView.getMeasuredWidth() > maxTextWidth) {
                 textView.measure(
                         MeasureSpec.makeMeasureSpec(maxTextWidth, MeasureSpec.AT_MOST),
                         MeasureSpec.makeMeasureSpec(dp(20), MeasureSpec.EXACTLY)
@@ -1951,17 +2236,26 @@ public final class MirrlyUiKit {
             @Override
             public void bindView(View view, UItem item, boolean divider, UniversalAdapter adapter, UniversalRecyclerView listView) {
                 IconSwitchCell cell = (IconSwitchCell) view;
+                cell.textView.setTextSize(16);
                 cell.setColors(Theme.key_windowBackgroundWhiteGrayIcon, Theme.key_windowBackgroundWhiteBlackText);
                 boolean sameItem = cell.boundItemId == item.id;
-                boolean prevChecked = cell.isChecked();
-                if (sameItem && prevChecked != item.checked) {
-                    cell.setTextAndCheckAndIcon(item.text, prevChecked, item.iconResId, divider);
+                boolean sameContent = sameItem
+                        && cell.boundIconResId == item.iconResId
+                        && TextUtils.equals(cell.boundText, item.text);
+                if (sameContent) {
                     cell.setChecked(item.checked);
+                    cell.setNeedDivider(divider);
                 } else {
-                    cell.setTextAndCheckAndIcon(item.text, item.checked, item.iconResId, divider);
+                    boolean prevChecked = sameItem && cell.isChecked();
+                    cell.setTextAndCheckAndIcon(item.text, sameItem ? prevChecked : item.checked, item.iconResId, divider);
+                    if (sameItem && prevChecked != item.checked) {
+                        cell.setChecked(item.checked);
+                    }
                 }
                 cell.setEnabled(item.enabled);
                 cell.boundItemId = item.id;
+                cell.boundText = item.text;
+                cell.boundIconResId = item.iconResId;
             }
 
             @Override
@@ -2047,11 +2341,21 @@ public final class MirrlyUiKit {
         private final Paint trackPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint trackBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint thumbPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint thumbSheenPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint thumbBorderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF trackRect = new RectF();
         private final RectF thumbRect = new RectF();
         private final Path clipThumb = new Path();
         private final CellFlickerDrawable thumbFlicker;
+
+        private int lastTrackTop = Integer.MIN_VALUE;
+        private int lastTrackBottom = Integer.MIN_VALUE;
+        private int lastThumbTop = Integer.MIN_VALUE;
+        private int lastThumbBottom = Integer.MIN_VALUE;
+        private int lastGlassGen = -1;
+        private boolean cachedIsDark;
+        private int cachedAccent;
+        private int cachedDivider;
 
         private final AnimatedFloat thumbProgress = new AnimatedFloat(this, 0, 280, CubicBezierInterpolator.EASE_OUT_QUINT);
 
@@ -2109,6 +2413,7 @@ public final class MirrlyUiKit {
             btn.setOrientation(LinearLayout.HORIZONTAL);
             btn.setGravity(Gravity.CENTER);
             ScaleStateListAnimator.apply(btn, 0.03f, 1.0f);
+            attachDisallowInterceptTouch(btn);
 
             ImageView icon = new ImageView(context);
             icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
@@ -2167,9 +2472,16 @@ public final class MirrlyUiKit {
             int accent = Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4, resourcesProvider);
             int divider = Theme.getColor(Theme.key_divider, resourcesProvider);
 
+            cachedIsDark = isDark;
+            cachedAccent = accent;
+            cachedDivider = divider;
+            lastTrackTop = Integer.MIN_VALUE;
+            lastThumbTop = Integer.MIN_VALUE;
+
+            float alphaScale = Utilities.clamp(MirrlyConfig.getEffectiveGlassAlpha(1f), 1.3f, 0.4f);
             trackPaint.setColor(ColorUtils.blendARGB(cardWhite, grayBg, isDark ? 0.58f : 0.85f));
             trackBorderPaint.setColor(ColorUtils.setAlphaComponent(divider, isDark ? 0x80 : 0x55));
-            thumbPaint.setColor(ColorUtils.blendARGB(cardWhite, accent, isDark ? 0.28f : 0.14f));
+            thumbPaint.setColor(ColorUtils.blendARGB(cardWhite, accent, (isDark ? 0.28f : 0.14f) * alphaScale));
             thumbBorderPaint.setColor(ColorUtils.setAlphaComponent(accent, isDark ? 0x7A : 0x52));
             thumbFlicker.setColors(isDark ? Color.WHITE : accent, isDark ? 18 : 14, isDark ? 42 : 30);
             lastLeftTint = 0;
@@ -2193,6 +2505,51 @@ public final class MirrlyUiKit {
             thumbFlicker.setParentWidth(Math.max(1, w / 2));
         }
 
+        private void ensureGlassGradients(int trackTop, int trackBottom, int thumbTop, int thumbBottom) {
+            int gen = GlassEngine.getGlassSettingsGenerationId();
+            float rimScale = Utilities.clamp(MirrlyConfig.getGlassRimScale(), 1.6f, 0.25f);
+            if (trackTop != lastTrackTop || trackBottom != lastTrackBottom || gen != lastGlassGen) {
+                lastTrackTop = trackTop;
+                lastTrackBottom = trackBottom;
+                int baseTrackAlpha = cachedIsDark ? 0x7A : 0x55;
+                int topTrackRim = ColorUtils.blendARGB(cachedDivider, Color.WHITE, cachedIsDark ? 0.28f : 0.45f);
+                trackBorderPaint.setStrokeWidth(dpf2(0.75f) * Utilities.clamp(rimScale, 1.35f, 0.5f));
+                trackBorderPaint.setShader(new LinearGradient(
+                        0f, trackTop, 0f, trackBottom,
+                        ColorUtils.setAlphaComponent(topTrackRim, Math.min(255, Math.round(baseTrackAlpha * 1.15f * rimScale))),
+                        ColorUtils.setAlphaComponent(cachedDivider, Math.min(255, Math.round(baseTrackAlpha * 0.75f * rimScale))),
+                        Shader.TileMode.CLAMP
+                ));
+            }
+            if (thumbTop != lastThumbTop || thumbBottom != lastThumbBottom || gen != lastGlassGen) {
+                lastThumbTop = thumbTop;
+                lastThumbBottom = thumbBottom;
+                lastGlassGen = gen;
+                int topSpecular = ColorUtils.blendARGB(cachedAccent, Color.WHITE, cachedIsDark ? 0.55f : 0.38f);
+                int topAlpha = Math.min(255, Math.round((cachedIsDark ? 0xA8 : 0x7A) * rimScale));
+                int midAlpha = Math.min(255, Math.round((cachedIsDark ? 0x55 : 0x3D) * rimScale));
+                int bottomAlpha = Math.min(255, Math.round((cachedIsDark ? 0x74 : 0x52) * rimScale));
+                thumbBorderPaint.setStrokeWidth(dpf2(0.85f) * Utilities.clamp(rimScale, 1.45f, 0.45f));
+                thumbBorderPaint.setShader(new LinearGradient(
+                        0f, thumbTop, 0f, thumbBottom,
+                        new int[]{
+                                ColorUtils.setAlphaComponent(topSpecular, topAlpha),
+                                ColorUtils.setAlphaComponent(cachedAccent, midAlpha),
+                                ColorUtils.setAlphaComponent(cachedAccent, bottomAlpha)
+                        },
+                        new float[]{0f, 0.55f, 1f},
+                        Shader.TileMode.CLAMP
+                ));
+                int sheenAlpha = Math.min(255, Math.round((cachedIsDark ? 0x24 : 0x3C) * Utilities.clamp(rimScale, 1.35f, 0f)));
+                thumbSheenPaint.setShader(new LinearGradient(
+                        0f, thumbTop, 0f, thumbTop + Math.max(1f, (thumbBottom - thumbTop) * 0.68f),
+                        ColorUtils.setAlphaComponent(Color.WHITE, sheenAlpha),
+                        0x00FFFFFF,
+                        Shader.TileMode.CLAMP
+                ));
+            }
+        }
+
         @Override
         protected void onDraw(Canvas canvas) {
             float left = getPaddingLeft();
@@ -2202,8 +2559,6 @@ public final class MirrlyUiKit {
 
             trackRect.set(left, top, right, bottom);
             float trackRadius = dp(13);
-            canvas.drawRoundRect(trackRect, trackRadius, trackRadius, trackPaint);
-            canvas.drawRoundRect(trackRect, trackRadius, trackRadius, trackBorderPaint);
 
             float t = thumbProgress.set(selectedIndex);
             float inset = dp(3);
@@ -2211,8 +2566,19 @@ public final class MirrlyUiKit {
             float thumbLeft = trackRect.left + inset + halfW * t;
             thumbRect.set(thumbLeft, trackRect.top + inset, thumbLeft + halfW, trackRect.bottom - inset);
 
+            ensureGlassGradients(
+                    Math.round(trackRect.top),
+                    Math.round(trackRect.bottom),
+                    Math.round(thumbRect.top),
+                    Math.round(thumbRect.bottom)
+            );
+
+            canvas.drawRoundRect(trackRect, trackRadius, trackRadius, trackPaint);
+            canvas.drawRoundRect(trackRect, trackRadius, trackRadius, trackBorderPaint);
+
             float thumbRadius = dp(10);
             canvas.drawRoundRect(thumbRect, thumbRadius, thumbRadius, thumbPaint);
+            canvas.drawRoundRect(thumbRect, thumbRadius, thumbRadius, thumbSheenPaint);
             if (SharedConfig.animationsEnabled() && LiteMode.isEnabled(LiteMode.FLAG_PARTICLES)) {
                 canvas.save();
                 clipThumb.rewind();

@@ -137,6 +137,7 @@ import org.telegram.ui.ChatActivity;
 import org.telegram.ui.Components.ListView.RecyclerListViewWithOverlayDraw;
 import org.telegram.ui.Components.Premium.PremiumButtonView;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
+import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Components.blur3.DownscaleScrollableNoiseSuppressor;
 import org.telegram.ui.Components.blur3.capture.IBlur3Capture;
 import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
@@ -809,9 +810,9 @@ public class EmojiView extends FrameLayout implements
             addView(backgroundView, new LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, searchFieldHeight));
 
             box = new FrameLayout(context);
-            box.setBackground(Theme.createRoundRectDrawable(dp(18), glassDesign ? getGlassIconColor(0.06f) : getThemedColor(Theme.key_chat_emojiSearchBackground)));
             box.setClipToOutline(true);
             box.setOutlineProvider(ViewOutlineProviderImpl.boundsWithPaddingRoundRect(0, dp(18)));
+            applySearchFieldBoxBackground(this, searchFieldGlassFactory != null ? searchFieldGlassFactory : blurredBackgroundDrawableFactory);
             if (type == 2) {
                 addView(box, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 36, Gravity.FILL, 10, 8, 10, 8));
             } else {
@@ -2899,34 +2900,59 @@ public class EmojiView extends FrameLayout implements
         }
     }
 
+    private @Nullable BlurredBackgroundDrawableViewFactory searchFieldGlassFactory;
+
+    private void applySearchFieldBoxBackground(@Nullable SearchField searchField, @Nullable BlurredBackgroundDrawableViewFactory factory) {
+        if (searchField == null || searchField.box == null) {
+            return;
+        }
+        final boolean forceRecreate = factory != searchFieldGlassFactory;
+        if (factory != null && BlurredBackgroundProviderImpl.checkBlurEnabled(currentAccount, resourcesProvider)) {
+            if (!forceRecreate && searchField.box.getBackground() instanceof BlurredBackgroundDrawable) {
+                ((BlurredBackgroundDrawable) searchField.box.getBackground()).updateColors();
+            } else {
+                searchField.box.setBackground(factory.create(searchField.box)
+                        .setColorProvider(BlurredBackgroundProviderImpl.emojiViewButton(resourcesProvider))
+                        .setRadius(dp(18))
+                        .setPadding(0));
+            }
+        } else {
+            final int bgColor = glassDesign ? getGlassIconColor(0.06f) : getThemedColor(Theme.key_chat_emojiSearchBackground);
+            if (searchField.box.getBackground() instanceof BlurredBackgroundDrawable || searchField.box.getBackground() == null) {
+                searchField.box.setBackground(Theme.createRoundRectDrawable(dp(18), bgColor));
+            } else {
+                Theme.setDrawableColor(searchField.box.getBackground(), bgColor);
+            }
+        }
+        searchField.box.invalidate();
+    }
+
+    private void applyGlassPillButtonBackground(@Nullable View button, @Nullable BlurredBackgroundDrawableViewFactory factory, boolean restoreCircleBackspaceFallback) {
+        if (button == null) {
+            return;
+        }
+        if (factory != null) {
+            button.setBackground(factory.create(button)
+                .setColorProvider(BlurredBackgroundProviderImpl.emojiViewButton(resourcesProvider))
+                .setRadius(dp(18))
+                .setPadding(dp(6)));
+        } else if (restoreCircleBackspaceFallback && (bottomTabContainerBackground == null || bottomTabContainerBackground.getVisibility() == GONE)) {
+            final int bgColor = getThemedColor(Theme.key_chat_emojiPanelBackground);
+            button.setBackground(Theme.createSimpleSelectorCircleDrawable(dp(56), bgColor, bgColor));
+        } else if (button.getBackground() instanceof BlurredBackgroundDrawable) {
+            button.setBackground(null);
+        }
+    }
+
     public void setBlurredBackgroundDrawableFactory(BlurredBackgroundDrawableViewFactory factory) {
-        if (backspaceButton != null) {
-            backspaceButton.setBackground(factory.create(backspaceButton)
-                .setColorProvider(BlurredBackgroundProviderImpl.emojiViewButton(resourcesProvider))
-                .setRadius(dp(18))
-                .setPadding(dp(6)));
-        }
-
-        if (searchButton != null) {
-            searchButton.setBackground(factory.create(searchButton)
-                .setColorProvider(BlurredBackgroundProviderImpl.emojiViewButton(resourcesProvider))
-                .setRadius(dp(18))
-                .setPadding(dp(6)));
-        }
-
-        if (typeTabs != null) {
-            typeTabs.setBackground(factory.create(typeTabs)
-                .setColorProvider(BlurredBackgroundProviderImpl.emojiViewButton(resourcesProvider))
-                .setRadius(dp(18))
-                .setPadding(dp(6)));
-        }
-
-        if (stickerSettingsButton != null) {
-            stickerSettingsButton.setBackground(factory.create(stickerSettingsButton)
-                .setColorProvider(BlurredBackgroundProviderImpl.emojiViewButton(resourcesProvider))
-                .setRadius(dp(18))
-                .setPadding(dp(6)));
-        }
+        applySearchFieldBoxBackground(emojiSearchField, factory);
+        applySearchFieldBoxBackground(gifSearchField, factory);
+        applySearchFieldBoxBackground(stickersSearchField, factory);
+        searchFieldGlassFactory = factory;
+        applyGlassPillButtonBackground(backspaceButton, factory, true);
+        applyGlassPillButtonBackground(searchButton, factory, false);
+        applyGlassPillButtonBackground(typeTabs, factory, false);
+        applyGlassPillButtonBackground(stickerSettingsButton, factory, false);
     }
 
 
@@ -5992,8 +6018,7 @@ public class EmojiView extends FrameLayout implements
             }
             searchField.shadowView.setBackgroundColor(getThemedColor(Theme.key_chat_emojiPanelShadowLine));
             searchField.searchStateDrawable.setColor(glassDesign ? getGlassIconColor(0.4f) : getThemedColor(Theme.key_chat_emojiSearchIcon));
-            Theme.setDrawableColor(searchField.box.getBackground(), glassDesign ? getGlassIconColor(0.06f) : getThemedColor(Theme.key_chat_emojiSearchBackground));
-            searchField.box.invalidate();
+            applySearchFieldBoxBackground(searchField, searchFieldGlassFactory);
             searchField.searchEditText.setHintTextColor(glassDesign ? getGlassIconColor(0.45f) : getThemedColor(Theme.key_chat_emojiSearchIcon));
             searchField.searchEditText.setTextColor(glassDesign ? getGlassIconColor(0.8f) : getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
         }

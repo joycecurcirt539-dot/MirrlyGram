@@ -59431,6 +59431,12 @@ public class TLRPC {
         public boolean premiumEffectWasPlayed; //custom
         public String originalLanguage; //custom
         public String translatedToLanguage; //custom
+        public boolean mirrlyTranslatedOpen; //custom
+        public transient boolean mirrlyTranslating; //custom
+        public boolean mirrlyDeleted; //custom
+        public int mirrlyDeletedAt; //custom
+        public boolean mirrlyDeletedByMe; //custom
+        public String mirrlySavedAttachPath; //custom
         public TL_textWithEntities translatedText; //custom
         public TL_iv.RichMessage translatedRichMessage; //custom
         public TL_textWithEntities translatedVoiceTranscription; //custom

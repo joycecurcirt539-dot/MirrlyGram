@@ -788,6 +788,13 @@ public class ConnectionsManager extends BaseController {
         native_checkProxy(currentAccount, "127.0.0.1", port, "", "", settings.getSecret(), requestTimeDelegate);
     }
 
+    public long checkDatacenter(int dcId, RequestTimeDelegate requestTimeDelegate) {
+        if (dcId <= 0 || requestTimeDelegate == null) {
+            return 0;
+        }
+        return native_checkDatacenter(currentAccount, dcId, requestTimeDelegate);
+    }
+
     public void setAppPaused(final boolean value, final boolean byScreenState) {
         if (!byScreenState) {
             appPaused = value;
@@ -1018,6 +1025,7 @@ public class ConnectionsManager extends BaseController {
     }
 
     public static void setProxySettings(boolean enabled, ProxySettings settings) {
+        org.telegram.messenger.mirrly.MirrlyDatacenterController.invalidateCache();
         String address = "";
         int port = 0;
         String username = "";
@@ -1088,6 +1096,7 @@ public class ConnectionsManager extends BaseController {
     public static native void native_setPushConnectionEnabled(int currentAccount, boolean value);
     public static native void native_applyDnsConfig(int currentAccount, long address, String phone, int date);
     public static native long native_checkProxy(int currentAccount, String address, int port, String username, String password, String secret, RequestTimeDelegate requestTimeDelegate);
+    public static native long native_checkDatacenter(int currentAccount, int datacenterId, RequestTimeDelegate requestTimeDelegate);
     public static native void native_onHostNameResolved(String host, long address, String ip);
     public static native void native_discardConnection(int currentAccount, int datacenterId, int connectionType);
     public static native void native_failNotRunningRequest(int currentAccount, int token);

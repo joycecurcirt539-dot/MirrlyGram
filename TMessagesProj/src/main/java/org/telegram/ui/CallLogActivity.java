@@ -47,6 +47,7 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.mirrly.MirrlyInterfaceConfig;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.tgnet.tl.TL_phone;
@@ -406,6 +407,12 @@ public class CallLogActivity extends BaseFragment implements NotificationCenter.
 				VoIPHelper.startCall(lastCallChat, null, null, false, getParentActivity(), CallLogActivity.this, getAccountInstance());
 				waitingForCallChatId = null;
 			}
+		} else if (id == NotificationCenter.mirrlyBottomBarConfigChanged) {
+			updateMainTabsOffsets();
+			if (fragmentView != null) {
+				checkUi_listViewPadding();
+				checkUi_floatingButton();
+			}
 		}
 	}
 
@@ -696,17 +703,23 @@ public class CallLogActivity extends BaseFragment implements NotificationCenter.
 			.add(NotificationCenter.messagesDeleted)
 			.add(NotificationCenter.activeGroupCallsUpdated)
 			.add(NotificationCenter.chatInfoDidLoad)
-			.add(NotificationCenter.groupCallUpdated);
+			.add(NotificationCenter.groupCallUpdated)
+			.addGlobal(NotificationCenter.mirrlyBottomBarConfigChanged);
 
 		if (arguments != null) {
 			needFinishFragment = arguments.getBoolean("needFinishFragment", true);
 			hasMainTabs = arguments.getBoolean("hasMainTabs", false);
 		}
 
-		additionNavigationBarHeight = hasMainTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS) : 0;
-		additionFloatingButtonOffset = hasMainTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN) : 0;
+		updateMainTabsOffsets();
 
 		return true;
+	}
+
+	private void updateMainTabsOffsets() {
+		final boolean showTabs = hasMainTabs && !MirrlyInterfaceConfig.isBottomBarCompletelyHidden();
+		additionNavigationBarHeight = showTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS) : 0;
+		additionFloatingButtonOffset = showTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN) : 0;
 	}
 
 	@Override
@@ -822,6 +835,7 @@ public class CallLogActivity extends BaseFragment implements NotificationCenter.
 		}
 
 		floatingButton = new FragmentFloatingButton(context, resourceProvider);
+		floatingButton.setBlurredBackgroundFactory(getBaseSimpleGlass().factory, true, resourceProvider);
 		floatingButton.imageView.setImageResource(R.drawable.filled_calls_plus);
 		floatingButton.setContentDescription(getString(R.string.Call));
 		floatingButton.setOnClickListener(v -> openCreateCall());
@@ -1409,10 +1423,15 @@ public class CallLogActivity extends BaseFragment implements NotificationCenter.
 	}
 
 	private void checkUi_floatingButton() {
-        floatingButton.setTranslationY(-navigationBarHeight - additionFloatingButtonOffset - additionalFloatingTranslation);
+        if (floatingButton != null) {
+            floatingButton.setTranslationY(-navigationBarHeight - additionFloatingButtonOffset - additionalFloatingTranslation);
+        }
 	}
 
 	private void checkUi_listViewPadding() {
+		if (listView == null || topPanelLayout == null || actionBarBackground == null || emptyView == null) {
+			return;
+		}
 		BaseFragmentSimpleGlass.setListViewParams(listView, mSystemInsets.top, mSystemInsets.bottom,
 			ActionBar.getCurrentActionBarHeight() + (int) topPanelLayout.getAnimatedHeightWithPadding(dp(7)), additionNavigationBarHeight);
 
@@ -1846,6 +1865,7 @@ public class CallLogActivity extends BaseFragment implements NotificationCenter.
 
 	private void showItemOptions() {
 		ItemOptions io = ItemOptions.makeOptions(this, otherItem);
+		io.setBlur(true);
 		// io.setColors(getThemedColor(Theme.key_actionBarDefaultTitle), getThemedColor(Theme.key_actionBarDefaultTitle));
 		io.setDimAlpha(0x08);
 		if (getUserConfig().showCallsTab) {
@@ -1928,6 +1948,9 @@ public class CallLogActivity extends BaseFragment implements NotificationCenter.
         			cell.profileSearchCell.update(0);
         		}
         	}
+        }
+        if (floatingButton != null) {
+        	floatingButton.updateColors();
         }
     }
 

@@ -9,6 +9,7 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
 import android.text.Editable;
@@ -19,6 +20,7 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.animation.Interpolator;
 import android.view.inputmethod.EditorInfo;
 import android.widget.FrameLayout;
@@ -40,6 +42,8 @@ import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.EditTextBoldCursor;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
+import org.telegram.utils.glass.GlassContrastHelper;
+import org.telegram.utils.glass.source.GlassSource;
 import org.telegram.utils.glass.source.GlassSourceCrossfade;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundColorProvider;
@@ -84,6 +88,7 @@ public class SimpleActionBar extends FrameLayout implements FactorAnimator.Targe
     private BlurredBackgroundDrawable glassBack;
     private BlurredBackgroundDrawable glassMenu;
     private BlurredBackgroundDrawable glassDone;
+    private BlurredBackgroundDrawable glassActionModeTitle;
     private float glassMenuRadius = -1;
     private BlurredBackgroundDrawableViewFactory glassFactory;
     private BlurredBackgroundColorProvider glassColorProvider;
@@ -152,6 +157,8 @@ public class SimpleActionBar extends FrameLayout implements FactorAnimator.Targe
         glassBack = factory.create(this).setColorProvider(buttonsColors).setRadius(dp(23)).setPadding(dp(6));
         glassMenu = factory.create(this).setColorProvider(buttonsColors).setRadius(dp(23)).setPadding(dp(6));
         glassDone = factory.create(this).setColorProvider(buttonsColors).setRadius(dp(23)).setPadding(dp(6));
+        glassActionModeTitle = factory.create(this).setColorProvider(buttonsColors).setRadius(dp(23)).setPadding(dp(6));
+        glassActionModeTitle.setAlpha((int) (255 * getActionModeFactor()));
         glassMenuRadius = dp(23);
         invalidate();
     }
@@ -176,8 +183,15 @@ public class SimpleActionBar extends FrameLayout implements FactorAnimator.Targe
         final BlurredBackgroundColorProvider colors = provider != null ? provider : glassColorProvider;
         if (glassBack != null) {
             glassBack.setColorProvider(colors);
+        }
+        if (glassMenu != null) {
             glassMenu.setColorProvider(colors);
+        }
+        if (glassDone != null) {
             glassDone.setColorProvider(colors);
+        }
+        if (glassActionModeTitle != null) {
+            glassActionModeTitle.setColorProvider(colors);
         }
         invalidate();
     }
@@ -185,8 +199,15 @@ public class SimpleActionBar extends FrameLayout implements FactorAnimator.Targe
     public void updateButtonsGlassColors() {
         if (glassBack != null) {
             glassBack.updateColors();
+        }
+        if (glassMenu != null) {
             glassMenu.updateColors();
+        }
+        if (glassDone != null) {
             glassDone.updateColors();
+        }
+        if (glassActionModeTitle != null) {
+            glassActionModeTitle.updateColors();
         }
         invalidate();
         if (openMenuOverlay != null) {
@@ -350,6 +371,34 @@ public class SimpleActionBar extends FrameLayout implements FactorAnimator.Targe
             glassDone.setBounds((int) (cx - hw) - p, (int) (cy - hh) - p, (int) (cx + hw) + p, (int) (cy + hh) + p);
             glassDone.setAlpha((int) (255 * doneButton.getAlpha()));
             glassDone.draw(canvas);
+        }
+
+        if (glassActionModeTitle != null && actionModeTitle != null) {
+            final float a = getActionModeFactor();
+            if (a > 0) {
+                float contentWidth = actionModeTitle.getDrawable().getCurrentWidth();
+                if (hasActionModeSubtitle() && actionModeSubtitle != null) {
+                    contentWidth = Math.max(contentWidth, actionModeSubtitle.getDrawable().getCurrentWidth());
+                }
+                if (contentWidth > 0) {
+                    if (actionModeTitle.getWidth() > 0) {
+                        contentWidth = Math.min(contentWidth, actionModeTitle.getWidth());
+                    }
+                    final float half = dp(23);
+                    final float cy = getRowTop() + ActionBar.getCurrentActionBarHeight() / 2f;
+                    final float padH = dp(18);
+                    final float textStart = (actionModeTitle.getLeft() > 0 ? actionModeTitle.getLeft() : dp(76)) + actionModeTitle.getTranslationX();
+                    final float pillLeft = textStart - padH;
+                    computeMenuPill(menuPillRect);
+                    final float maxRight = Math.max(pillLeft + half * 2, (menuPillRect.width() > 0 ? menuPillRect.left : getWidth()) - dp(6));
+                    final float pillRight = Math.min(Math.max(pillLeft + half * 2, textStart + contentWidth + padH), maxRight);
+                    glassActionModeTitle.setBounds((int) pillLeft - p, (int) (cy - half) - p, (int) pillRight + p, (int) (cy + half) + p);
+                    glassActionModeTitle.setAlpha((int) (255 * a));
+                    glassActionModeTitle.draw(canvas);
+                } else {
+                    glassActionModeTitle.setAlpha(0);
+                }
+            }
         }
 
         if (glassMenu != null) {
@@ -524,14 +573,14 @@ public class SimpleActionBar extends FrameLayout implements FactorAnimator.Targe
         }
         if (actionModeTitle != null) {
             final float modeWidth = actionMode != null ? actionMode.getTargetPillWidth() : 0;
-            final int right = (int) modeWidth + dp(6 + 12);
+            final int right = (int) Math.max(modeWidth, modeWidth > 0 ? dp(46) : 0) + dp(28);
             if (hasActionModeSubtitle()) {
-                setMargins(actionModeTitle, dp(66), rowTop + rowHeight / 2 - dp(22), right);
+                setMargins(actionModeTitle, dp(76), rowTop + rowHeight / 2 - dp(22), right);
                 actionModeTitle.getLayoutParams().height = dp(22);
-                setMargins(actionModeSubtitle, dp(66), rowTop + rowHeight / 2 + dp(1), right);
+                setMargins(actionModeSubtitle, dp(76), rowTop + rowHeight / 2 + dp(1), right);
                 actionModeSubtitle.getLayoutParams().height = dp(18);
             } else {
-                setMargins(actionModeTitle, dp(66), rowTop, right);
+                setMargins(actionModeTitle, dp(76), rowTop, right);
                 actionModeTitle.getLayoutParams().height = rowHeight;
             }
         }
@@ -616,6 +665,13 @@ public class SimpleActionBar extends FrameLayout implements FactorAnimator.Targe
     @Override
     public void updateColors() {
         resolveColors();
+        if (adaptiveContrastApplied) {
+            lastAdaptiveBackFactor = -1f;
+            lastAdaptiveTitleFactor = -1f;
+            lastAdaptiveMenuFactor = -1f;
+            applyAdaptiveGlassContrast(pendingAdaptiveBackFactor, pendingAdaptiveTitleFactor, pendingAdaptiveMenuFactor);
+            return;
+        }
         titleLayout.updateColors();
         backButton.updateColors();
         if (menu != null) {
@@ -642,7 +698,193 @@ public class SimpleActionBar extends FrameLayout implements FactorAnimator.Targe
         if (glassMenu != null) {
             glassMenu.updateColors();
         }
+        if (glassDone != null) {
+            glassDone.updateColors();
+        }
+        if (glassActionModeTitle != null) {
+            glassActionModeTitle.updateColors();
+        }
         invalidate();
+    }
+
+    private boolean adaptiveContrastApplied;
+    private float lastAdaptiveBackFactor = -1f;
+    private float lastAdaptiveTitleFactor = -1f;
+    private float lastAdaptiveMenuFactor = -1f;
+    private float pendingAdaptiveBackFactor;
+    private float pendingAdaptiveTitleFactor;
+    private float pendingAdaptiveMenuFactor;
+
+    private final GlassContrastHelper.HorizontalAdaptiveBand adaptiveTitleBand = new GlassContrastHelper.HorizontalAdaptiveBand();
+    private final GlassContrastHelper.HorizontalAdaptiveBand adaptiveSubtitleBand = new GlassContrastHelper.HorizontalAdaptiveBand();
+
+    public void updateSmartAdaptiveGlassContrast(
+            @Nullable ViewGroup sampleTarget,
+            int glassBgColor,
+            @Nullable GlassSource backdropSource,
+            @Nullable android.graphics.drawable.Drawable backdropDrawable,
+            int viewportW,
+            int viewportH,
+            float fallbackBgLuma,
+            boolean liquidShaderActive,
+            boolean resetToBase
+    ) {
+        if (resetToBase) {
+            applyAdaptiveGlassContrast(0f);
+            return;
+        }
+        adaptiveContrastApplied = true;
+        final float defaultHalo = glassFactory != null ? 0.30f : 0f;
+
+        if (backButton != null && backButton.getVisibility() == VISIBLE && backButton.getWidth() > 0) {
+            final int backColor = GlassContrastHelper.estimateIconAdaptiveColor(
+                    backButton, sampleTarget, glassBgColor, itemsColor,
+                    backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma,
+                    resourcesProvider, false, liquidShaderActive
+            );
+            backButton.applyAdaptiveColor(backColor);
+        }
+
+        if (titleLayout != null) {
+            for (SimpleTextView view : titleLayout.titleViews) {
+                if (view != null && view.getVisibility() == VISIBLE && view.getWidth() > 0) {
+                    final float sx = Math.max(0f, view.getTextStartX());
+                    final float tw = Math.max(view.getTextWidth(), dp(24));
+                    GlassContrastHelper.computeHorizontalAdaptiveBand(
+                            view, sampleTarget,
+                            sx, 0f, Math.min(view.getWidth(), sx + tw), view.getHeight(),
+                            glassBgColor, titleColor, backdropSource, backdropDrawable,
+                            viewportW, viewportH, fallbackBgLuma, resourcesProvider,
+                            false, false, liquidShaderActive, adaptiveTitleBand
+                    );
+                    view.setGlassOpticalHaloStrength(Math.max(defaultHalo, adaptiveTitleBand.haloStrength));
+                    view.setTextColor(adaptiveTitleBand.solidColor);
+                    view.setEmojiColor(adaptiveTitleBand.solidColor);
+                    view.setAdaptiveHorizontalGradient(adaptiveTitleBand, sx);
+                }
+            }
+            if (titleLayout.subtitleView != null && titleLayout.subtitleView.getVisibility() == VISIBLE && titleLayout.subtitleView.getWidth() > 0) {
+                final float sx = Math.max(0f, titleLayout.subtitleView.getTextStartX());
+                final float sw = Math.max(titleLayout.subtitleView.getTextWidth(), dp(24));
+                GlassContrastHelper.computeHorizontalAdaptiveBand(
+                        titleLayout.subtitleView, sampleTarget,
+                        sx, 0f, Math.min(titleLayout.subtitleView.getWidth(), sx + sw), titleLayout.subtitleView.getHeight(),
+                        glassBgColor, subtitleColor, backdropSource, backdropDrawable,
+                        viewportW, viewportH, fallbackBgLuma, resourcesProvider,
+                        true, false, liquidShaderActive, adaptiveSubtitleBand
+                );
+                titleLayout.subtitleView.setGlassOpticalHaloStrength(Math.max(defaultHalo, adaptiveSubtitleBand.haloStrength));
+                titleLayout.subtitleView.setTextColor(adaptiveSubtitleBand.solidColor);
+                titleLayout.subtitleView.setAdaptiveHorizontalGradient(adaptiveSubtitleBand, sx);
+            }
+        }
+
+        if (menu != null && menu.getVisibility() == VISIBLE) {
+            menu.applyAdaptiveItemsContrast(
+                    sampleTarget, glassBgColor, itemsColor,
+                    backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma,
+                    resourcesProvider, liquidShaderActive
+            );
+        }
+        if (doneButton != null && doneButton.getVisibility() == VISIBLE && doneButton.getWidth() > 0) {
+            final int doneColor = GlassContrastHelper.estimateIconAdaptiveColor(
+                    doneButton, sampleTarget, glassBgColor, itemsColor,
+                    backdropSource, backdropDrawable, viewportW, viewportH, fallbackBgLuma,
+                    resourcesProvider, false, liquidShaderActive
+            );
+            doneButton.applyAdaptiveGlassColor(doneColor);
+        }
+    }
+
+    public void applyAdaptiveGlassContrast(float invertFactor) {
+        applyAdaptiveGlassContrast(invertFactor, invertFactor, invertFactor);
+    }
+
+    public void applyAdaptiveGlassContrast(float backInvertFactor, float titleInvertFactor, float menuInvertFactor) {
+        final float backF = Math.max(0f, Math.min(1f, backInvertFactor));
+        final float titleF = Math.max(0f, Math.min(1f, titleInvertFactor));
+        final float menuF = Math.max(0f, Math.min(1f, menuInvertFactor));
+        pendingAdaptiveBackFactor = backF;
+        pendingAdaptiveTitleFactor = titleF;
+        pendingAdaptiveMenuFactor = menuF;
+
+        if (backF <= 0.001f && titleF <= 0.001f && menuF <= 0.001f) {
+            if (!adaptiveContrastApplied) {
+                return;
+            }
+            adaptiveContrastApplied = false;
+            lastAdaptiveBackFactor = 0f;
+            lastAdaptiveTitleFactor = 0f;
+            lastAdaptiveMenuFactor = 0f;
+            titleLayout.applyAdaptiveColors(titleColor, subtitleColor, glassFactory != null ? 0.30f : 0f);
+            backButton.applyAdaptiveColor(itemsColor);
+            if (menu != null) {
+                menu.applyAdaptiveItemsColor(itemsColor);
+            }
+            if (doneButton != null) {
+                doneButton.applyAdaptiveGlassColor(0);
+            }
+            if (searchField != null) {
+                updateSearchColors();
+            }
+            invalidate();
+            return;
+        }
+
+        if (adaptiveContrastApplied
+                && Math.abs(lastAdaptiveBackFactor - backF) < 0.005f
+                && Math.abs(lastAdaptiveTitleFactor - titleF) < 0.005f
+                && Math.abs(lastAdaptiveMenuFactor - menuF) < 0.005f) {
+            return;
+        }
+        adaptiveContrastApplied = true;
+        lastAdaptiveBackFactor = backF;
+        lastAdaptiveTitleFactor = titleF;
+        lastAdaptiveMenuFactor = menuF;
+
+        final int adaptedTitle = GlassContrastHelper.blendAdaptiveTextColor(titleColor, titleF, false);
+        final int adaptedSubtitle = GlassContrastHelper.blendAdaptiveTextColor(subtitleColor, titleF, true);
+        final int adaptedBack = GlassContrastHelper.blendAdaptiveIconColor(itemsColor, backF);
+        final int adaptedMenu = GlassContrastHelper.blendAdaptiveIconColor(itemsColor, menuF);
+        final float haloStrength = titleF > 0.001f ? Math.max(0.55f, titleF * 0.85f) : (glassFactory != null ? 0.30f : 0f);
+
+        titleLayout.applyAdaptiveColors(adaptedTitle, adaptedSubtitle, haloStrength);
+        backButton.applyAdaptiveColor(adaptedBack);
+        if (menu != null) {
+            menu.applyAdaptiveItemsColor(adaptedMenu);
+        }
+        if (doneButton != null) {
+            doneButton.applyAdaptiveGlassColor(adaptedMenu);
+        }
+        invalidate();
+    }
+
+    public void getGlassPillZones(@Nullable Rect backOut, @Nullable Rect titleOut, @Nullable Rect menuOut) {
+        final int w = getMeasuredWidth() > 0 ? getMeasuredWidth() : getWidth();
+        final int rowTop = getRowTop();
+        final int rowBottom = rowTop + ActionBar.getCurrentActionBarHeight();
+        if (backOut != null) {
+            if (glassBack != null && !glassBack.getBounds().isEmpty()) {
+                backOut.set(glassBack.getBounds());
+            } else if (backButton != null && backButton.getVisibility() == VISIBLE) {
+                backOut.set(backButton.getLeft(), backButton.getTop(), backButton.getRight(), backButton.getBottom());
+            } else {
+                backOut.set(0, rowTop, dp(58), rowBottom);
+            }
+        }
+        if (titleOut != null) {
+            titleOut.set(dp(58), rowTop, Math.max(dp(120), w - dp(58)), rowBottom);
+        }
+        if (menuOut != null) {
+            if (glassMenu != null && !glassMenu.getBounds().isEmpty()) {
+                menuOut.set(glassMenu.getBounds());
+            } else if (menu != null && menu.getVisibility() == VISIBLE && menu.getWidth() > 0) {
+                final int ml = Math.max(0, Math.round(menu.getX()));
+                menuOut.set(ml, rowTop, Math.min(w, ml + menu.getWidth()), rowBottom);
+            } else {
+                menuOut.set(Math.max(0, w - dp(58)), rowTop, w, rowBottom);
+            }
+        }
     }
 
     public void setTitleColor(int color) {
@@ -912,6 +1154,7 @@ public class SimpleActionBar extends FrameLayout implements FactorAnimator.Targe
             actionModeTitle.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
             actionModeTitle.setEllipsizeByGradient(true);
             actionModeTitle.setAnimationProperties(0.6f, 0, 320, CubicBezierInterpolator.EASE_OUT_QUINT);
+            actionModeTitle.setOnWidthUpdatedListener(this::invalidate);
             addView(actionModeTitle, indexOfChild(backButton), LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.LEFT));
             applyFactors();
         }
@@ -949,6 +1192,7 @@ public class SimpleActionBar extends FrameLayout implements FactorAnimator.Targe
             actionModeSubtitle.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
             actionModeSubtitle.setEllipsizeByGradient(true);
             actionModeSubtitle.setAnimationProperties(0.35f, 0, 320, CubicBezierInterpolator.EASE_OUT_QUINT);
+            actionModeSubtitle.setOnWidthUpdatedListener(this::invalidate);
             addView(actionModeSubtitle, indexOfChild(backButton), LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 18, Gravity.TOP | Gravity.LEFT));
             applyFactors();
         }
@@ -1348,6 +1592,9 @@ public class SimpleActionBar extends FrameLayout implements FactorAnimator.Targe
             setAlphaAndVisibility(actionModeSubtitle, a);
             actionModeSubtitle.setTranslationX(-dp(16) * (1f - a));
         }
+        if (glassActionModeTitle != null) {
+            glassActionModeTitle.setAlpha((int) (255 * a));
+        }
         if (searchLayout != null) {
             setAlphaAndVisibility(searchLayout, sk);
             computeMenuPill(menuPillRect);
@@ -1437,16 +1684,39 @@ public class SimpleActionBar extends FrameLayout implements FactorAnimator.Targe
         }
 
         void updateColors() {
+            hasLastBackAdaptiveColor = false;
+            applyAdaptiveColor(itemsColor);
             setBackground(Theme.createSelectorDrawable(itemsBackgroundColor, 1));
+            closeDrawable.setColorFilter(new PorterDuffColorFilter(itemsActionModeColor, PorterDuff.Mode.SRC_IN));
+            invalidate();
+        }
+
+        private int lastBackFilterColor;
+        private boolean hasLastBackAdaptiveColor;
+        private int lastBackAdaptiveColor;
+        private int lastBackAdaptiveActionModeColor;
+        private Drawable lastBackAdaptiveDrawable;
+
+        void applyAdaptiveColor(int color) {
+            if (hasLastBackAdaptiveColor
+                    && lastBackAdaptiveColor == color
+                    && lastBackAdaptiveActionModeColor == itemsActionModeColor
+                    && lastBackAdaptiveDrawable == drawable) {
+                return;
+            }
+            hasLastBackAdaptiveColor = true;
+            lastBackAdaptiveColor = color;
+            lastBackAdaptiveActionModeColor = itemsActionModeColor;
+            lastBackAdaptiveDrawable = drawable;
             if (drawable instanceof BackDrawable) {
-                ((BackDrawable) drawable).setColor(itemsColor);
+                ((BackDrawable) drawable).setColor(color);
                 ((BackDrawable) drawable).setRotatedColor(itemsActionModeColor);
             } else if (drawable instanceof MenuDrawable) {
-                ((MenuDrawable) drawable).setIconColor(itemsColor);
-            } else if (drawable != null) {
-                drawable.setColorFilter(new PorterDuffColorFilter(itemsColor, PorterDuff.Mode.SRC_IN));
+                ((MenuDrawable) drawable).setIconColor(color);
+            } else if (drawable != null && lastBackFilterColor != color) {
+                lastBackFilterColor = color;
+                drawable.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
             }
-            closeDrawable.setColorFilter(new PorterDuffColorFilter(itemsActionModeColor, PorterDuff.Mode.SRC_IN));
             invalidate();
         }
 
@@ -1657,17 +1927,27 @@ public class SimpleActionBar extends FrameLayout implements FactorAnimator.Targe
         }
 
         void updateColors() {
+            applyAdaptiveColors(titleColor, subtitleColor, glassFactory != null ? 0.30f : 0f);
+        }
+
+        void applyAdaptiveColors(int adaptedTitle, int adaptedSubtitle, float haloStrength) {
             for (SimpleTextView view : titleViews) {
                 if (view != null) {
-                    view.setTextColor(titleColor);
-                    view.setEmojiColor(titleColor);
+                    view.clearAdaptiveHorizontalGradient();
+                    view.setGlassOpticalHaloStrength(haloStrength);
+                    view.setTextColor(adaptedTitle);
+                    view.setEmojiColor(adaptedTitle);
                 }
             }
             if (subtitleView != null) {
-                subtitleView.setTextColor(subtitleColor);
+                subtitleView.clearAdaptiveHorizontalGradient();
+                subtitleView.setGlassOpticalHaloStrength(haloStrength);
+                subtitleView.setTextColor(adaptedSubtitle);
             }
             if (subtitleOutView != null) {
-                subtitleOutView.setTextColor(subtitleColor);
+                subtitleOutView.clearAdaptiveHorizontalGradient();
+                subtitleOutView.setGlassOpticalHaloStrength(haloStrength);
+                subtitleOutView.setTextColor(adaptedSubtitle);
             }
         }
 

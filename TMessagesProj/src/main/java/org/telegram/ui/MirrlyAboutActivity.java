@@ -52,6 +52,7 @@ import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundPro
 import org.telegram.ui.Components.blur3.utils.Blur3Utils;
 import org.telegram.ui.Stories.recorder.ButtonWithCounterView;
 import org.telegram.utils.glass.BaseFragmentSimpleGlass;
+import org.telegram.utils.glass.GlassEngine;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -254,6 +255,16 @@ public class MirrlyAboutActivity extends BaseFragment implements NotificationCen
                         MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(heightMeasureSpec), MeasureSpec.EXACTLY)
                 );
             }
+
+            @Override
+            protected void dispatchDraw(Canvas canvas) {
+                super.dispatchDraw(canvas);
+                if (hasRunningHeroAnimationUnderTabs()
+                        || (pager != null && (pager.checkTabsAnimationInProgress() || isPagerTranslating()))
+                        || (tabsView != null && tabsView.isAnimatingIndicator())) {
+                    glassEngine.invalidate();
+                }
+            }
         };
         ThemeBind.backgroundColor(frameLayout, Theme.key_windowBackgroundGray, getResourceProvider());
 
@@ -274,6 +285,10 @@ public class MirrlyAboutActivity extends BaseFragment implements NotificationCen
         frameLayout.addView(listTopOverlay, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 0, Gravity.TOP));
         ViewGroup.LayoutParams overlayLp = listTopOverlay.getLayoutParams();
         overlayLp.height = insetTop + ActionBar.getCurrentActionBarHeight() + dp(44);
+
+        navigationBarFadeView = new View(context);
+        navigationBarFadeView.setVisibility(insetBottom >= dp(40) ? View.VISIBLE : View.GONE);
+        frameLayout.addView(navigationBarFadeView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, Math.max(0, insetBottom), Gravity.BOTTOM));
 
         tabsContainer.setTranslationY(BaseFragmentSimpleGlass.getPillGlassTop(insetTop) - dp(9.66f));
         tabsContainer.addView(tabsView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 36 + 6 + 6));
@@ -297,10 +312,72 @@ public class MirrlyAboutActivity extends BaseFragment implements NotificationCen
         });
         getBaseSimpleGlass().setClipView(null);
         frameLayout.addView(tabsContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP, -4, 0, -4, 0));
-        listTopOverlay.setBackground(getBaseSimpleGlass().createActionBarFadeDrawable(listTopOverlay));
+        android.graphics.drawable.Drawable topFadeDrawable = getBaseSimpleGlass().createActionBarFadeDrawable(listTopOverlay);
+        if (topFadeDrawable instanceof org.telegram.utils.glass.fade.GlassFadeBlurredDrawable) {
+            ((org.telegram.utils.glass.fade.GlassFadeBlurredDrawable) topFadeDrawable).setOverlayAlpha(105);
+        }
+        listTopOverlay.setBackground(topFadeDrawable);
+        navigationBarFadeView.setBackground(getBaseSimpleGlass().createNavigationBarFadeDrawable(navigationBarFadeView));
         simpleActionBar.setBackground(null);
 
         return fragmentView = frameLayout;
+    }
+
+    private boolean isPagerTranslating() {
+        if (pager == null) {
+            return false;
+        }
+        View[] pages = pager.getViewPages();
+        if (pages == null) {
+            return false;
+        }
+        if (pages.length > 1 && pages[1] != null && pages[1].getVisibility() == View.VISIBLE) {
+            return true;
+        }
+        return pages.length > 0 && pages[0] != null && pages[0].getTranslationX() != 0f;
+    }
+
+    private boolean hasRunningHeroAnimationUnderTabs() {
+        if (isPaused || pager == null || !GlassEngine.getCurrentGlassSettings().isBlurEnabled) {
+            return false;
+        }
+        int pagerW = pager.getWidth();
+        if (pagerW <= 0) {
+            return false;
+        }
+        float topGlassBottom = Math.max(
+                tabsContainer != null ? tabsContainer.getY() + tabsContainer.getHeight() : 0f,
+                listTopOverlay != null ? listTopOverlay.getHeight() : 0f
+        );
+        if (topGlassBottom <= 0f) {
+            return false;
+        }
+        for (int a = 0, n = pager.getChildCount(); a < n; a++) {
+            View page = pager.getChildAt(a);
+            if (!(page instanceof TabListView) || page.getVisibility() != View.VISIBLE) {
+                continue;
+            }
+            float pageLeft = page.getX();
+            if (pageLeft >= pagerW || pageLeft + page.getWidth() <= 0f) {
+                continue;
+            }
+            TabListView lv = (TabListView) page;
+            for (int i = 0, count = lv.getChildCount(); i < count; i++) {
+                View child = lv.getChildAt(i);
+                if (child instanceof MirrlyUiKit.HeroCardView) {
+                    MirrlyUiKit.HeroCardView hero = (MirrlyUiKit.HeroCardView) child;
+                    if (!hero.isIdleAnimationRunning()) {
+                        continue;
+                    }
+                    float heroTop = lv.getY() + hero.getY();
+                    float heroBottom = heroTop + hero.getHeight();
+                    if (heroBottom > 0f && heroTop < topGlassBottom) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     private void updateParallaxState(boolean active) {
@@ -346,6 +423,17 @@ public class MirrlyAboutActivity extends BaseFragment implements NotificationCen
             lp.height = insetTop + ActionBar.getCurrentActionBarHeight() + dp(44);
             listTopOverlay.requestLayout();
         }
+        if (navigationBarFadeView != null) {
+            ViewGroup.LayoutParams navLp = navigationBarFadeView.getLayoutParams();
+            int nextVisibility = bottom >= dp(40) ? View.VISIBLE : View.GONE;
+            if (navigationBarFadeView.getVisibility() != nextVisibility) {
+                navigationBarFadeView.setVisibility(nextVisibility);
+            }
+            if (navLp != null && navLp.height != bottom) {
+                navLp.height = bottom;
+                navigationBarFadeView.requestLayout();
+            }
+        }
         for (TabListView lv : listViews) {
             lv.checkInsets();
         }
@@ -353,11 +441,24 @@ public class MirrlyAboutActivity extends BaseFragment implements NotificationCen
 
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
-        if (id == NotificationCenter.proxySettingsChanged || id == NotificationCenter.didSetNewTheme) {
+        if (id == NotificationCenter.proxySettingsChanged) {
             for (TabListView lv : listViews) {
                 if (lv.adapter != null) {
-                    lv.adapter.update(id == NotificationCenter.proxySettingsChanged);
+                    lv.adapter.update(true);
                 }
+            }
+        } else if (id == NotificationCenter.didSetNewTheme) {
+            for (TabListView lv : listViews) {
+                if (lv.adapter != null) {
+                    lv.adapter.updateWithoutNotify();
+                }
+                for (int i = 0; i < lv.getChildCount(); i++) {
+                    View child = lv.getChildAt(i);
+                    if (child instanceof Theme.Colorable) {
+                        ((Theme.Colorable) child).updateColors();
+                    }
+                }
+                lv.invalidate();
             }
         }
     }
@@ -649,6 +750,7 @@ public class MirrlyAboutActivity extends BaseFragment implements NotificationCen
                 .add(R.drawable.msg_openin, LocaleController.getString(R.string.MirrlyAboutOpenLink), () -> openExternalUrl(url))
                 .add(R.drawable.msg_copy, LocaleController.getString(R.string.MirrlyAboutCopyLink), () -> copyUrlWithBulletin(url, null))
                 .setScrimViewBackground(listView.getClipBackground(view))
+                .setBlur(true)
                 .show();
         return true;
     }

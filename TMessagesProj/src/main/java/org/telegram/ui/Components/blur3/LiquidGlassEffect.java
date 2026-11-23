@@ -15,6 +15,27 @@ import java.util.Arrays;
 @RequiresApi(api = 33)
 public class LiquidGlassEffect {
 
+    private static volatile String plainShaderCode;
+    private static volatile String arrowShaderCode;
+
+    private static String getPlainShaderCode() {
+        String code = plainShaderCode;
+        if (code == null) {
+            code = AndroidUtilities.readRes(R.raw.liquid_glass_shader);
+            plainShaderCode = code;
+        }
+        return code;
+    }
+
+    private static String getArrowShaderCode() {
+        String code = arrowShaderCode;
+        if (code == null) {
+            code = AndroidUtilities.readRes(R.raw.liquid_glass_arrow_shader);
+            arrowShaderCode = code;
+        }
+        return code;
+    }
+
     private final RenderNode node;
     // the arrow costs the shader a lot: a shape without it keeps the plain one
     private final RuntimeShader plainShader;
@@ -29,8 +50,7 @@ public class LiquidGlassEffect {
 
     public LiquidGlassEffect(RenderNode node) {
         this.node = node;
-        final String code = AndroidUtilities.readRes(R.raw.liquid_glass_shader);
-        shader = plainShader = new RuntimeShader(code);
+        shader = plainShader = new RuntimeShader(getPlainShaderCode());
         node.setRenderEffect(effect = RenderEffect.createRuntimeShaderEffect(shader, "img"));
     }
 
@@ -55,8 +75,11 @@ public class LiquidGlassEffect {
      * it, the half width of the stripe of the edge the arrow changes.
      */
     public void setArrow(float axisX, float axisY, float dirX, float dirY, float height, float tipRadius, float filletRadius, float stripe) {
-        if (arrowAxisX != axisX || arrowAxisY != axisY || arrowDirX != dirX || arrowDirY != dirY
-                || arrowHeight != height || arrowTipRadius != tipRadius || arrowFilletRadius != filletRadius || arrowStripe != stripe) {
+        if ((arrowHeight > 0f) != (height > 0f)
+                || Math.abs(arrowAxisX - axisX) >= 0.25f || Math.abs(arrowAxisY - axisY) >= 0.25f
+                || Math.abs(arrowDirX - dirX) > 0.001f || Math.abs(arrowDirY - dirY) > 0.001f
+                || Math.abs(arrowHeight - height) >= 0.25f || Math.abs(arrowTipRadius - tipRadius) >= 0.25f
+                || Math.abs(arrowFilletRadius - filletRadius) >= 0.25f || Math.abs(arrowStripe - stripe) >= 0.25f) {
             arrowAxisX = axisX;
             arrowAxisY = axisY;
             arrowDirX = dirX;
@@ -104,22 +127,22 @@ public class LiquidGlassEffect {
 
         if (
             this.downsample != downsample ||
-            Math.abs(this.width - width) > 0.1f ||
-            Math.abs(this.height - height) > 0.1f ||
-            Math.abs(this.radiusLeftTop - radiusLeftTop) > 0.1f ||
-            Math.abs(this.radiusRightTop - radiusRightTop) > 0.1f ||
-            Math.abs(this.radiusRightBottom - radiusRightBottom) > 0.1f ||
-            Math.abs(this.radiusLeftBottom - radiusLeftBottom) > 0.1f ||
-            Math.abs(this.thickness - thickness) > 0.1f ||
-            Math.abs(this.intensity - intensity) > 0.1f ||
-            Math.abs(this.index - index) > 0.1f ||
+            Math.abs(this.width - width) >= 0.25f ||
+            Math.abs(this.height - height) >= 0.25f ||
+            Math.abs(this.radiusLeftTop - radiusLeftTop) >= 0.25f ||
+            Math.abs(this.radiusRightTop - radiusRightTop) >= 0.25f ||
+            Math.abs(this.radiusRightBottom - radiusRightBottom) >= 0.25f ||
+            Math.abs(this.radiusLeftBottom - radiusLeftBottom) >= 0.25f ||
+            Math.abs(this.thickness - thickness) >= 0.25f ||
+            Math.abs(this.intensity - intensity) > 0.05f ||
+            Math.abs(this.index - index) > 0.05f ||
             this.foregroundColor != foregroundColor ||
             arrowChanged
         ) {
             arrowChanged = false;
             if (arrowHeight > 0) {
                 if (arrowShader == null) {
-                    arrowShader = new RuntimeShader(AndroidUtilities.readRes(R.raw.liquid_glass_arrow_shader));
+                    arrowShader = new RuntimeShader(getArrowShaderCode());
                 }
                 shader = arrowShader;
             } else {
@@ -166,12 +189,17 @@ public class LiquidGlassEffect {
 
         final float centerX = (bodyX + width / 2 - nodeOffsetX) / downsample;
         final float centerY = (bodyY + height / 2 - nodeOffsetY) / downsample;
-        final boolean onGrid = nodeOffsetX == (int) nodeOffsetX && nodeOffsetY == (int) nodeOffsetY;
+        final int gridOffsetX = Math.round(nodeOffsetX);
+        final int gridOffsetY = Math.round(nodeOffsetY);
+        final boolean onGrid = Math.abs(nodeOffsetX - gridOffsetX) < 0.25f && Math.abs(nodeOffsetY - gridOffsetY) < 0.25f;
         final int effectIndex = onGrid
-            ? Math.floorMod((int) -nodeOffsetY, downsample) * downsample + Math.floorMod((int) -nodeOffsetX, downsample)
+            ? Math.floorMod(-gridOffsetY, downsample) * downsample + Math.floorMod(-gridOffsetX, downsample)
             : effectPool.length - 1;
         RenderEffect phaseEffect = effectPool[effectIndex];
-        if (phaseEffect == null || effectPoolCenterX[effectIndex] != centerX || effectPoolCenterY[effectIndex] != centerY) {
+        final float centerTol = 0.25f / Math.max(1, downsample);
+        if (phaseEffect == null
+                || Math.abs(effectPoolCenterX[effectIndex] - centerX) >= centerTol
+                || Math.abs(effectPoolCenterY[effectIndex] - centerY) >= centerTol) {
             shader.setFloatUniform("center", centerX, centerY);
             phaseEffect = RenderEffect.createRuntimeShaderEffect(shader, "img");
             effectPool[effectIndex] = phaseEffect;

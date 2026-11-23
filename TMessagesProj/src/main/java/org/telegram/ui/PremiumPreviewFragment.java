@@ -490,12 +490,16 @@ public class PremiumPreviewFragment extends BaseFragment implements Notification
         };
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             scrollableViewNoiseSuppressor = new DownscaleScrollableNoiseSuppressor(true, true);
+            iBlur3SourceGlass = new GlassSourceRenderNode(null);
+            iBlur3SourceGlass.setScrollableNoiseSuppressor(scrollableViewNoiseSuppressor, DownscaleScrollableNoiseSuppressor.DRAW_GLASS);
+            iBlur3SourceGlass.setUnderSource(iBlur3Source);
             iBlur3SourceGlassFrosted = new GlassSourceRenderNode(null);
             iBlur3SourceGlassFrosted.setScrollableNoiseSuppressor(scrollableViewNoiseSuppressor, DownscaleScrollableNoiseSuppressor.DRAW_FROSTED_GLASS);
             iBlur3SourceGlassFrosted.setUnderSource(iBlur3Source);
-            iBlur3Factory = new BlurredBackgroundDrawableViewFactory(iBlur3SourceGlassFrosted);
+            iBlur3Factory = new BlurredBackgroundDrawableViewFactory(iBlur3SourceGlass, iBlur3SourceGlassFrosted, iBlur3Source);
         } else {
             scrollableViewNoiseSuppressor = null;
+            iBlur3SourceGlass = null;
             iBlur3SourceGlassFrosted = null;
             iBlur3Factory = new BlurredBackgroundDrawableViewFactory(iBlur3Source);
         }
@@ -1169,25 +1173,43 @@ public class PremiumPreviewFragment extends BaseFragment implements Notification
 
         if (BuildVars.useInvoiceBilling()) {
             final Activity activity = fragment != null ? fragment.getParentActivity() : LaunchActivity.instance;
+            final String safeSource = TextUtils.isEmpty(source) ? "settings" : Uri.encode(source);
+            final String botUrl = selectedTier != null && selectedTier.subscriptionOption != null ? selectedTier.subscriptionOption.bot_url : null;
             if (activity instanceof LaunchActivity) {
                 final LaunchActivity launchActivity = (LaunchActivity) activity;
-                if (selectedTier == null || selectedTier.subscriptionOption == null || selectedTier.subscriptionOption.bot_url == null) {
+                if (TextUtils.isEmpty(botUrl)) {
                     final MessagesController messagesController = MessagesController.getInstance(account);
                     if (!TextUtils.isEmpty(messagesController.premiumBotUsername)) {
                         launchActivity.setNavigateToPremiumBot(true);
-                        launchActivity.onNewIntent(new Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/" + messagesController.premiumBotUsername + "?start=" + source)), (Browser.Progress) null);
+                        launchActivity.onNewIntent(new Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/" + messagesController.premiumBotUsername + "?start=" + safeSource)), (Browser.Progress) null);
                     } else if (!TextUtils.isEmpty(messagesController.premiumInvoiceSlug)) {
                         launchActivity.onNewIntent(new Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/$" + messagesController.premiumInvoiceSlug)), (Browser.Progress) null);
+                    } else {
+                        launchActivity.setNavigateToPremiumBot(true);
+                        launchActivity.onNewIntent(new Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/PremiumBot?start=" + safeSource)), (Browser.Progress) null);
                     }
                 } else {
-                    final Uri uri = Uri.parse(selectedTier.subscriptionOption.bot_url);
-                    if (uri.getHost().equals("t.me")) {
-                        if (!uri.getPath().startsWith("/$") && !uri.getPath().startsWith("/invoice/")) {
-                            launchActivity.setNavigateToPremiumBot(true);
-                        }
+                    final Uri uri = Uri.parse(botUrl);
+                    final String host = uri.getHost();
+                    final String path = uri.getPath();
+                    if ("t.me".equalsIgnoreCase(host) && (path == null || (!path.startsWith("/$") && !path.startsWith("/invoice/")))) {
+                        launchActivity.setNavigateToPremiumBot(true);
                     }
-                    Browser.openUrl(launchActivity, tier.subscriptionOption.bot_url);
+                    Browser.openUrl(launchActivity, botUrl);
                 }
+            } else if (fragment != null && fragment.getContext() != null) {
+                final MessagesController messagesController = MessagesController.getInstance(account);
+                final String fallbackUrl;
+                if (!TextUtils.isEmpty(botUrl)) {
+                    fallbackUrl = botUrl;
+                } else if (!TextUtils.isEmpty(messagesController.premiumBotUsername)) {
+                    fallbackUrl = "https://t.me/" + messagesController.premiumBotUsername + "?start=" + safeSource;
+                } else if (!TextUtils.isEmpty(messagesController.premiumInvoiceSlug)) {
+                    fallbackUrl = "https://t.me/$" + messagesController.premiumInvoiceSlug;
+                } else {
+                    fallbackUrl = "https://t.me/PremiumBot?start=" + safeSource;
+                }
+                Browser.openUrl(fragment.getContext(), fallbackUrl);
             }
             return;
         }
@@ -1482,6 +1504,8 @@ public class PremiumPreviewFragment extends BaseFragment implements Notification
             for (TLRPC.Document document : getMediaDataController().getPremiumPromo().videos) {
                 FileLoader.getInstance(currentAccount).loadFile(document, getMediaDataController().getPremiumPromo(), FileLoader.PRIORITY_HIGH, 0);
             }
+        } else {
+            getMediaDataController().loadPremiumPromo(false);
         }
 
         if (type == FEATURES_BUSINESS) {
@@ -2162,8 +2186,12 @@ public class PremiumPreviewFragment extends BaseFragment implements Notification
                             .setSubscriptionReplacementMode(BillingFlowParams.SubscriptionUpdateParams.ReplacementMode.CHARGE_FULL_PRICE)
                             .build();
                 }
-                buyPremium(this, tier, "settings", true, updateParams);
+                buyPremium(this, tier, TextUtils.isEmpty(source) ? "settings" : source, true, updateParams);
             });
+            premiumButtonView.setFlickerDisabled(false);
+        } else if (BuildVars.useInvoiceBilling() && !getUserConfig().isPremium()) {
+            premiumButtonView.setButton(getPremiumButtonText(currentAccount, null), null, animated);
+            buttonContainerInternal.setOnClickListener(v -> buyPremium(this, null, TextUtils.isEmpty(source) ? "settings" : source, true, null));
             premiumButtonView.setFlickerDisabled(false);
         }
     }
@@ -2621,6 +2649,7 @@ public class PremiumPreviewFragment extends BaseFragment implements Notification
 
     private BlurredBackgroundWithFadeDrawable navbarProtectionDrawable;
     private final @Nullable DownscaleScrollableNoiseSuppressor scrollableViewNoiseSuppressor;
+    private final @Nullable GlassSourceRenderNode iBlur3SourceGlass;
     private final @Nullable GlassSourceRenderNode iBlur3SourceGlassFrosted;
     private final @NonNull GlassSource iBlur3Source;
     private final @NonNull BlurredBackgroundDrawableViewFactory iBlur3Factory;

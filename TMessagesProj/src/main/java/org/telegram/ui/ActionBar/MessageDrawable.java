@@ -637,7 +637,7 @@ public class MessageDrawable extends Drawable {
         boolean invalidatePath;
         if (pathDrawCacheParams != null) {
             path = pathDrawCacheParams.path;
-            invalidatePath = pathDrawCacheParams.invalidatePath(bounds, drawFullBottom, drawFullTop);
+            invalidatePath = pathDrawCacheParams.invalidatePath(bounds, drawFullBottom, drawFullTop, rad, nearRad, smallRad, isTopNear, isBottomNear, botButtonsBottom, drawFullBubble);
         } else {
             path = this.path;
             invalidatePath = true;
@@ -690,7 +690,7 @@ public class MessageDrawable extends Drawable {
         boolean invalidatePath;
         if (pathDrawCacheParams != null) {
             path = pathDrawCacheParams.path;
-            invalidatePath = pathDrawCacheParams.invalidatePath(bounds, drawFullBottom, drawFullTop);
+            invalidatePath = pathDrawCacheParams.invalidatePath(bounds, drawFullBottom, drawFullTop, rad, nearRad, smallRad, isTopNear, isBottomNear, botButtonsBottom, drawFullBubble);
         } else {
             path = this.path;
             invalidatePath = true;
@@ -892,11 +892,52 @@ public class MessageDrawable extends Drawable {
         Rect lastRect = new Rect();
         boolean lastDrawFullTop;
         boolean lastDrawFullBottom;
+        int lastRad = -1;
+        int lastNearRad = -1;
+        int lastSmallRad = -1;
+        int lastBubbleRadius = -1;
+        boolean lastIsTopNear;
+        boolean lastIsBottomNear;
+        boolean lastBotButtonsBottom;
+        boolean lastDrawFullBubble;
 
         public boolean invalidatePath(Rect bounds, boolean drawFullBottom, boolean drawFullTop) {
-            boolean invalidate = lastRect.isEmpty() || lastRect.top != bounds.top || lastRect.bottom != bounds.bottom || lastRect.right != bounds.right || lastRect.left != bounds.left || lastDrawFullTop != drawFullTop || lastDrawFullBottom != drawFullBottom || !drawFullTop || !drawFullBottom;
+            boolean invalidate = lastRect.isEmpty() || lastRect.top != bounds.top || lastRect.bottom != bounds.bottom || lastRect.right != bounds.right || lastRect.left != bounds.left || lastDrawFullTop != drawFullTop || lastDrawFullBottom != drawFullBottom || !drawFullTop || !drawFullBottom || lastBubbleRadius != SharedConfig.bubbleRadius;
             lastDrawFullTop = drawFullTop;
             lastDrawFullBottom = drawFullBottom;
+            lastBubbleRadius = SharedConfig.bubbleRadius;
+            lastRect.set(bounds);
+            return invalidate;
+        }
+
+        public boolean invalidatePath(Rect bounds, boolean drawFullBottom, boolean drawFullTop, int rad, int nearRad, int smallRad, boolean isTopNear, boolean isBottomNear, boolean botButtonsBottom, boolean drawFullBubble) {
+            boolean invalidate = lastRect.isEmpty()
+                    || lastRect.top != bounds.top
+                    || lastRect.bottom != bounds.bottom
+                    || lastRect.right != bounds.right
+                    || lastRect.left != bounds.left
+                    || lastDrawFullTop != drawFullTop
+                    || lastDrawFullBottom != drawFullBottom
+                    || !drawFullTop
+                    || !drawFullBottom
+                    || lastBubbleRadius != SharedConfig.bubbleRadius
+                    || lastRad != rad
+                    || lastNearRad != nearRad
+                    || lastSmallRad != smallRad
+                    || lastIsTopNear != isTopNear
+                    || lastIsBottomNear != isBottomNear
+                    || lastBotButtonsBottom != botButtonsBottom
+                    || lastDrawFullBubble != drawFullBubble;
+            lastDrawFullTop = drawFullTop;
+            lastDrawFullBottom = drawFullBottom;
+            lastBubbleRadius = SharedConfig.bubbleRadius;
+            lastRad = rad;
+            lastNearRad = nearRad;
+            lastSmallRad = smallRad;
+            lastIsTopNear = isTopNear;
+            lastIsBottomNear = isBottomNear;
+            lastBotButtonsBottom = botButtonsBottom;
+            lastDrawFullBubble = drawFullBubble;
             lastRect.set(bounds);
             return invalidate;
         }

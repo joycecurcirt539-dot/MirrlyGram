@@ -7,20 +7,26 @@ import static org.telegram.messenger.AndroidUtilities.lerp;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.text.TextPaint;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.ViewGroup;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.DrawableRes;
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.annotation.RawRes;
 import androidx.annotation.StringRes;
 import androidx.core.graphics.ColorUtils;
@@ -35,6 +41,8 @@ import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.mirrly.MirrlyConfig;
+import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AnimatedTextView;
@@ -74,6 +82,8 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
 
     private TabAnimation tabAnimation;
     private TLRPC.TL_attachMenuBot tabAnimationBot;
+    private int staticIconRes;
+    private boolean circleCompactMode;
 
     private final TextPaint defaultTextPaint;
 
@@ -125,10 +135,20 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
             final float offset = (visualWidth - getMeasuredWidth()) / 2f;
             imageView.setTranslationX(offset);
             textView.setTranslationX(offset);
+            if (backupImageView != null) {
+                backupImageView.setTranslationX(offset);
+            }
         }
     }
 
     private static final RectF tmpRectF = new RectF();
+    private final Paint glassLensFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint glassLensRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final LinearGradient glassLensFillGradient = new LinearGradient(0, 0, 0, 1, 0x18FFFFFF, 0x04FFFFFF, Shader.TileMode.CLAMP);
+    private final LinearGradient glassLensRimDarkGradient = new LinearGradient(0, 0, 0, 1, 0x33FFFFFF, 0x16FFFFFF, Shader.TileMode.CLAMP);
+    private final LinearGradient glassLensRimLightGradient = new LinearGradient(0, 0, 0, 1, 0xD9FFFFFF, 0x33FFFFFF, Shader.TileMode.CLAMP);
+    private final Matrix glassLensMatrix = new Matrix();
+    private final RectF glassLensRect = new RectF();
 
     private boolean hasGestureSelectedOverride;
     private float gestureSelectedOverride;
@@ -151,7 +171,7 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
     protected void dispatchDraw(@NonNull Canvas canvas) {
         final float viewWidth = hasVisualWidth ? visualWidth : getWidth();
         final float selectedFactor = hasGestureSelectedOverride ? gestureSelectedOverride : isSelectedAnimator.getFloatValue();
-        if (selectedFactor > 0 && !skipDrawSelector) {
+        if (selectedFactor > 0 && !skipDrawSelector && !circleCompactMode) {
             final float alpha = AnimatorUtils.DECELERATE_INTERPOLATOR.getInterpolation(selectedFactor);
 
             paintCounterBackground.setColor(Theme.multAlpha(colorSelected, 0.09f * alpha));
@@ -161,6 +181,32 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
             canvas.save();
             canvas.scale(s, s, tmpRectF.centerX(), tmpRectF.centerY());
             canvas.drawRoundRect(tmpRectF, r, r, paintCounterBackground);
+            if (MirrlyConfig.isGlassLiquidEnabled() && tmpRectF.width() > 1f && tmpRectF.height() > 1f) {
+                final int pillAlpha = Math.round(255f * alpha);
+                final float h = Math.max(1f, tmpRectF.height());
+                glassLensMatrix.reset();
+                glassLensMatrix.setScale(1f, h);
+                glassLensMatrix.postTranslate(0f, tmpRectF.top);
+                glassLensFillGradient.setLocalMatrix(glassLensMatrix);
+                glassLensFillPaint.setShader(glassLensFillGradient);
+                glassLensFillPaint.setAlpha(pillAlpha);
+                canvas.drawRoundRect(tmpRectF, r, r, glassLensFillPaint);
+
+                final float rimScale = MirrlyConfig.getGlassRimScale();
+                if (rimScale > 0.01f && s > 0.05f) {
+                    final boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
+                    final LinearGradient rimShader = isDark ? glassLensRimDarkGradient : glassLensRimLightGradient;
+                    rimShader.setLocalMatrix(glassLensMatrix);
+                    final float strokeW = (dpf2(0.55f) * rimScale) / s;
+                    final float inset = strokeW * 0.5f;
+                    glassLensRimPaint.setStyle(Paint.Style.STROKE);
+                    glassLensRimPaint.setStrokeWidth(strokeW);
+                    glassLensRimPaint.setShader(rimShader);
+                    glassLensRimPaint.setAlpha(pillAlpha);
+                    glassLensRect.set(tmpRectF.left + inset, tmpRectF.top + inset, tmpRectF.right - inset, tmpRectF.bottom - inset);
+                    canvas.drawRoundRect(glassLensRect, Math.max(0f, r - inset), Math.max(0f, r - inset), glassLensRimPaint);
+                }
+            }
             canvas.restore();
         }
 
@@ -176,10 +222,13 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
             canvas.save();
 
             final float gap = dpf2(1.33f);
-            final float cx = viewWidth / 2f + dpf2(11);
-            final float cy = dpf2(10);
             final float height = dpf2(16);
             final float width = Math.max(height, counter.getCurrentWidth() + dp(8));
+            float cx = viewWidth / 2f + dpf2(11);
+            if (circleCompactMode && viewWidth > 0f) {
+                cx = Math.min(cx, Math.max(viewWidth / 2f, viewWidth - width / 2f - dpf2(3)));
+            }
+            final float cy = circleCompactMode ? dpf2(11) : dpf2(10);
             final float rOuter = dpf2(9.333f);
             final float rInner = dpf2(8f);
             tmpRectF.set(
@@ -250,18 +299,103 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
     }
 
     private boolean needUpdateBackupViewColor;
+    private float adaptiveInvertFactor = 0f;
+    private float smartAdaptiveWcagLuma = -1f;
+    private int lastAppliedIconColor;
+    private boolean hasAppliedIconColor;
+    private PorterDuffColorFilter cachedIconColorFilter;
+
+    public void applyAdaptiveGlassContrast(float invertFactor) {
+        final float clamped = Math.max(0f, Math.min(1f, invertFactor));
+        if (smartAdaptiveWcagLuma >= 0f || Math.abs(this.adaptiveInvertFactor - clamped) >= 0.008f) {
+            this.smartAdaptiveWcagLuma = -1f;
+            this.adaptiveInvertFactor = clamped;
+            applyColors();
+        }
+    }
+
+    public void updateSmartAdaptiveGlassContrast(
+            @Nullable ViewGroup sampleTarget,
+            int glassBgColor,
+            int viewportW,
+            int viewportH,
+            float fallbackBgLuma,
+            boolean resetToBase
+    ) {
+        if (resetToBase || getVisibility() != VISIBLE || getWidth() <= 0 || getHeight() <= 0) {
+            if (smartAdaptiveWcagLuma >= 0f || adaptiveInvertFactor > 0.001f) {
+                smartAdaptiveWcagLuma = -1f;
+                adaptiveInvertFactor = 0f;
+                applyColors();
+            }
+            return;
+        }
+        final float underLuma = org.telegram.utils.glass.GlassContrastHelper.estimateUnderlyingLuminanceInBand(
+                this, sampleTarget, 0f, 0f, getWidth(), getHeight(),
+                null, null, viewportW, viewportH, fallbackBgLuma, resourcesProvider);
+        final float nextWcag = org.telegram.utils.glass.GlassContrastHelper.computeCompositeWcagLuminance(glassBgColor, underLuma);
+        if (smartAdaptiveWcagLuma < 0f || Math.abs(smartAdaptiveWcagLuma - nextWcag) >= 0.015f) {
+            smartAdaptiveWcagLuma = nextWcag;
+            applyColors();
+        }
+    }
+
+    private boolean hasAppliedTextColor;
+    private int lastAppliedTextColor;
+    private float lastAppliedHaloStrength = -1f;
 
     private void applyColors() {
-        final int color = ColorUtils.blendARGB(colorDefault, colorSelected, isSelectedAnimator.getFloatValue());
-        final int colorText = ColorUtils.blendARGB(colorDefault, colorSelectedText, isSelectedAnimator.getFloatValue());
-
-        final PorterDuffColorFilter filter = new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN);
-        if (backupImageView != null && needUpdateBackupViewColor) {
-            backupImageView.setColorFilter(filter);
-            backupImageView.invalidate();
+        final float sel = isSelectedAnimator.getFloatValue();
+        final int baseIcon = ColorUtils.blendARGB(colorDefault, colorSelected, sel);
+        final int baseText = ColorUtils.blendARGB(colorDefault, colorSelectedText, sel);
+        final int color;
+        final int colorText;
+        final float haloStrength;
+        if (smartAdaptiveWcagLuma >= 0f) {
+            final boolean needLight = org.telegram.utils.glass.GlassContrastHelper.resolveAdaptiveColorFromWcag(
+                    baseText, smartAdaptiveWcagLuma, false, false) != baseText;
+            color = org.telegram.utils.glass.GlassContrastHelper.resolveAdaptiveColorFromWcag(
+                    baseIcon, smartAdaptiveWcagLuma, false, sel > 0.5f);
+            colorText = org.telegram.utils.glass.GlassContrastHelper.resolveAdaptiveColorFromWcag(
+                    baseText, smartAdaptiveWcagLuma, false, sel > 0.5f);
+            haloStrength = needLight ? 0.72f : ((smartAdaptiveWcagLuma > 0.08f && smartAdaptiveWcagLuma < 0.35f) ? 0.58f : 0.25f);
+        } else {
+            color = adaptiveInvertFactor > 0.001f
+                    ? org.telegram.utils.glass.GlassContrastHelper.blendAdaptiveIconColor(baseIcon, adaptiveInvertFactor)
+                    : baseIcon;
+            colorText = adaptiveInvertFactor > 0.001f
+                    ? org.telegram.utils.glass.GlassContrastHelper.blendAdaptiveTextColor(baseText, adaptiveInvertFactor, false)
+                    : baseText;
+            haloStrength = adaptiveInvertFactor > 0.005f ? Math.max(0.45f, adaptiveInvertFactor * 0.78f) : 0f;
         }
-        imageView.setColorFilter(filter);
-        textView.setTextColor(colorText);
+
+        final boolean iconChanged = !hasAppliedIconColor || lastAppliedIconColor != color || cachedIconColorFilter == null;
+        if (iconChanged) {
+            hasAppliedIconColor = true;
+            lastAppliedIconColor = color;
+            cachedIconColorFilter = new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN);
+            if (backupImageView != null && needUpdateBackupViewColor) {
+                backupImageView.setColorFilter(cachedIconColorFilter);
+                backupImageView.invalidate();
+            }
+            imageView.setColorFilter(cachedIconColorFilter);
+        }
+        final boolean textChanged = !hasAppliedTextColor || lastAppliedTextColor != colorText;
+        final boolean haloChanged = lastAppliedHaloStrength < 0f || Math.abs(lastAppliedHaloStrength - haloStrength) > 0.01f;
+        if (textChanged) {
+            hasAppliedTextColor = true;
+            lastAppliedTextColor = colorText;
+            textView.setTextColor(colorText);
+        }
+        if (textChanged || haloChanged) {
+            lastAppliedHaloStrength = haloStrength;
+            org.telegram.utils.glass.GlassContrastHelper.applyOpticalTextHalo(
+                    textView.getPaint(),
+                    colorText,
+                    haloStrength
+            );
+            textView.invalidate();
+        }
     }
 
     @Override
@@ -319,6 +453,12 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
             } else {
                 backupImageView.clearImage();
             }
+            applyColors();
+            return;
+        }
+
+        if (staticIconRes != 0) {
+            imageView.setImageResource(staticIconRes);
             applyColors();
             return;
         }
@@ -430,6 +570,7 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
 
     public static GlassTabView createAvatar(Context context, Theme.ResourcesProvider resourcesProvider, int currentAccount, @StringRes int stringRes) {
         GlassTabView tab = new GlassTabView(context);
+        tab.resourcesProvider = resourcesProvider;
         tab.textView.setText(LocaleController.getString(stringRes));
         tab.imageView.setVisibility(GONE);
 
@@ -440,6 +581,7 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
         backupImageView.setForUserOrChat(user, avatarDrawable);
         backupImageView.setRoundRadius(dp(11));
         tab.backupImageView = backupImageView;
+        tab.avatarDrawable = avatarDrawable;
 
         tab.addView(backupImageView, LayoutHelper.createFrame(22, 22, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 5, 0, 0));
         tab.colorDefault = Theme.getColor(Theme.key_glass_tabUnselected, resourcesProvider);
@@ -450,8 +592,14 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
     }
 
     public void updateUserAvatar(int currentAccount) {
+        if (backupImageView == null) {
+            return;
+        }
         TLRPC.User user = MessagesController.getInstance(currentAccount).getUser(UserConfig.getInstance(currentAccount).getClientUserId());
-        AvatarDrawable avatarDrawable = new AvatarDrawable(user);
+        if (avatarDrawable == null) {
+            avatarDrawable = new AvatarDrawable();
+        }
+        avatarDrawable.setInfo(currentAccount, user);
         backupImageView.setForUserOrChat(user, avatarDrawable);
     }
 
@@ -531,6 +679,9 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
 
     @Override
     public float measureTextWidth() {
+        if (circleCompactMode) {
+            return 0f;
+        }
         return defaultTextPaint.measureText(textView.getText().toString());
     }
 
@@ -538,6 +689,9 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
 
     @Override
     public float measureTextWidth(float textSizeDp) {
+        if (circleCompactMode) {
+            return 0f;
+        }
         if (scaledTextPaint == null) {
             scaledTextPaint = new TextPaint(defaultTextPaint);
         }
@@ -635,10 +789,123 @@ public class GlassTabView extends FrameLayout implements MainTabsLayout.Tab, Fac
     public void setTabAnimation(TabAnimation animation) {
         tabAnimation = animation;
         tabAnimationBot = null;
+        staticIconRes = 0;
         lastIconAnimationRaw = 0;
         lastBotIconId = 0;
         imageView.clearAnimationDrawable();
         checkPlayAnimation(false);
+    }
+
+    public void setCircleCompactMode(boolean compact) {
+        if (this.circleCompactMode == compact) {
+            return;
+        }
+        this.circleCompactMode = compact;
+        textView.setVisibility(compact ? GONE : VISIBLE);
+        updateCompactIconLayout();
+        invalidate();
+    }
+
+    public boolean isCircleCompactMode() {
+        return circleCompactMode;
+    }
+
+    private void updateCompactIconLayout() {
+        if (circleCompactMode) {
+            imageView.setLayoutParams(LayoutHelper.createFrame(24, 24, Gravity.CENTER));
+            if (backupImageView != null && tabAnimationBot == null) {
+                backupImageView.setRoundRadius(dp(13));
+                backupImageView.setLayoutParams(LayoutHelper.createFrame(26, 26, Gravity.CENTER));
+            }
+        } else {
+            imageView.setLayoutParams(LayoutHelper.createFrame(24, 24, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 4, 0, 0));
+            if (backupImageView != null && tabAnimationBot == null) {
+                backupImageView.setRoundRadius(dp(11));
+                backupImageView.setLayoutParams(LayoutHelper.createFrame(22, 22, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 5, 0, 0));
+            }
+        }
+        checkVisualWidth();
+    }
+
+    public void restoreMainTab(TabAnimation animation, CharSequence title) {
+        tabAnimation = animation;
+        tabAnimationBot = null;
+        staticIconRes = 0;
+        lastIconAnimationRaw = 0;
+        lastBotIconId = 0;
+        lastIsSelected = false;
+        imageView.clearAnimationDrawable();
+        imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        imageView.setVisibility(VISIBLE);
+        if (backupImageView != null) {
+            backupImageView.setVisibility(GONE);
+        }
+        textView.setText(title);
+        updateCompactIconLayout();
+        if (animation != null && animation.iconStatic == -1 && animation.endFrameMid == -1 && animation.iconToFilled == animation.iconToOutline) {
+            imageView.setAnimation(animation.iconToFilled, 24, 24);
+        }
+        checkPlayAnimation(false);
+        applyColors();
+        invalidate();
+    }
+
+    public void restoreUserAvatarTab(int currentAccount, CharSequence title) {
+        TLRPC.User user = MessagesController.getInstance(currentAccount).getUser(UserConfig.getInstance(currentAccount).getClientUserId());
+        setCustomAvatar(user, currentAccount, title, R.drawable.msg_openprofile);
+    }
+
+    public void setCustomStaticIcon(@DrawableRes int iconRes, CharSequence title) {
+        tabAnimation = null;
+        tabAnimationBot = null;
+        staticIconRes = iconRes;
+        lastIconAnimationRaw = 0;
+        lastBotIconId = 0;
+        lastIsSelected = false;
+        imageView.clearAnimationDrawable();
+        imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        imageView.setImageResource(iconRes);
+        imageView.setVisibility(VISIBLE);
+        if (backupImageView != null) {
+            backupImageView.setVisibility(GONE);
+        }
+        textView.setText(title);
+        updateCompactIconLayout();
+        applyColors();
+        invalidate();
+    }
+
+    public void setCustomAvatar(@Nullable TLObject object, int currentAccount, CharSequence title, @DrawableRes int fallbackIconRes) {
+        if (object == null) {
+            setCustomStaticIcon(fallbackIconRes, title);
+            return;
+        }
+        tabAnimation = null;
+        tabAnimationBot = null;
+        staticIconRes = 0;
+        lastIconAnimationRaw = 0;
+        lastBotIconId = 0;
+        lastIsSelected = false;
+        imageView.clearAnimationDrawable();
+        imageView.setVisibility(GONE);
+
+        if (backupImageView == null) {
+            backupImageView = new BackupImageView(getContext());
+            addView(backupImageView, LayoutHelper.createFrame(22, 22, Gravity.CENTER_HORIZONTAL | Gravity.TOP, 0, 5, 0, 0));
+        }
+        if (avatarDrawable == null) {
+            avatarDrawable = new AvatarDrawable();
+        }
+        avatarDrawable.setInfo(currentAccount, object);
+        backupImageView.setSize(-1, -1);
+        backupImageView.setForUserOrChat(object, avatarDrawable);
+        backupImageView.setColorFilter(null);
+        needUpdateBackupViewColor = false;
+        backupImageView.setVisibility(VISIBLE);
+        textView.setText(title);
+        updateCompactIconLayout();
+        applyColors();
+        invalidate();
     }
 
     public void setText(CharSequence text) {

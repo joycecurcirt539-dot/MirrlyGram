@@ -25,6 +25,7 @@ import android.graphics.ColorFilter;
 import android.graphics.ColorMatrix;
 import android.graphics.ColorMatrixColorFilter;
 import android.graphics.CornerPathEffect;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PathEffect;
@@ -32,6 +33,7 @@ import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.text.Layout;
@@ -2930,6 +2932,70 @@ public class ChatActionCell extends BaseCell implements DownloadController.FileD
         return radialProgress != null && radialProgress.getIcon() == MediaActionDrawable.ICON_CANCEL;
     }
 
+    private int overrideCustomDateTextColor = 0;
+    private boolean customDateOpticalHalo = false;
+    private boolean customDateGradientActive = false;
+    private LinearGradient customDateGradientShader;
+    private int[] customDateGradientColors;
+    private float[] customDateGradientPositions;
+    private int customDateGradientWidth;
+
+    public void setCustomDateAdaptiveStyle(int textColor, boolean opticalHalo) {
+        if (this.overrideCustomDateTextColor != textColor || this.customDateOpticalHalo != opticalHalo || customDateGradientActive) {
+            this.overrideCustomDateTextColor = textColor;
+            this.customDateOpticalHalo = opticalHalo;
+            this.customDateGradientActive = false;
+            invalidate();
+        }
+    }
+
+    public void setCustomDateAdaptiveStyle(
+            int solidTextColor,
+            boolean opticalHalo,
+            @Nullable org.telegram.utils.glass.GlassContrastHelper.HorizontalAdaptiveBand band
+    ) {
+        boolean invalidated = false;
+        if (this.overrideCustomDateTextColor != solidTextColor || this.customDateOpticalHalo != opticalHalo) {
+            this.overrideCustomDateTextColor = solidTextColor;
+            this.customDateOpticalHalo = opticalHalo;
+            invalidated = true;
+        }
+        if (band == null || !band.useGradient || band.gradientWidth <= 0) {
+            if (customDateGradientActive) {
+                customDateGradientActive = false;
+                invalidated = true;
+            }
+        } else {
+            final int n = org.telegram.utils.glass.GlassContrastHelper.HorizontalAdaptiveBand.SAMPLE_COUNT;
+            boolean changed = !customDateGradientActive || customDateGradientShader == null || Math.abs(customDateGradientWidth - band.gradientWidth) > 2;
+            if (customDateGradientColors == null) {
+                customDateGradientColors = new int[n];
+                customDateGradientPositions = new float[n];
+                changed = true;
+            }
+            if (!changed) {
+                for (int i = 0; i < n; i++) {
+                    if (customDateGradientColors[i] != band.colors[i]) {
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            customDateGradientActive = true;
+            if (changed) {
+                System.arraycopy(band.colors, 0, customDateGradientColors, 0, n);
+                System.arraycopy(band.positions, 0, customDateGradientPositions, 0, n);
+                customDateGradientWidth = Math.max(1, band.gradientWidth);
+                customDateGradientShader = new LinearGradient(0f, 0f, customDateGradientWidth, 0f,
+                        customDateGradientColors, customDateGradientPositions, Shader.TileMode.CLAMP);
+                invalidated = true;
+            }
+        }
+        if (invalidated) {
+            invalidate();
+        }
+    }
+
     public int getCustomDate() {
         return customDate;
     }
@@ -3099,23 +3165,45 @@ public class ChatActionCell extends BaseCell implements DownloadController.FileD
             }
         }
 
+        if (textPaint == null) {
+            textPaint = (TextPaint) getThemedPaint(Theme.key_paint_chatActionText);
+        }
         if (textPaint != null && textLayout != null) {
             canvas.save();
             canvas.translate(textXLeft, textY);
             if (textLayout.getPaint() != textPaint) {
                 buildLayout();
             }
+            final TextPaint layoutPaint = textLayout.getPaint();
+            final int savedPaintColor = layoutPaint.getColor();
+            final Shader savedShader = layoutPaint.getShader();
+            final boolean applyCustomStyle = overrideCustomDateTextColor != 0 || customDateOpticalHalo || customDateGradientActive;
+            if (applyCustomStyle) {
+                final int effectiveTextColor = overrideCustomDateTextColor != 0 ? overrideCustomDateTextColor : savedPaintColor;
+                layoutPaint.setColor(effectiveTextColor);
+                layoutPaint.setShader(customDateGradientActive ? customDateGradientShader : null);
+                if (customDateOpticalHalo) {
+                    org.telegram.utils.glass.GlassContrastHelper.applyOpticalTextHalo(layoutPaint, effectiveTextColor, true);
+                }
+            }
             canvas.save();
             SpoilerEffect.clipOutCanvas(canvas, spoilers);
             SpoilerEffect.layoutDrawMaybe(textLayout, canvas);
             if (delegate == null || delegate.canDrawOutboundsContent()) {
-                AnimatedEmojiSpan.drawAnimatedEmojis(canvas, textLayout, animatedEmojiStack, 0, spoilers, 0, 0, 0, 1f, textLayout == null ? null : getAdaptiveEmojiColorFilter(textLayout.getPaint().getColor()));
+                AnimatedEmojiSpan.drawAnimatedEmojis(canvas, textLayout, animatedEmojiStack, 0, spoilers, 0, 0, 0, 1f, textLayout == null ? null : getAdaptiveEmojiColorFilter(layoutPaint.getColor()));
             }
             canvas.restore();
 
             for (SpoilerEffect eff : spoilers) {
-                eff.setColor(textLayout.getPaint().getColor());
+                eff.setColor(layoutPaint.getColor());
                 eff.draw(canvas);
+            }
+            if (applyCustomStyle) {
+                if (customDateOpticalHalo) {
+                    org.telegram.utils.glass.GlassContrastHelper.applyOpticalTextHalo(layoutPaint, savedPaintColor, false);
+                }
+                layoutPaint.setShader(savedShader);
+                layoutPaint.setColor(savedPaintColor);
             }
 
             canvas.restore();
@@ -3516,7 +3604,172 @@ public class ChatActionCell extends BaseCell implements DownloadController.FileD
         backgroundRight = (int) Math.max(backgroundRight, rect.right);
     }
 
+    public void ensureBackgroundPath() {
+        if (!invalidatePath && backgroundRight > backgroundLeft) {
+            return;
+        }
+        final int viewWidth = getMeasuredWidth() > 0 ? getMeasuredWidth() : getWidth();
+        if (viewWidth <= 0) {
+            backgroundLeft = 0;
+            backgroundRight = 0;
+            backgroundPath.reset();
+            return;
+        }
+        invalidatePath = false;
+        backgroundLeft = viewWidth;
+        backgroundRight = 0;
+        lineWidths.clear();
+        final int count = textLayout == null ? 0 : textLayout.getLineCount();
+        final int corner = dp(11);
+        final int cornerIn = dp(8);
+
+        int prevLineWidth = 0;
+        for (int a = 0; a < count; a++) {
+            int lineWidth = (int) Math.ceil(textLayout.getLineWidth(a));
+            if (a != 0) {
+                int diff = prevLineWidth - lineWidth;
+                if (diff > 0 && diff <= 1.5f * corner + cornerIn) {
+                    lineWidth = prevLineWidth;
+                }
+            }
+            lineWidths.add(lineWidth);
+            prevLineWidth = lineWidth;
+        }
+        for (int a = count - 2; a >= 0; a--) {
+            int lineWidth = lineWidths.get(a);
+            int diff = prevLineWidth - lineWidth;
+            if (diff > 0 && diff <= 1.5f * corner + cornerIn) {
+                lineWidth = prevLineWidth;
+            }
+            lineWidths.set(a, lineWidth);
+            prevLineWidth = lineWidth;
+        }
+
+        int y = dp(4);
+        int x = viewWidth / 2;
+        int previousLineBottom = 0;
+
+        final int cornerOffset = dp(3);
+        final int cornerInSmall = dp(6);
+        final int cornerRest = corner - cornerOffset;
+
+        lineHeights.clear();
+        backgroundPath.reset();
+        backgroundPath.moveTo(x, y);
+
+        for (int a = 0; a < count; a++) {
+            int lineWidth = lineWidths.get(a);
+            int lineBottom = textLayout.getLineBottom(a);
+            int nextLineWidth = a < count - 1 ? lineWidths.get(a + 1) : 0;
+
+            int height = lineBottom - previousLineBottom;
+            if (a == 0 || lineWidth > prevLineWidth) {
+                height += dp(3);
+            }
+            if (a == count - 1 || lineWidth > nextLineWidth) {
+                height += dp(3);
+            }
+
+            previousLineBottom = lineBottom;
+
+            float startX = x + lineWidth / 2.0f;
+
+            int innerCornerRad;
+            if (a != count - 1 && lineWidth < nextLineWidth && a != 0 && lineWidth < prevLineWidth) {
+                innerCornerRad = cornerInSmall;
+            } else {
+                innerCornerRad = cornerIn;
+            }
+
+            if (a == 0 || lineWidth > prevLineWidth) {
+                rect.set(startX - cornerOffset - corner, y, startX + cornerRest, y + corner * 2);
+                checkLeftRightBounds();
+                backgroundPath.arcTo(rect, -90, 90);
+            } else if (lineWidth < prevLineWidth) {
+                rect.set(startX + cornerRest, y, startX + cornerRest + innerCornerRad * 2, y + innerCornerRad * 2);
+                checkLeftRightBounds();
+                backgroundPath.arcTo(rect, -90, -90);
+            }
+            y += height;
+            int yOffset = y;
+            if (a != count - 1 && lineWidth < nextLineWidth) {
+                y -= dp(3);
+                height -= dp(3);
+            }
+            if (a != 0 && lineWidth < prevLineWidth) {
+                y -= dp(3);
+                height -= dp(3);
+            }
+            lineHeights.add(height);
+
+            if (a == count - 1 || lineWidth > nextLineWidth) {
+                rect.set(startX - cornerOffset - corner, y - corner * 2, startX + cornerRest, y);
+                checkLeftRightBounds();
+                backgroundPath.arcTo(rect, 0, 90);
+            } else if (lineWidth < nextLineWidth) {
+                rect.set(startX + cornerRest, y - innerCornerRad * 2, startX + cornerRest + innerCornerRad * 2, y);
+                checkLeftRightBounds();
+                backgroundPath.arcTo(rect, 180, -90);
+            }
+
+            prevLineWidth = lineWidth;
+        }
+        for (int a = count - 1; a >= 0; a--) {
+            prevLineWidth = a != 0 ? lineWidths.get(a - 1) : 0;
+            int lineWidth = lineWidths.get(a);
+            int nextLineWidth = a != count - 1 ? lineWidths.get(a + 1) : 0;
+            int lineBottom = textLayout.getLineBottom(a);
+            float startX = x - lineWidth / 2;
+
+            int innerCornerRad;
+            if (a != count - 1 && lineWidth < nextLineWidth && a != 0 && lineWidth < prevLineWidth) {
+                innerCornerRad = cornerInSmall;
+            } else {
+                innerCornerRad = cornerIn;
+            }
+
+            if (a == count - 1 || lineWidth > nextLineWidth) {
+                rect.set(startX - cornerRest, y - corner * 2, startX + cornerOffset + corner, y);
+                checkLeftRightBounds();
+                backgroundPath.arcTo(rect, 90, 90);
+            } else if (lineWidth < nextLineWidth) {
+                rect.set(startX - cornerRest - innerCornerRad * 2, y - innerCornerRad * 2, startX - cornerRest, y);
+                checkLeftRightBounds();
+                backgroundPath.arcTo(rect, 90, -90);
+            }
+
+            y -= lineHeights.get(a);
+
+            if (a == 0 || lineWidth > prevLineWidth) {
+                rect.set(startX - cornerRest, y, startX + cornerOffset + corner, y + corner * 2);
+                checkLeftRightBounds();
+                backgroundPath.arcTo(rect, 180, 90);
+            } else if (lineWidth < prevLineWidth) {
+                rect.set(startX - cornerRest - innerCornerRad * 2, y, startX - cornerRest, y + innerCornerRad * 2);
+                checkLeftRightBounds();
+                backgroundPath.arcTo(rect, 0, -90);
+            }
+        }
+        backgroundPath.close();
+
+        if (isMessageActionSuggestedPostApproval() && !isNewStyleButtonLayout()) {
+            rect.left = x - textWidth / 2f - dp(17);
+            rect.top = y;
+            rect.right = x + textWidth / 2f + dp(17);
+            rect.bottom = y + textHeight + titleHeight + dp(28);
+
+            backgroundPath.reset();
+            backgroundPath.addRoundRect(rect, dp(15), dp(15), Path.Direction.CW);
+            backgroundPath.close();
+        }
+        if (backgroundLeft >= backgroundRight && textWidth > 0) {
+            backgroundLeft = x - textWidth / 2 - dp(11);
+            backgroundRight = x + textWidth / 2 + dp(11);
+        }
+    }
+
     public void drawBackground(Canvas canvas, boolean fromParent) {
+        ensureBackgroundPath();
         if (canDrawInParent) {
             if (hasGradientService() && !fromParent) {
                 return;
@@ -3540,155 +3793,6 @@ public class ChatActionCell extends BaseCell implements DownloadController.FileD
             }
             backgroundPaint = overrideBackgroundPaint;
             textPaint = overrideTextPaint;
-        }
-        if (invalidatePath) {
-            invalidatePath = false;
-            backgroundLeft = getWidth();
-            backgroundRight = 0;
-            lineWidths.clear();
-            final int count = textLayout == null ? 0 : textLayout.getLineCount();
-            final int corner = dp(11);
-            final int cornerIn = dp(8);
-
-            int prevLineWidth = 0;
-            for (int a = 0; a < count; a++) {
-                int lineWidth = (int) Math.ceil(textLayout.getLineWidth(a));
-                if (a != 0) {
-                    int diff = prevLineWidth - lineWidth;
-                    if (diff > 0 && diff <= 1.5f * corner + cornerIn) {
-                        lineWidth = prevLineWidth;
-                    }
-                }
-                lineWidths.add(lineWidth);
-                prevLineWidth = lineWidth;
-            }
-            for (int a = count - 2; a >= 0; a--) {
-                int lineWidth = lineWidths.get(a);
-                int diff = prevLineWidth - lineWidth;
-                if (diff > 0 && diff <= 1.5f * corner + cornerIn) {
-                    lineWidth = prevLineWidth;
-                }
-                lineWidths.set(a, lineWidth);
-                prevLineWidth = lineWidth;
-            }
-
-            int y = dp(4);
-            int x = getMeasuredWidth() / 2;
-            int previousLineBottom = 0;
-
-            final int cornerOffset = dp(3);
-            final int cornerInSmall = dp(6);
-            final int cornerRest = corner - cornerOffset;
-
-            lineHeights.clear();
-            backgroundPath.reset();
-            backgroundPath.moveTo(x, y);
-
-            for (int a = 0; a < count; a++) {
-                int lineWidth = lineWidths.get(a);
-                int lineBottom = textLayout.getLineBottom(a);
-                int nextLineWidth = a < count - 1 ? lineWidths.get(a + 1) : 0;
-
-                int height = lineBottom - previousLineBottom;
-                if (a == 0 || lineWidth > prevLineWidth) {
-                    height += dp(3);
-                }
-                if (a == count - 1 || lineWidth > nextLineWidth) {
-                    height += dp(3);
-                }
-
-                previousLineBottom = lineBottom;
-
-                float startX = x + lineWidth / 2.0f;
-
-                int innerCornerRad;
-                if (a != count - 1 && lineWidth < nextLineWidth && a != 0 && lineWidth < prevLineWidth) {
-                    innerCornerRad = cornerInSmall;
-                } else {
-                    innerCornerRad = cornerIn;
-                }
-
-                if (a == 0 || lineWidth > prevLineWidth) {
-                    rect.set(startX - cornerOffset - corner, y, startX + cornerRest, y + corner * 2);
-                    checkLeftRightBounds();
-                    backgroundPath.arcTo(rect, -90, 90);
-                } else if (lineWidth < prevLineWidth) {
-                    rect.set(startX + cornerRest, y, startX + cornerRest + innerCornerRad * 2, y + innerCornerRad * 2);
-                    checkLeftRightBounds();
-                    backgroundPath.arcTo(rect, -90, -90);
-                }
-                y += height;
-                int yOffset = y;
-                if (a != count - 1 && lineWidth < nextLineWidth) {
-                    y -= dp(3);
-                    height -= dp(3);
-                }
-                if (a != 0 && lineWidth < prevLineWidth) {
-                    y -= dp(3);
-                    height -= dp(3);
-                }
-                lineHeights.add(height);
-
-                if (a == count - 1 || lineWidth > nextLineWidth) {
-                    rect.set(startX - cornerOffset - corner, y - corner * 2, startX + cornerRest, y);
-                    checkLeftRightBounds();
-                    backgroundPath.arcTo(rect, 0, 90);
-                } else if (lineWidth < nextLineWidth) {
-                    rect.set(startX + cornerRest, y - innerCornerRad * 2, startX + cornerRest + innerCornerRad * 2, y);
-                    checkLeftRightBounds();
-                    backgroundPath.arcTo(rect, 180, -90);
-                }
-
-                prevLineWidth = lineWidth;
-            }
-            for (int a = count - 1; a >= 0; a--) {
-                prevLineWidth = a != 0 ? lineWidths.get(a - 1) : 0;
-                int lineWidth = lineWidths.get(a);
-                int nextLineWidth = a != count - 1 ? lineWidths.get(a + 1) : 0;
-                int lineBottom = textLayout.getLineBottom(a);
-                float startX = x - lineWidth / 2;
-
-                int innerCornerRad;
-                if (a != count - 1 && lineWidth < nextLineWidth && a != 0 && lineWidth < prevLineWidth) {
-                    innerCornerRad = cornerInSmall;
-                } else {
-                    innerCornerRad = cornerIn;
-                }
-
-                if (a == count - 1 || lineWidth > nextLineWidth) {
-                    rect.set(startX - cornerRest, y - corner * 2, startX + cornerOffset + corner, y);
-                    checkLeftRightBounds();
-                    backgroundPath.arcTo(rect, 90, 90);
-                } else if (lineWidth < nextLineWidth) {
-                    rect.set(startX - cornerRest - innerCornerRad * 2, y - innerCornerRad * 2, startX - cornerRest, y);
-                    checkLeftRightBounds();
-                    backgroundPath.arcTo(rect, 90, -90);
-                }
-
-                y -= lineHeights.get(a);
-
-                if (a == 0 || lineWidth > prevLineWidth) {
-                    rect.set(startX - cornerRest, y, startX + cornerOffset + corner, y + corner * 2);
-                    checkLeftRightBounds();
-                    backgroundPath.arcTo(rect, 180, 90);
-                } else if (lineWidth < prevLineWidth) {
-                    rect.set(startX - cornerRest - innerCornerRad * 2, y, startX - cornerRest, y + innerCornerRad * 2);
-                    checkLeftRightBounds();
-                    backgroundPath.arcTo(rect, 0, -90);
-                }
-            }
-            backgroundPath.close();
-
-            if (isMessageActionSuggestedPostApproval() && !isNewStyleButtonLayout()) {
-                rect.left = x - textWidth / 2f - dp(17);
-                rect.top = y;
-                rect.right = x + textWidth / 2f + dp(17);
-                rect.bottom = y + textHeight + titleHeight + dp(28);
-
-                backgroundPath.reset();
-                backgroundPath.addRoundRect(rect, dp(15), dp(15), Path.Direction.CW);
-                backgroundPath.close();
-            }
         }
         if (!visiblePartSet) {
             ViewGroup parent = (ViewGroup) getParent();
@@ -4095,6 +4199,9 @@ public class ChatActionCell extends BaseCell implements DownloadController.FileD
 
     @Override
     public int getBoundsLeft() {
+        if (invalidatePath || backgroundLeft >= backgroundRight) {
+            ensureBackgroundPath();
+        }
         if (hasStarGiftLayout()) {
             final int giftLayoutLeft = (int) (getWidth() - (starGiftLayout.getWidth() + dp(8))) / 2;
             if (starGiftLayout.repost) {
@@ -4106,7 +4213,7 @@ public class ChatActionCell extends BaseCell implements DownloadController.FileD
             return sideMenuWidth / 2 + (getWidth() - giftRectSize) / 2;
         }
         int left = backgroundLeft;
-        if (imageReceiver != null && imageReceiver.getVisible()) {
+        if (imageReceiver != null && imageReceiver.getVisible() && currentMessageObject != null && imageReceiver.hasImageSet() && imageReceiver.getImageWidth() > 0) {
             left = Math.min((int) imageReceiver.getImageX(), left);
         }
         return sideMenuWidth / 2 + left;
@@ -4114,6 +4221,9 @@ public class ChatActionCell extends BaseCell implements DownloadController.FileD
 
     @Override
     public int getBoundsRight() {
+        if (invalidatePath || backgroundLeft >= backgroundRight) {
+            ensureBackgroundPath();
+        }
         if (hasStarGiftLayout()) {
             final int giftLayoutRight = (int) (getWidth() + (starGiftLayout.getWidth() + dp(8))) / 2;
             if (starGiftLayout.repost) {
@@ -4125,7 +4235,7 @@ public class ChatActionCell extends BaseCell implements DownloadController.FileD
             return sideMenuWidth / 2 + (getWidth() + giftRectSize) / 2;
         }
         int right = backgroundRight;
-        if (imageReceiver != null && imageReceiver.getVisible()) {
+        if (imageReceiver != null && imageReceiver.getVisible() && currentMessageObject != null && imageReceiver.hasImageSet() && imageReceiver.getImageWidth() > 0) {
             right = Math.max((int) imageReceiver.getImageX2(), right);
         }
         return sideMenuWidth / 2 + right;

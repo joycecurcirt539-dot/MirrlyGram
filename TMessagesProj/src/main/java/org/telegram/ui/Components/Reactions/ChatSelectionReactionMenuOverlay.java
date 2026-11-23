@@ -1,5 +1,8 @@
 package org.telegram.ui.Components.Reactions;
 
+import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
+import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
+
 import static org.telegram.ui.ChatActivity.MODE_DEFAULT;
 
 import android.animation.Animator;
@@ -66,6 +69,21 @@ public class ChatSelectionReactionMenuOverlay extends FrameLayout {
         });
     }
 
+    private @androidx.annotation.Nullable BlurredBackgroundDrawableViewFactory blurredBackgroundDrawableFactory;
+
+    public void setBlurredBackgroundDrawableFactory(@androidx.annotation.Nullable BlurredBackgroundDrawableViewFactory factory) {
+        if (this.blurredBackgroundDrawableFactory == factory) {
+            return;
+        }
+        this.blurredBackgroundDrawableFactory = factory;
+        if (reactionsContainerLayout != null && factory != null) {
+            reactionsContainerLayout.setBackgroundFactory(
+                    factory,
+                    BlurredBackgroundProviderImpl.messageMenuReactionsBackground(parentFragment.getResourceProvider())
+            );
+        }
+    }
+
     private void checkCreateReactionsLayout() {
         if (reactionsContainerLayout == null) {
             final boolean tags = parentFragment.getUserConfig().getClientUserId() == parentFragment.getDialogId();
@@ -130,6 +148,12 @@ public class ChatSelectionReactionMenuOverlay extends FrameLayout {
             });
             reactionsContainerLayout.setClipChildren(false);
             reactionsContainerLayout.setClipToPadding(false);
+            if (blurredBackgroundDrawableFactory != null) {
+                reactionsContainerLayout.setBackgroundFactory(
+                        blurredBackgroundDrawableFactory,
+                        BlurredBackgroundProviderImpl.messageMenuReactionsBackground(parentFragment.getResourceProvider())
+                );
+            }
             addView(reactionsContainerLayout, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 70 + mPadding, Gravity.RIGHT));
         }
     }

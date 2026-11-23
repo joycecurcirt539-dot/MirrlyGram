@@ -83,7 +83,14 @@ public class BlurredBackgroundProviderBuilder implements BlurredBackgroundProvid
 
     @Override
     public int getBackgroundColor() {
-        return get(backgroundColor, 0);
+        final int color = get(backgroundColor, 0);
+        final int alpha = android.graphics.Color.alpha(color);
+        if (alpha > 0 && alpha < 255) {
+            final float effective = org.telegram.messenger.mirrly.MirrlyConfig.getEffectiveGlassAlpha(alpha / 255f);
+            final int scaledAlpha = Math.max(1, Math.min(242, Math.round(effective * 255f)));
+            return (color & 0x00FFFFFF) | (scaledAlpha << 24);
+        }
+        return color;
     }
 
     @Override

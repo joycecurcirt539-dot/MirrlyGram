@@ -67,6 +67,7 @@ import androidx.core.graphics.drawable.IconCompat;
 import com.google.common.collect.Lists;
 
 import org.telegram.messenger.support.LongSparseIntArray;
+import org.telegram.messenger.mirrly.MirrlyConfig;
 import org.telegram.messenger.utils.tlutils.TLKeyboardHelper;
 import org.telegram.messenger.utils.tlutils.TlUtils;
 import org.telegram.messenger.voip.VoIPGroupNotification;
@@ -386,10 +387,15 @@ public class NotificationsController extends BaseController implements Notificat
                 return;
             }
             try {
-                String channelId = "wallet_tonconnect_" + currentAccount;
+                final boolean disableVibration = MirrlyConfig.isDisableAllVibrations();
+                String channelId = (disableVibration ? "wallet_tonconnect_nv_" : "wallet_tonconnect_") + currentAccount;
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    systemNotificationManager.createNotificationChannel(new NotificationChannel(
-                            channelId, "TON Connect", NotificationManager.IMPORTANCE_DEFAULT));
+                    NotificationChannel channel = new NotificationChannel(
+                            channelId, "TON Connect", NotificationManager.IMPORTANCE_DEFAULT);
+                    if (disableVibration) {
+                        channel.enableVibration(false);
+                    }
+                    systemNotificationManager.createNotificationChannel(channel);
                 }
                 boolean hidePreview = AndroidUtilities.needShowPasscode() || SharedConfig.isWaitingForPasscodeEnter
                         || !getAccountInstance().getNotificationsSettings().getBoolean("EnablePreviewAll", true);
@@ -413,6 +419,9 @@ public class NotificationsController extends BaseController implements Notificat
                         .setWhen(time)
                         .setAutoCancel(true)
                         .setContentIntent(contentIntent);
+                if (disableVibration) {
+                    builder.setVibrate(new long[]{0, 0});
+                }
                 notificationManager.notify("wallet_tonconnect", currentAccount, builder.build());
             } catch (Exception e) {
                 FileLog.e(e);
@@ -3392,7 +3401,7 @@ public class NotificationsController extends BaseController implements Notificat
     }
 
     private void playInChatSound() {
-        if (!inChatSoundEnabled || MediaController.getInstance().isRecordingAudio()) {
+        if (!inChatSoundEnabled || !org.telegram.messenger.mirrly.MirrlyConfig.isInChatReceiveSoundEnabled() || MediaController.getInstance().isRecordingAudio()) {
             return;
         }
         try {
@@ -3433,6 +3442,7 @@ public class NotificationsController extends BaseController implements Notificat
                     if (soundIn != 0) {
                         try {
                             soundPool.play(soundIn, 1.0f, 1.0f, 1, 0, 1.0f);
+                            org.telegram.messenger.mirrly.MirrlyPowerTelemetry.recordChatSound();
                         } catch (Exception e) {
                             FileLog.e(e);
                         }
@@ -3484,25 +3494,48 @@ public class NotificationsController extends BaseController implements Notificat
         return true;
     }
 
-    public void deleteNotificationChannel(long dialogId, long topicId) {
-        deleteNotificationChannel(dialogId, topicId, -1);
+    @TargetApi(26)
+    private boolean channelHasVibration(NotificationChannel channel) {
+        if (channel == null) {
+            return false;
+        }
+        if (channel.shouldVibrate()) {
+            return true;
+        }
+        long[] pattern = channel.getVibrationPattern();
+        return pattern != null && pattern.length > 0 && !isEmptyVibration(pattern);
     }
 
-    private void deleteNotificationChannelInternal(long dialogId, long topicId, int what) {
-        if (Build.VERSION.SDK_INT < 26) {
-            return;
-        }
-        try {
-            SharedPreferences preferences = getAccountInstance().getNotificationsSettings();
-            SharedPreferences.Editor editor = preferences.edit();
-            if (what == 0 || what == -1) {
-                String key = "org.telegram.key" + dialogId;
-                if (topicId != 0) {
-                    key += ".topic" + topicId;
+    @TargetApi(26)
+    private void deleteChannelKeysAndPrefix(SharedPreferences preferences, Map<String, ?> allPrefs, SharedPreferences.Editor editor, String exactKey, String prefix, String excludePrefix) {
+        for (int pass = 0; pass < 2; pass++) {
+            String k = pass == 0 ? exactKey : exactKey + "_nv";
+            String channelId = preferences.getString(k, null);
+            if (channelId != null) {
+                editor.remove(k).remove(k + "_s");
+                try {
+                    systemNotificationManager.deleteNotificationChannel(channelId);
+                } catch (Exception e) {
+                    FileLog.e(e);
                 }
-                String channelId = preferences.getString(key, null);
-                if (channelId != null) {
-                    editor.remove(key).remove(key + "_s");
+                if (BuildVars.LOGS_ENABLED) {
+                    FileLog.d("delete channel internal " + channelId);
+                }
+            }
+        }
+        if (allPrefs != null && prefix != null) {
+            for (Map.Entry<String, ?> entry : allPrefs.entrySet()) {
+                String k = entry.getKey();
+                if (k == null || k.endsWith("_s") || !k.startsWith(prefix)) {
+                    continue;
+                }
+                if (excludePrefix != null && k.startsWith(excludePrefix)) {
+                    continue;
+                }
+                Object v = entry.getValue();
+                if (v instanceof String) {
+                    String channelId = (String) v;
+                    editor.remove(k).remove(k + "_s");
                     try {
                         systemNotificationManager.deleteNotificationChannel(channelId);
                     } catch (Exception e) {
@@ -3513,20 +3546,97 @@ public class NotificationsController extends BaseController implements Notificat
                     }
                 }
             }
-            if (what == 1 || what == -1) {
-                String key = "org.telegram.keyia" + dialogId;
-                String channelId = preferences.getString(key, null);
-                if (channelId != null) {
-                    editor.remove(key).remove(key + "_s");
+        }
+    }
+
+    public void onMirrlyVibrationPolicyChanged(boolean disabled) {
+        if (Build.VERSION.SDK_INT < 26 || systemNotificationManager == null) {
+            return;
+        }
+        notificationsQueue.postRunnable(() -> {
+            try {
+                SharedPreferences preferences = getAccountInstance().getNotificationsSettings();
+                Map<String, ?> values = preferences.getAll();
+                SharedPreferences.Editor editor = preferences.edit();
+                boolean changed = false;
+                for (Map.Entry<String, ?> entry : values.entrySet()) {
+                    String key = entry.getKey();
+                    if (key == null || key.endsWith("_s") || !key.endsWith("_nv")) {
+                        continue;
+                    }
+                    if (!(entry.getValue() instanceof String)) {
+                        continue;
+                    }
+                    String channelId = (String) entry.getValue();
+                    if (!disabled) {
+                        try {
+                            systemNotificationManager.deleteNotificationChannel(channelId);
+                        } catch (Exception e) {
+                            FileLog.e(e);
+                        }
+                        editor.remove(key).remove(key + "_s");
+                        changed = true;
+                    } else {
+                        NotificationChannel channel = systemNotificationManager.getNotificationChannel(channelId);
+                        if (channel != null && channelHasVibration(channel)) {
+                            try {
+                                systemNotificationManager.deleteNotificationChannel(channelId);
+                            } catch (Exception e) {
+                                FileLog.e(e);
+                            }
+                            editor.remove(key).remove(key + "_s");
+                            changed = true;
+                        }
+                    }
+                }
+                String tonConnectNvChannel = "wallet_tonconnect_nv_" + currentAccount;
+                if (!disabled) {
                     try {
-                        systemNotificationManager.deleteNotificationChannel(channelId);
+                        systemNotificationManager.deleteNotificationChannel(tonConnectNvChannel);
                     } catch (Exception e) {
                         FileLog.e(e);
                     }
-                    if (BuildVars.LOGS_ENABLED) {
-                        FileLog.d("delete channel internal " + channelId);
+                } else {
+                    NotificationChannel tc = systemNotificationManager.getNotificationChannel(tonConnectNvChannel);
+                    if (tc != null && channelHasVibration(tc)) {
+                        try {
+                            systemNotificationManager.deleteNotificationChannel(tonConnectNvChannel);
+                        } catch (Exception e) {
+                            FileLog.e(e);
+                        }
                     }
                 }
+                if (changed) {
+                    editor.commit();
+                }
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+        });
+    }
+
+    public void deleteNotificationChannel(long dialogId, long topicId) {
+        deleteNotificationChannel(dialogId, topicId, -1);
+    }
+
+    private void deleteNotificationChannelInternal(long dialogId, long topicId, int what) {
+        if (Build.VERSION.SDK_INT < 26) {
+            return;
+        }
+        try {
+            SharedPreferences preferences = getAccountInstance().getNotificationsSettings();
+            Map<String, ?> allPrefs = preferences.getAll();
+            SharedPreferences.Editor editor = preferences.edit();
+            if (what == 0 || what == -1) {
+                String key = "org.telegram.key" + dialogId;
+                if (topicId != 0) {
+                    key += ".topic" + topicId;
+                }
+                deleteChannelKeysAndPrefix(preferences, allPrefs, editor, key, "org.telegram.key" + dialogId + "_" + topicId + "_", null);
+            }
+            if (what == 1 || what == -1) {
+                String key = "org.telegram.keyia" + dialogId;
+                deleteChannelKeysAndPrefix(preferences, allPrefs, editor, key, "org.telegram.keyia" + dialogId + "_" + topicId + "_", null);
             }
             editor.commit();
         } catch (Exception e) {
@@ -3551,6 +3661,7 @@ public class NotificationsController extends BaseController implements Notificat
         }
         try {
             SharedPreferences preferences = getAccountInstance().getNotificationsSettings();
+            Map<String, ?> allPrefs = preferences.getAll();
             SharedPreferences.Editor editor = preferences.edit();
             if (what == 0 || what == -1) {
                 String key;
@@ -3565,18 +3676,7 @@ public class NotificationsController extends BaseController implements Notificat
                 } else {
                     key = "private";
                 }
-                String channelId = preferences.getString(key, null);
-                if (channelId != null) {
-                    editor.remove(key).remove(key + "_s");
-                    try {
-                        systemNotificationManager.deleteNotificationChannel(channelId);
-                    } catch (Exception e) {
-                        FileLog.e(e);
-                    }
-                    if (BuildVars.LOGS_ENABLED) {
-                        FileLog.d("delete channel global internal " + channelId);
-                    }
-                }
+                deleteChannelKeysAndPrefix(preferences, allPrefs, editor, key, key + "_", key + "_ia");
             }
 
             if (what == 1 || what == -1) {
@@ -3592,18 +3692,7 @@ public class NotificationsController extends BaseController implements Notificat
                 } else {
                     key = "private_ia";
                 }
-                String channelId = preferences.getString(key, null);
-                if (channelId != null) {
-                    editor.remove(key).remove(key + "_s");
-                    try {
-                        systemNotificationManager.deleteNotificationChannel(channelId);
-                    } catch (Exception e) {
-                        FileLog.e(e);
-                    }
-                    if (BuildVars.LOGS_ENABLED) {
-                        FileLog.d("delete channel global internal " + channelId);
-                    }
-                }
+                deleteChannelKeysAndPrefix(preferences, allPrefs, editor, key, key + "_", null);
             }
             String overwriteKey;
             if (type == TYPE_CHANNEL) {
@@ -3926,6 +4015,11 @@ public class NotificationsController extends BaseController implements Notificat
             key = (isInApp ? "org.telegram.keyia" : "org.telegram.key") + dialogId + "_" + topicId;
         }
         key += "_" + soundHash;
+        final boolean mirrlyDisableVibration = MirrlyConfig.isDisableAllVibrations();
+        if (mirrlyDisableVibration) {
+            vibrationPattern = new long[]{0, 0};
+            key += "_nv";
+        }
         String channelId = preferences.getString(key, null);
         String settings = preferences.getString(key + "_s", null);
         boolean edited = false;
@@ -3943,7 +4037,7 @@ public class NotificationsController extends BaseController implements Notificat
                     Uri channelSound = existingChannel.getSound();
                     long[] channelVibrationPattern = existingChannel.getVibrationPattern();
                     boolean vibrate = existingChannel.shouldVibrate();
-                    if (!vibrate && channelVibrationPattern == null) {
+                    if (!vibrate && (channelVibrationPattern == null || channelVibrationPattern.length == 0)) {
                         channelVibrationPattern = new long[]{0, 0};
                     }
                     int channelLedColor = existingChannel.getLightColor();
@@ -3966,6 +4060,8 @@ public class NotificationsController extends BaseController implements Notificat
                     newSettingsHash = Utilities.MD5(newSettings.toString());
                     newSettings.setLength(0);
                     if (isInApp && importance != channelImportance) {
+                        shouldOverwrite = true;
+                    } else if (mirrlyDisableVibration && channelHasVibration(existingChannel)) {
                         shouldOverwrite = true;
                     } else if (!newSettingsHash.equals(settings)) {
                         SharedPreferences.Editor editor = null;
@@ -4038,7 +4134,7 @@ public class NotificationsController extends BaseController implements Notificat
                             edited = true;
                         }
                         boolean hasVibration = !isEmptyVibration(vibrationPattern);
-                        if (hasVibration != vibrate) {
+                        if (!mirrlyDisableVibration && hasVibration != vibrate) {
                             if (!isInApp) {
                                 if (editor == null) {
                                     editor = preferences.edit();
@@ -4142,7 +4238,7 @@ public class NotificationsController extends BaseController implements Notificat
             } else {
                 notificationChannel.enableLights(false);
             }
-            if (!isEmptyVibration(vibrationPattern)) {
+            if (!mirrlyDisableVibration && !isEmptyVibration(vibrationPattern)) {
                 notificationChannel.enableVibration(true);
                 if (vibrationPattern.length > 0) {
                     notificationChannel.setVibrationPattern(vibrationPattern);
@@ -4591,6 +4687,11 @@ public class NotificationsController extends BaseController implements Notificat
                 } catch (Exception e) {
                     FileLog.e(e);
                 }
+            }
+
+            if (MirrlyConfig.isDisableAllVibrations()) {
+                vibrate = 2;
+                vibrateOnlyIfSilent = false;
             }
 
             if (notifyDisabled) {
@@ -5992,7 +6093,7 @@ public class NotificationsController extends BaseController implements Notificat
     }
 
     public void playOutChatSound() {
-        if (!inChatSoundEnabled || MediaController.getInstance().isRecordingAudio()) {
+        if (!inChatSoundEnabled || !org.telegram.messenger.mirrly.MirrlyConfig.isInChatSendSoundEnabled() || MediaController.getInstance().isRecordingAudio()) {
             return;
         }
         try {
@@ -6027,6 +6128,7 @@ public class NotificationsController extends BaseController implements Notificat
                 if (soundOut != 0) {
                     try {
                         soundPool.play(soundOut, 1.0f, 1.0f, 1, 0, 1.0f);
+                        org.telegram.messenger.mirrly.MirrlyPowerTelemetry.recordChatSound();
                     } catch (Exception e) {
                         FileLog.e(e);
                     }

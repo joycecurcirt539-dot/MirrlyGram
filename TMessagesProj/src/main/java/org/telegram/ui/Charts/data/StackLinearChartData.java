@@ -61,6 +61,9 @@ public class StackLinearChartData extends ChartData {
 
     public StackLinearChartData(ChartData data, long d) {
         int index = Arrays.binarySearch(data.x, d);
+        if (index < 0) {
+            index = Math.max(0, Math.min(data.x.length - 1, -(index + 1)));
+        }
         int startIndex = index - 4;
         int endIndex = index + 4;
 
@@ -91,6 +94,7 @@ public class StackLinearChartData extends ChartData {
             line.colorKey = data.lines.get(i).colorKey;
             line.color = data.lines.get(i).color;
             line.colorDark = data.lines.get(i).colorDark;
+            line.unitType = data.lines.get(i).unitType;
             lines.add(line);
         }
         int i = 0;
@@ -104,7 +108,11 @@ public class StackLinearChartData extends ChartData {
             i++;
         }
 
-        timeStep = 86400000L;
+        yTickFormatter = data.yTickFormatter;
+        yTooltipFormatter = data.yTooltipFormatter;
+        xTickFormatter = data.xTickFormatter;
+        xTooltipFormatter = data.xTooltipFormatter;
+        timeStep = data.timeStep > 0 ? data.timeStep : 86400000L;
         measure();
     }
 

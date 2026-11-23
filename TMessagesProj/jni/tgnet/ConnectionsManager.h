@@ -10,6 +10,7 @@
 #define CONNECTIONSMANAGER_H
 
 #include <pthread.h>
+#include <deque>
 #include <queue>
 #include <functional>
 #include <sys/epoll.h>
@@ -76,6 +77,7 @@ public:
     void setPushConnectionEnabled(bool value);
     void applyDnsConfig(NativeByteBuffer *buffer, std::string phone, int32_t date);
     int64_t checkProxy(std::string address, uint16_t port, std::string username, std::string password, std::string secret, onRequestTimeFunc requestTimeFunc, jobject ptr1);
+    int64_t checkDatacenter(uint32_t datacenterId, onRequestTimeFunc requestTimeFunc, jobject ptr1);
 
 #ifdef ANDROID
     void sendRequest(TLObject *object, onCompleteFunc onComplete, onQuickAckFunc onQuickAck, onWriteToSocketFunc onWriteToSocket, onRequestClearFunc onClear, uint32_t flags, uint32_t datacenterId, ConnectionType connectionType, bool immediate, int32_t requestToken);
@@ -111,6 +113,8 @@ private:
     std::unique_ptr<TLObject> wrapInLayer(TLObject *object, Datacenter *datacenter, Request *baseRequest);
     void removeRequestFromGuid(int32_t requestToken);
     bool cancelRequestInternal(int32_t token, int64_t messageId, bool notifyServer, bool removeFromClass, onRequestCancelDoneFunc onCancelled);
+    void recordCancelledMessageId(int64_t messageId);
+    bool isCancelledRpcResult(NativeByteBuffer *data);
     int callEvents(int64_t now);
     int32_t sendRequestInternal(TLObject *object, onCompleteFunc onComplete, onQuickAckFunc onQuickAck, onRequestClearFunc onClear, uint32_t flags, uint32_t datacenterId, ConnectionType connetionType, bool immediate);
 
@@ -136,6 +140,8 @@ private:
 
     void scheduleCheckProxyInternal(ProxyCheckInfo *proxyCheckInfo);
     void checkProxyInternal(ProxyCheckInfo *proxyCheckInfo);
+    void pumpProxyCheckQueue();
+    void checkProxyTimeouts(int64_t now);
 
     int32_t instanceNum = 0;
     uint32_t configVersion = 5;
@@ -221,6 +227,9 @@ private:
     requestsList runningRequests;
     std::vector<uint32_t> requestingSaltsForDc;
     std::unordered_set<int32_t> tokensToBeCancelled;
+    static constexpr size_t MAX_CANCELLED_MESSAGE_IDS = 256;
+    std::deque<int64_t> cancelledMessageIdsQueue;
+    std::unordered_set<int64_t> cancelledMessageIds;
     int32_t lastPingId = 0;
     int64_t lastInvokeAfterMessageId = 0;
 

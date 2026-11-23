@@ -17,9 +17,11 @@ import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.InsetDrawable;
@@ -46,8 +48,11 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.NotificationCenter;
+import org.telegram.messenger.mirrly.MirrlyConfig;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
+import org.telegram.ui.Components.blur3.drawable.GlassRim;
+import org.telegram.ui.Components.blur3.drawable.GlassRimRenderer;
 import org.telegram.ui.Stories.recorder.HintView2;
 
 import java.util.ArrayList;
@@ -97,6 +102,16 @@ public class ScrollSlidingTextTabStrip extends HorizontalScrollView implements T
     private int scrollingToChild = -1;
 
     private GradientDrawable selectorDrawable;
+    private final GlassRimRenderer selectorRimRenderer = new GlassRimRenderer();
+    private final float[] selectorRadii = new float[8];
+    private final RectF selectorRect = new RectF();
+    private final Paint selectorSheenPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private LinearGradient selectorSheenGradient;
+    private float lastSheenTop = Float.NaN, lastSheenBottom = Float.NaN;
+    private boolean lastSheenDark;
+    private GlassRim selectorGlassRim;
+    private float lastSelectorRimScale = -1f;
+    private boolean lastSelectorRimDark;
 
     private int tabLineColorKey = Theme.key_actionBarTabLine;
     private int activeTextColorKey = Theme.key_actionBarTabActiveText;
@@ -152,8 +167,38 @@ public class ScrollSlidingTextTabStrip extends HorizontalScrollView implements T
         }
     };
 
+    private float adaptiveInvertFactor = 0f;
+
     protected int processColor(int color) {
-        return color;
+        if (adaptiveInvertFactor <= 0.001f) {
+            return color;
+        }
+        return org.telegram.utils.glass.GlassContrastHelper.blendAdaptiveTextColor(color, adaptiveInvertFactor, false);
+    }
+
+    public void applyAdaptiveGlassContrast(float invertFactor) {
+        final float clamped = Math.max(0f, Math.min(1f, invertFactor));
+        if (Math.abs(this.adaptiveInvertFactor - clamped) < 0.008f) {
+            return;
+        }
+        this.adaptiveInvertFactor = clamped;
+        final boolean enableHalo = org.telegram.messenger.mirrly.MirrlyConfig.isGlassLiquidEnabled() && clamped > 0.005f;
+        final int activeColor = processColor(Theme.getColor(activeTextColorKey, resourcesProvider));
+        final int unactiveColor = processColor(Theme.getColor(unactiveTextColorKey, resourcesProvider));
+        for (int a = 0, count = tabsContainer.getChildCount(); a < count; a++) {
+            final View child = tabsContainer.getChildAt(a);
+            if (child instanceof TextView) {
+                final TextView tab = (TextView) child;
+                final int color = (currentPosition == a) ? activeColor : unactiveColor;
+                tab.setTextColor(color);
+                org.telegram.utils.glass.GlassContrastHelper.applyOpticalTextHalo(
+                        tab.getPaint(),
+                        color,
+                        enableHalo ? Math.max(0.45f, clamped * 0.78f) : (backgroundDrawable != null ? 0.25f : 0f)
+                );
+            }
+        }
+        invalidate();
     }
 
     public ScrollSlidingTextTabStrip(Context context) {
@@ -167,6 +212,9 @@ public class ScrollSlidingTextTabStrip extends HorizontalScrollView implements T
         selectorDrawable = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, null);
         float rad = AndroidUtilities.dpf2(14);
         selectorDrawable.setCornerRadii(new float[]{rad, rad, rad, rad, rad, rad, rad, rad});
+        for (int i = 0; i < 8; i++) {
+            selectorRadii[i] = rad;
+        }
 //        selectorDrawable.setCornerRadii(new float[]{rad, rad, rad, rad, 0, 0, 0, 0});
 
         setFillViewport(true);
@@ -757,25 +805,60 @@ public class ScrollSlidingTextTabStrip extends HorizontalScrollView implements T
                 r += current.getTranslationX();
             }
             int wasAlpha = selectorDrawable.getAlpha();
-            selectorDrawable.setAlpha((int) (wasAlpha * tabsContainer.getAlpha()));
-//            selectorDrawable.setBounds(
-//                (int) l,
-//                height - dpr(4),
-//                (int) r,
-//                height
-//            );
-            selectorDrawable.setBounds(
-                getPaddingLeft() + (int) l + dp(4),
-                getPaddingTop() + dp(4),
-                getPaddingLeft() + (int) r - dp(4),
-                height - getPaddingBottom() - dp(4)
-            );
+            final float tabAlpha = tabsContainer.getAlpha();
+            selectorDrawable.setAlpha((int) (wasAlpha * tabAlpha));
+            final int pillLeft = getPaddingLeft() + (int) l + dp(4);
+            final int pillTop = getPaddingTop() + dp(4);
+            final int pillRight = getPaddingLeft() + (int) r - dp(4);
+            final int pillBottom = height - getPaddingBottom() - dp(4);
+            selectorDrawable.setBounds(pillLeft, pillTop, pillRight, pillBottom);
             selectorDrawable.draw(canvas);
             selectorDrawable.setAlpha(wasAlpha);
+
+            if (MirrlyConfig.isGlassLiquidEnabled() && pillRight > pillLeft && pillBottom > pillTop && tabAlpha > 0f) {
+                final boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
+                final float rad = AndroidUtilities.dpf2(14);
+                for (int i = 0; i < 8; i++) {
+                    selectorRadii[i] = rad;
+                }
+                if (selectorSheenGradient == null || pillTop != lastSheenTop || pillBottom != lastSheenBottom || isDark != lastSheenDark) {
+                    lastSheenTop = pillTop;
+                    lastSheenBottom = pillBottom;
+                    lastSheenDark = isDark;
+                    selectorSheenGradient = new LinearGradient(
+                        0, pillTop, 0, pillBottom,
+                        isDark ? 0x18FFFFFF : 0x24FFFFFF,
+                        0x03FFFFFF,
+                        Shader.TileMode.CLAMP
+                    );
+                    selectorSheenPaint.setShader(selectorSheenGradient);
+                }
+                selectorRect.set(pillLeft, pillTop, pillRight, pillBottom);
+                selectorSheenPaint.setAlpha(Math.round(255 * tabAlpha));
+                canvas.drawRoundRect(selectorRect, rad, rad, selectorSheenPaint);
+
+                final float rimScale = MirrlyConfig.getGlassRimScale();
+                if (rimScale > 0.001f) {
+                    if (selectorGlassRim == null || Math.abs(rimScale - lastSelectorRimScale) > 0.001f || isDark != lastSelectorRimDark) {
+                        lastSelectorRimScale = rimScale;
+                        lastSelectorRimDark = isDark;
+                        final float sw = Math.max(0.5f, AndroidUtilities.dpf2(0.55f) * rimScale);
+                        final int topColor = scaleRimAlpha(isDark ? 0x33FFFFFF : 0xD9FFFFFF, rimScale);
+                        final int bottomColor = scaleRimAlpha(isDark ? 0x16FFFFFF : 0x33FFFFFF, rimScale);
+                        selectorGlassRim = GlassRim.of(GlassRim.LIGHT_TOP, sw, topColor, sw, bottomColor, 0, 0);
+                    }
+                    selectorRimRenderer.draw(canvas, pillLeft, pillTop, pillRight, pillBottom, selectorRadii, selectorGlassRim, tabAlpha);
+                }
+            }
 
             return result;
         }
         return super.drawChild(canvas, child, drawingTime);
+    }
+
+    private static int scaleRimAlpha(int color, float scale) {
+        final int a = Math.max(0, Math.min(255, Math.round(Color.alpha(color) * scale)));
+        return (color & 0x00FFFFFF) | (a << 24);
     }
 
     @Override

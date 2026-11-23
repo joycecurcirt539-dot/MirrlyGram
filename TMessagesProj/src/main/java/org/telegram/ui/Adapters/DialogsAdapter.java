@@ -45,6 +45,7 @@ import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.mirrly.MirrlyInterfaceConfig;
 import org.telegram.messenger.support.LongSparseIntArray;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLObject;
@@ -245,6 +246,14 @@ public class DialogsAdapter extends RecyclerListView.SelectionAdapter implements
         return -1;
     }
 
+    private boolean shouldHideArchiveRow() {
+        return !isOnlySelect
+                && dialogsType == DialogsActivity.DIALOGS_TYPE_DEFAULT
+                && folderId == 0
+                && communityId == 0
+                && MirrlyInterfaceConfig.isHideArchiveFromChats();
+    }
+
     public int fixScrollGap(RecyclerListView animationSupportListView, int p, int offset, boolean hasHiddenArchive, boolean hasStories, boolean hasTabs, boolean oppened) {
 //        int itemsToEnd = getItemCount() - p;
         int cellHeight = AndroidUtilities.dp(SharedConfig.useThreeLinesLayout ? 76 : 70);
@@ -262,7 +271,7 @@ public class DialogsAdapter extends RecyclerListView.SelectionAdapter implements
 //        } else {
 //            bottom += additionalHeight;
 //        }
-        if (hasHiddenArchive) {
+        if (hasHiddenArchive && !shouldHideArchiveRow()) {
             top += cellHeight;
         }
         int paddingTop = animationSupportListView.getPaddingTop();
@@ -1253,6 +1262,18 @@ public class DialogsAdapter extends RecyclerListView.SelectionAdapter implements
         ArrayList<TLRPC.Dialog> dialogs = parentFragment.getDialogsArray(currentAccount, dialogsType, folderId, false);
         int fromIndex = fixPosition(fromPosition);
         int toIndex = fixPosition(toPosition);
+        if (shouldHideArchiveRow()) {
+            Object fromItem = getItem(fromPosition);
+            Object toItem = getItem(toPosition);
+            if (!(fromItem instanceof TLRPC.Dialog) || !(toItem instanceof TLRPC.Dialog)) {
+                return;
+            }
+            fromIndex = dialogs.indexOf(fromItem);
+            toIndex = dialogs.indexOf(toItem);
+            if (fromIndex < 0 || toIndex < 0) {
+                return;
+            }
+        }
         TLRPC.Dialog fromDialog = dialogs.get(fromIndex);
         TLRPC.Dialog toDialog = dialogs.get(toIndex);
         if (dialogsType == 7 || dialogsType == 8) {
@@ -1508,7 +1529,7 @@ public class DialogsAdapter extends RecyclerListView.SelectionAdapter implements
 
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             int size = itemInternals.size();
-            boolean hasArchive = folderId == 0 && dialogsType == 0 && MessagesController.getInstance(currentAccount).dialogs_dict.get(DialogObject.makeFolderDialogId(1)) != null;
+            boolean hasArchive = !shouldHideArchiveRow() && folderId == 0 && dialogsType == 0 && MessagesController.getInstance(currentAccount).dialogs_dict.get(DialogObject.makeFolderDialogId(1)) != null;
             View parent = (View) getParent();
             int height;
             int blurOffset = 0;
@@ -1665,6 +1686,25 @@ public class DialogsAdapter extends RecyclerListView.SelectionAdapter implements
             array = parentFragment.getDialogsArray(currentAccount, dialogsType, folderId, dialogsListFrozen);
             if (array == null) {
                 array = new ArrayList<>();
+            } else if (shouldHideArchiveRow()) {
+                final long archiveDialogId = DialogObject.makeFolderDialogId(1);
+                ArrayList<TLRPC.Dialog> filtered = null;
+                for (int i = 0, n = array.size(); i < n; i++) {
+                    TLRPC.Dialog d = array.get(i);
+                    if (d != null && (d.id == archiveDialogId || (d instanceof TLRPC.TL_dialogFolder && ((TLRPC.TL_dialogFolder) d).folder != null && ((TLRPC.TL_dialogFolder) d).folder.id == 1))) {
+                        if (filtered == null) {
+                            filtered = new ArrayList<>(n - 1);
+                            for (int j = 0; j < i; j++) {
+                                filtered.add(array.get(j));
+                            }
+                        }
+                    } else if (filtered != null) {
+                        filtered.add(d);
+                    }
+                }
+                if (filtered != null) {
+                    array = filtered;
+                }
             }
         }
 

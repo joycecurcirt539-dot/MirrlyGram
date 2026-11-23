@@ -17,7 +17,7 @@ public class BlurredBackgroundColorProviderThemed implements BlurredBackgroundCo
     private float alpha;
 
     public BlurredBackgroundColorProviderThemed(Theme.ResourcesProvider resourcesProvider, int backgroundColorId) {
-        this(resourcesProvider, backgroundColorId, LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) ? 0.85f : 0.76f);
+        this(resourcesProvider, backgroundColorId, LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) ? 0.74f : 0.76f);
     }
 
     public BlurredBackgroundColorProviderThemed(Theme.ResourcesProvider resourcesProvider, int backgroundColorId, float alpha) {
@@ -49,6 +49,9 @@ public class BlurredBackgroundColorProviderThemed implements BlurredBackgroundCo
     }
 
     private boolean hasCompactOutline() {
+        if (org.telegram.messenger.mirrly.MirrlyConfig.isLiquidGlassEverywhere()) {
+            return false;
+        }
         return isCompactGlass() && Color.alpha(Theme.getColor(compactOutlineKey, resourcesProvider)) != 0;
     }
 
@@ -83,19 +86,22 @@ public class BlurredBackgroundColorProviderThemed implements BlurredBackgroundCo
     }
 
     private int themeGeneration = ThemeBind.generation();
+    private int glassGeneration = org.telegram.utils.glass.GlassEngine.getGlassSettingsGenerationId();
 
     // not a view: nothing dispatches updateColors() on theme switches for every owner, so the getters refresh lazily
     private void checkThemeGeneration() {
         final int generation = ThemeBind.generation();
-        if (themeGeneration != generation) {
+        final int curGlassGen = org.telegram.utils.glass.GlassEngine.getGlassSettingsGenerationId();
+        if (themeGeneration != generation || glassGeneration != curGlassGen) {
             updateColors();
         }
     }
 
     public void updateColors() {
         themeGeneration = ThemeBind.generation();
+        glassGeneration = org.telegram.utils.glass.GlassEngine.getGlassSettingsGenerationId();
         final int color = Theme.getColor(backgroundColorId, resourcesProvider);
-        backgroundColor = Theme.multAlpha(color, alpha);
+        backgroundColor = Theme.multAlpha(color, org.telegram.messenger.mirrly.MirrlyConfig.getEffectiveGlassAlpha(alpha));
 
         if (isDark()) {
             strokeColorTop = 0x28FFFFFF;

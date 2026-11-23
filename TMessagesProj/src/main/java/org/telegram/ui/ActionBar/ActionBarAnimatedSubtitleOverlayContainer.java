@@ -8,10 +8,14 @@ import android.content.Context;
 import android.text.SpannableString;
 import android.text.TextUtils;
 import android.util.TypedValue;
+import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
+import org.telegram.utils.glass.GlassContrastHelper;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.ui.Components.CubicBezierInterpolator;
@@ -90,6 +94,34 @@ public class ActionBarAnimatedSubtitleOverlayContainer extends FrameLayout imple
 
     public float getTotalVisibility() {
         return titleOverlayAnimator.getMetadata().getTotalVisibility();
+    }
+
+    public float getTotalWidth() {
+        float maxW = 0f;
+        for (ListAnimator.Entry<SimpleTextViewReplaceable> entry : titleOverlayAnimator) {
+            if (entry.getVisibility() > 0.05f && entry.item != null) {
+                float w = entry.item.getMeasuredWidth();
+                if (entry.item.getLayout() != null && entry.item.getLayout().getLineCount() > 0) {
+                    w = entry.item.getLayout().getLineWidth(0);
+                } else if (!TextUtils.isEmpty(entry.item.getText())) {
+                    w = entry.item.getPaint().measureText(entry.item.getText(), 0, entry.item.getText().length());
+                }
+                maxW = Math.max(maxW, w * entry.item.getScaleX());
+            }
+        }
+        return maxW;
+    }
+
+    public void applyAdaptiveColors(int textColor, float haloStrength) {
+        for (int i = 0, n = getChildCount(); i < n; i++) {
+            final View child = getChildAt(i);
+            if (child instanceof SimpleTextViewReplaceable) {
+                final SimpleTextViewReplaceable tv = (SimpleTextViewReplaceable) child;
+                tv.setTextColor(textColor);
+                tv.setLinkTextColor(textColor);
+                GlassContrastHelper.applyOpticalTextHalo(tv.getPaint(), textColor, haloStrength);
+            }
+        }
     }
 
     private class SimpleTextViewReplaceable extends TextView implements Destroyable {

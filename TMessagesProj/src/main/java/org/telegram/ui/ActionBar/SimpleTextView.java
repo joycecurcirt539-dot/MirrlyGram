@@ -14,6 +14,7 @@ import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
 import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PorterDuff;
@@ -37,6 +38,7 @@ import android.view.View;
 import android.view.accessibility.AccessibilityNodeInfo;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.Emoji;
@@ -46,6 +48,7 @@ import org.telegram.ui.Components.AnimatedEmojiSpan;
 import org.telegram.ui.Components.EmptyStubSpan;
 import org.telegram.ui.Components.StaticLayoutEx;
 import org.telegram.ui.Components.spoilers.SpoilerEffect;
+import org.telegram.utils.glass.GlassContrastHelper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -137,9 +140,92 @@ public class SimpleTextView extends View implements Drawable.Callback {
     private boolean attachedToWindow;
 
     private Layout.Alignment mAlignment = Layout.Alignment.ALIGN_NORMAL;
+    private boolean glassOpticalHaloEnabled;
+    private float glassOpticalHaloStrength = 0f;
+    private int lastHaloTextColor;
+    private int lastEmojiColor;
+    private boolean hasEmojiColor;
+    private boolean adaptiveGradientActive;
+    private LinearGradient adaptiveGradientShader;
+    private Matrix adaptiveGradientMatrix;
+    private int[] adaptiveGradientColors;
+    private float[] adaptiveGradientPositions;
+    private int adaptiveGradientWidth;
+    private float adaptiveGradientOriginX;
+
+    public void setAdaptiveHorizontalGradient(@Nullable GlassContrastHelper.HorizontalAdaptiveBand band, float originX) {
+        if (band == null || !band.useGradient || band.gradientWidth <= 0) {
+            clearAdaptiveHorizontalGradient();
+            return;
+        }
+        final int n = GlassContrastHelper.HorizontalAdaptiveBand.SAMPLE_COUNT;
+        boolean changed = !adaptiveGradientActive || adaptiveGradientShader == null || Math.abs(adaptiveGradientWidth - band.gradientWidth) > 2;
+        if (adaptiveGradientColors == null) {
+            adaptiveGradientColors = new int[n];
+            adaptiveGradientPositions = new float[n];
+            changed = true;
+        }
+        if (!changed) {
+            for (int i = 0; i < n; i++) {
+                if (adaptiveGradientColors[i] != band.colors[i]) {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        final boolean originChanged = Math.abs(this.adaptiveGradientOriginX - originX) > 0.5f;
+        this.adaptiveGradientOriginX = originX;
+        this.adaptiveGradientActive = true;
+        if (changed) {
+            System.arraycopy(band.colors, 0, adaptiveGradientColors, 0, n);
+            System.arraycopy(band.positions, 0, adaptiveGradientPositions, 0, n);
+            adaptiveGradientWidth = Math.max(1, band.gradientWidth);
+            adaptiveGradientShader = new LinearGradient(0f, 0f, adaptiveGradientWidth, 0f,
+                    adaptiveGradientColors, adaptiveGradientPositions, Shader.TileMode.CLAMP);
+            if (adaptiveGradientMatrix == null) {
+                adaptiveGradientMatrix = new Matrix();
+            }
+            textPaint.setShader(adaptiveGradientShader);
+            invalidate();
+        } else if (originChanged) {
+            invalidate();
+        }
+    }
+
+    public void clearAdaptiveHorizontalGradient() {
+        if (adaptiveGradientActive || textPaint.getShader() != null) {
+            adaptiveGradientActive = false;
+            textPaint.setShader(null);
+            invalidate();
+        }
+    }
+
+    public void setGlassOpticalHaloEnabled(boolean enabled) {
+        setGlassOpticalHaloStrength(enabled ? 0.55f : 0f);
+    }
+
+    public void setGlassOpticalHaloStrength(float strength) {
+        final float clamped = Math.max(0f, Math.min(1f, strength));
+        final boolean enabled = clamped > 0.01f;
+        if (this.glassOpticalHaloEnabled != enabled || Math.abs(this.glassOpticalHaloStrength - clamped) > 0.02f) {
+            this.glassOpticalHaloEnabled = enabled;
+            this.glassOpticalHaloStrength = clamped;
+            this.lastHaloTextColor = textPaint.getColor();
+            GlassContrastHelper.applyOpticalTextHalo(textPaint, lastHaloTextColor, clamped);
+            invalidate();
+        }
+    }
+
+    public boolean isGlassOpticalHaloEnabled() {
+        return glassOpticalHaloEnabled;
+    }
 
     public void setEmojiColor(int color) {
-        emojiStackColorFilter = new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN);
+        if (!hasEmojiColor || lastEmojiColor != color || emojiStackColorFilter == null) {
+            hasEmojiColor = true;
+            lastEmojiColor = color;
+            emojiStackColorFilter = new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN);
+        }
     }
 
     public SimpleTextView(Context context) {
@@ -149,7 +235,16 @@ public class SimpleTextView extends View implements Drawable.Callback {
     }
 
     public void setTextColor(int color) {
+        final int oldColor = textPaint.getColor();
+        final boolean colorChanged = oldColor != color;
+        if (!colorChanged && (!glassOpticalHaloEnabled || lastHaloTextColor == color)) {
+            return;
+        }
         textPaint.setColor(color);
+        if (glassOpticalHaloEnabled && (colorChanged || lastHaloTextColor != color)) {
+            lastHaloTextColor = color;
+            GlassContrastHelper.applyOpticalTextHalo(textPaint, color, glassOpticalHaloStrength);
+        }
         invalidate();
     }
 
@@ -241,7 +336,7 @@ public class SimpleTextView extends View implements Drawable.Callback {
     }
 
     public void setEllipsizeByGradient(boolean value, Boolean forceLeft) {
-        if (scrollNonFitText == value) {
+        if (ellipsizeByGradient == value && (forceEllipsizeByGradientLeft == forceLeft || (forceEllipsizeByGradientLeft != null && forceEllipsizeByGradientLeft.equals(forceLeft)))) {
             return;
         }
         ellipsizeByGradient = value;
@@ -845,6 +940,10 @@ public class SimpleTextView extends View implements Drawable.Callback {
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+        if (glassOpticalHaloEnabled && lastHaloTextColor != textPaint.getColor()) {
+            lastHaloTextColor = textPaint.getColor();
+            GlassContrastHelper.applyOpticalTextHalo(textPaint, lastHaloTextColor, glassOpticalHaloStrength);
+        }
         int textOffsetX = 0;
         layoutX = 0;
         layoutY = 0;
@@ -1179,6 +1278,13 @@ public class SimpleTextView extends View implements Drawable.Callback {
     }
 
     private void drawLayout(Canvas canvas) {
+        if (adaptiveGradientActive && adaptiveGradientShader != null) {
+            adaptiveGradientMatrix.setTranslate(-(layoutX - adaptiveGradientOriginX), 0f);
+            adaptiveGradientShader.setLocalMatrix(adaptiveGradientMatrix);
+            textPaint.setShader(adaptiveGradientShader);
+        } else if (textPaint.getShader() != null) {
+            textPaint.setShader(null);
+        }
         if (fullAlpha > 0 && fullLayoutLeftOffset != 0) {
             canvas.save();
             canvas.translate(-fullLayoutLeftOffset * fullAlpha + fullLayoutLeftCharactersOffset * fullAlpha, 0);

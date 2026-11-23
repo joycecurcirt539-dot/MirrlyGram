@@ -22,8 +22,10 @@ import androidx.annotation.RawRes;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.utils.ViewOutlineProviderImpl;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundColorProviderThemed;
+import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
 import org.telegram.utils.glass.source.GlassSourceColor;
 
 import java.util.ArrayList;
@@ -76,31 +78,91 @@ public class FragmentFloatingButton extends FrameLayout implements FactorAnimato
         }
 
         if (isSubButton) {
-            iBlur3ColorProviderTabs = new BlurredBackgroundColorProviderThemed(null, Theme.key_dialogBackground) {
-                @Override
-                public int getStrokeColorTop() {
-                    return isDark() ? 0x06FFFFFF : 0x11000000;
-                }
-
-                @Override
-                public int getStrokeColorBottom() {
-                    return isDark() ? 0x11FFFFFF : 0x20000000;
-                }
-
-                @Override
-                public int getShadowColor() {
-                    return isDark() ? 0x04FFFFFF : 0x20000000;
-                }
-            };
-            iBlur3SourceColor = new GlassSourceColor();
-            iBlur3Background = new BlurredBackgroundDrawable(iBlur3SourceColor);
-            iBlur3Background.setColorProvider(iBlur3ColorProviderTabs);
-            iBlur3Background.setStrokeWidth(dpf2(0.4f), dpf2(0.4f));
-            iBlur3Background.setRadius(dp(18));
-            iBlur3Background.setPadding(dp(5.66f));
+            createFallbackSubButtonGlass(resourcesProvider);
         }
 
         updateColors();
+    }
+
+    private void createFallbackSubButtonGlass(@Nullable Theme.ResourcesProvider rp) {
+        iBlur3ColorProviderTabs = new BlurredBackgroundColorProviderThemed(rp, Theme.key_dialogBackground) {
+            @Override
+            public int getStrokeColorTop() {
+                return isDark() ? 0x06FFFFFF : 0x11000000;
+            }
+
+            @Override
+            public int getStrokeColorBottom() {
+                return isDark() ? 0x11FFFFFF : 0x20000000;
+            }
+
+            @Override
+            public int getShadowColor() {
+                return isDark() ? 0x04FFFFFF : 0x20000000;
+            }
+        };
+        iBlur3SourceColor = new GlassSourceColor();
+        iBlur3Background = new BlurredBackgroundDrawable(iBlur3SourceColor);
+        iBlur3Background.setCallback(this);
+        iBlur3Background.setColorProvider(iBlur3ColorProviderTabs);
+        iBlur3Background.setStrokeWidth(dpf2(0.4f), dpf2(0.4f));
+        iBlur3Background.setRadius(dp(18));
+        iBlur3Background.setPadding(dp(5.66f));
+        if (getWidth() > 0 && getHeight() > 0) {
+            iBlur3Background.setBounds(0, 0, getWidth(), getHeight());
+        }
+    }
+
+    public void setBlurredBackgroundFactory(@Nullable BlurredBackgroundDrawableViewFactory factory) {
+        setBlurredBackgroundFactory(factory, !isSubButton, resourcesProvider);
+    }
+
+    public void setBlurredBackgroundFactory(@Nullable BlurredBackgroundDrawableViewFactory factory, boolean useAccentGlass) {
+        setBlurredBackgroundFactory(factory, useAccentGlass, resourcesProvider);
+    }
+
+    public void setBlurredBackgroundFactory(
+            @Nullable BlurredBackgroundDrawableViewFactory factory,
+            boolean useAccentGlass,
+            @Nullable Theme.ResourcesProvider resourcesProvider) {
+        glassResourcesProvider = resourcesProvider;
+        final Theme.ResourcesProvider effectiveProvider = getEffectiveResourcesProvider();
+        useAccentGlassForFactory = useAccentGlass && !isSubButton;
+
+        if (factory == null) {
+            iBlur3ColorProviderTabs = null;
+            iBlur3SourceColor = null;
+            if (isSubButton) {
+                createFallbackSubButtonGlass(effectiveProvider);
+            } else {
+                iBlur3Background = null;
+            }
+            updateColors();
+            return;
+        }
+
+        iBlur3ColorProviderTabs = null;
+        iBlur3SourceColor = null;
+        iBlur3Background = factory.create(this);
+        iBlur3Background.setCallback(this);
+        iBlur3Background.setColorProvider(BlurredBackgroundProviderImpl.floatingButtonAccent(effectiveProvider, !useAccentGlassForFactory));
+        if (isSubButton) {
+            iBlur3Background.setRadius(dp(18));
+            iBlur3Background.setPadding(dp(5.66f));
+        } else {
+            final int w = getWidth();
+            final int h = getHeight();
+            iBlur3Background.setPadding(0);
+            iBlur3Background.setRadius(w > 0 && h > 0 ? Math.min(w, h) / 2f : dp(24));
+        }
+        if (getWidth() > 0 && getHeight() > 0) {
+            iBlur3Background.setBounds(0, 0, getWidth(), getHeight());
+        }
+        updateColors();
+    }
+
+    private Theme.ResourcesProvider getEffectiveResourcesProvider() {
+        return glassResourcesProvider != null ? glassResourcesProvider : resourcesProvider;
     }
 
     public void setProgressVisible(boolean visible, boolean animated) {
@@ -147,8 +209,11 @@ public class FragmentFloatingButton extends FrameLayout implements FactorAnimato
     private GlassSourceColor iBlur3SourceColor;
     private BlurredBackgroundDrawable iBlur3Background;
     private BlurredBackgroundColorProviderThemed iBlur3ColorProviderTabs;
+    private @Nullable Theme.ResourcesProvider glassResourcesProvider;
+    private boolean useAccentGlassForFactory;
 
     private Drawable themedBackground;
+    private boolean themedBackgroundForGlass;
     private int themedIconColor;
     private boolean themedIconColorSet;
     private int themedBackgroundColor, themedBackgroundPressedColor;
@@ -158,18 +223,20 @@ public class FragmentFloatingButton extends FrameLayout implements FactorAnimato
         if (imageView == null || progressView == null) {
             return;
         }
-        final boolean recolorBackground = themedBackground != null && getBackground() == themedBackground;
+        final Theme.ResourcesProvider rp = getEffectiveResourcesProvider();
+        final boolean glassActive = iBlur3Background != null;
+        final boolean recolorBackground = themedBackground != null && getBackground() == themedBackground && themedBackgroundForGlass == glassActive;
         if (isSubButton) {
-            final int iconColor = Theme.getColor(Theme.key_actionBarDefaultIcon, resourcesProvider);
+            final int iconColor = Theme.getColor(Theme.key_actionBarDefaultIcon, rp);
             if (iconColor != themedIconColor || !themedIconColorSet) {
                 themedIconColor = iconColor;
                 themedIconColorSet = true;
                 imageView.setColorFilter(iconColor, PorterDuff.Mode.SRC_IN);
             }
-            progressView.setProgressColor(Theme.getColor(Theme.key_actionBarDefaultIcon, resourcesProvider));
+            progressView.setProgressColor(Theme.getColor(Theme.key_actionBarDefaultIcon, rp));
 
             if (iBlur3SourceColor != null) {
-                iBlur3SourceColor.setColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+                iBlur3SourceColor.setColor(Theme.getColor(Theme.key_windowBackgroundWhite, rp));
             }
             if (iBlur3ColorProviderTabs != null) {
                 iBlur3ColorProviderTabs.updateColors();
@@ -180,37 +247,61 @@ public class FragmentFloatingButton extends FrameLayout implements FactorAnimato
             invalidate();
 
             int rad = dp(18);
-            int pressedColor = Theme.getColor(Theme.key_listSelector, resourcesProvider);
+            int pressedColor = Theme.getColor(Theme.key_listSelector, rp);
             if (recolorBackground) {
                 if (pressedColor != themedBackgroundPressedColor) {
                     themedBackgroundPressedColor = pressedColor;
                     Theme.setSelectorDrawableColor(themedBackground, pressedColor, true);
                 }
             } else {
+                themedBackgroundForGlass = glassActive;
                 setBackground(themedBackground = Theme.createInsetRoundRectDrawable(themedBackgroundPressedColor = pressedColor, rad, dp(6)));
             }
         } else {
-            final int iconColor = Theme.getColor(Theme.key_chats_actionIcon, resourcesProvider);
+            final int iconKey = glassActive && !useAccentGlassForFactory ? Theme.key_actionBarDefaultIcon : Theme.key_chats_actionIcon;
+            final int iconColor = Theme.getColor(iconKey, rp);
             if (iconColor != themedIconColor || !themedIconColorSet) {
                 themedIconColor = iconColor;
                 themedIconColorSet = true;
                 imageView.setColorFilter(iconColor, PorterDuff.Mode.SRC_IN);
             }
-            progressView.setProgressColor(Theme.getColor(Theme.key_chats_actionIcon, resourcesProvider));
-            final int color = Theme.getColor(Theme.key_featuredStickers_addButton, resourcesProvider);
-            final int pressedColor = Theme.getColor(Theme.key_featuredStickers_addButtonPressed, resourcesProvider);
-            if (recolorBackground) {
-                if (color != themedBackgroundColor || pressedColor != themedBackgroundPressedColor) {
-                    themedBackgroundColor = color;
+            progressView.setProgressColor(iconColor);
+
+            if (iBlur3Background != null) {
+                iBlur3Background.updateColors();
+                invalidate();
+                final int pressedColor = useAccentGlassForFactory
+                        ? Theme.multAlpha(iconColor, 0.22f)
+                        : Theme.getColor(Theme.key_listSelector, rp);
+                if (recolorBackground) {
+                    if (pressedColor != themedBackgroundPressedColor) {
+                        themedBackgroundPressedColor = pressedColor;
+                        Theme.setSelectorDrawableColor(themedBackground, pressedColor, true);
+                        themedBackground.invalidateSelf();
+                    }
+                } else {
+                    themedBackgroundForGlass = true;
+                    themedBackgroundColor = 0;
                     themedBackgroundPressedColor = pressedColor;
-                    Theme.setSelectorDrawableColor(themedBackground, color, false);
-                    Theme.setSelectorDrawableColor(themedBackground, pressedColor, true);
-                    themedBackground.invalidateSelf();
+                    setBackground(themedBackground = Theme.createInsetRoundRectDrawable(pressedColor, dp(28), 0));
                 }
             } else {
-                themedBackgroundColor = color;
-                themedBackgroundPressedColor = pressedColor;
-                setBackground(themedBackground = Theme.createSimpleSelectorCircleDrawable(dp(48), color, pressedColor));
+                final int color = Theme.getColor(Theme.key_featuredStickers_addButton, rp);
+                final int pressedColor = Theme.getColor(Theme.key_featuredStickers_addButtonPressed, rp);
+                if (recolorBackground) {
+                    if (color != themedBackgroundColor || pressedColor != themedBackgroundPressedColor) {
+                        themedBackgroundColor = color;
+                        themedBackgroundPressedColor = pressedColor;
+                        Theme.setSelectorDrawableColor(themedBackground, color, false);
+                        Theme.setSelectorDrawableColor(themedBackground, pressedColor, true);
+                        themedBackground.invalidateSelf();
+                    }
+                } else {
+                    themedBackgroundForGlass = false;
+                    themedBackgroundColor = color;
+                    themedBackgroundPressedColor = pressedColor;
+                    setBackground(themedBackground = Theme.createSimpleSelectorCircleDrawable(dp(48), color, pressedColor));
+                }
             }
         }
     }
@@ -254,7 +345,15 @@ public class FragmentFloatingButton extends FrameLayout implements FactorAnimato
         super.onSizeChanged(w, h, oldw, oldh);
         if (iBlur3Background != null) {
             iBlur3Background.setBounds(0, 0, w, h);
+            if (!isSubButton) {
+                iBlur3Background.setRadius(Math.min(w, h) / 2f);
+            }
         }
+    }
+
+    @Override
+    protected boolean verifyDrawable(@NonNull Drawable who) {
+        return who == iBlur3Background || super.verifyDrawable(who);
     }
 
     @Override

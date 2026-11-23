@@ -960,6 +960,7 @@ public abstract class BaseFragment {
             for (int i = sheetsStack.size() - 1; i >= 0; --i) {
                 if (sheetsStack.get(i).isShown()) {
                     if (sheetsStack.get(i).showDialog(dialog)) {
+                        org.telegram.messenger.mirrly.MirrlyHaptics.syncDialogHaptics(dialog);
                         return dialog;
                     }
                 }
@@ -986,6 +987,7 @@ public abstract class BaseFragment {
                 }
             });
             visibleDialog.show();
+            org.telegram.messenger.mirrly.MirrlyHaptics.syncDialogHaptics(visibleDialog);
             return visibleDialog;
         } catch (Exception e) {
             FileLog.e(e);
@@ -1239,6 +1241,7 @@ public abstract class BaseFragment {
         fragment.setParentDialog(bottomSheet[0]);
         bottomSheet[0].setOpenNoDelay(true);
         bottomSheet[0].show();
+        org.telegram.messenger.mirrly.MirrlyHaptics.syncDialogHaptics(bottomSheet[0]);
 
         return actionBarLayout;
     }

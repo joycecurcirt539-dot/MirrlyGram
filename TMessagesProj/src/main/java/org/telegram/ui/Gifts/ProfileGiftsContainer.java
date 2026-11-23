@@ -105,6 +105,7 @@ import org.telegram.ui.Components.ViewPagerFixed;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundColorProviderThemed;
+import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
 import org.telegram.ui.LaunchActivity;
 import org.telegram.ui.PeerColorActivity;
 import org.telegram.ui.ProfileActivity;
@@ -1341,8 +1342,13 @@ public class ProfileGiftsContainer extends FrameLayout implements NotificationCe
             currentMenu.show();
             return true;
         });
-//        tabsView.setBackgroundColor(backgroundColor);
-        addView(tabsView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 42, Gravity.TOP));
+        if (buttonGlassFactory != null) {
+            final BlurredBackgroundDrawable tabsGlass = buttonGlassFactory.create(tabsView, BlurredBackgroundProviderImpl.simpleActionBar(resourcesProvider));
+            tabsGlass.setRadius(dp(18));
+            tabsGlass.setPadding(dp(6));
+            tabsView.setBlurredBackground(tabsGlass);
+        }
+        addView(tabsView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 42, Gravity.TOP, 6, 0, 6, 0));
 
         ProfileActivity.Button2 button2 = new ProfileActivity.Button2(context);
         BlurredBackgroundDrawable drawable = buttonGlassFactory.create(button2, new BlurredBackgroundColorProviderThemed(resourcesProvider, Theme.key_windowBackgroundWhite));
@@ -1907,6 +1913,9 @@ public class ProfileGiftsContainer extends FrameLayout implements NotificationCe
     public void updateColors() {
 //        setBackgroundColor(backgroundColor = Theme.getColor(Theme.key_windowBackgroundGray, resourcesProvider));
 //        tabsView.setBackgroundColor(backgroundColor);
+        if (tabsView != null) {
+            tabsView.updateColors();
+        }
         button.updateColors();
         final int buttonColor = processColor(Theme.getColor(Theme.key_featuredStickers_addButton, resourcesProvider));
         if (button.getBackground() instanceof android.graphics.drawable.ShapeDrawable) {

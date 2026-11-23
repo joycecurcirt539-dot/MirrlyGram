@@ -19,6 +19,8 @@ import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.utils.RenderNodeEffects;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.blur3.capture.IBlur3Capture;
+import org.telegram.utils.glass.GlassEngine;
+import org.telegram.utils.glass.GlassSettings;
 import org.telegram.utils.glass.positions.GlassPositionsArray;
 
 import java.util.ArrayList;
@@ -26,24 +28,49 @@ import java.util.List;
 
 @RequiresApi(api = Build.VERSION_CODES.S)
 public class DownscaleScrollableNoiseSuppressor {
-    public final boolean isLiquidGlassEnabled;
+    public boolean isLiquidGlassEnabled;
+    private int lastGlassSettingsGeneration = -1;
     public final boolean allowNoiseSuppress;
     private final boolean simpleMode;
-    private final int k;
+    private int k;
 
     public DownscaleScrollableNoiseSuppressor() {
         this(true, false);
     }
 
     public DownscaleScrollableNoiseSuppressor(boolean simple, boolean allowNoiseSuppress) {
-        isLiquidGlassEnabled = LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS);
+        final GlassSettings gs = GlassEngine.getCurrentGlassSettings();
+        isLiquidGlassEnabled = gs.isLiquidGlassEnabled;
+        lastGlassSettingsGeneration = GlassEngine.getGlassSettingsGenerationId();
         simpleMode = simple;
-        k = isLiquidGlassEnabled || allowNoiseSuppress ? 1 : 8; // 1
+        k = (isLiquidGlassEnabled || allowNoiseSuppress) ? 1 : 8;
 
         this.allowNoiseSuppress = allowNoiseSuppress;
-        resultRenderNodes = new RenderNode[isLiquidGlassEnabled || !simpleMode ? 2 : 1];
+        resultRenderNodes = new RenderNode[(isLiquidGlassEnabled || !simpleMode) ? 2 : 1];
         for (int a = 0; a < resultRenderNodes.length; a++) {
             resultRenderNodes[a] = new RenderNode(null);
+        }
+    }
+
+    private void syncGlassSettings() {
+        final GlassSettings gs = GlassEngine.getCurrentGlassSettings();
+        final int gen = GlassEngine.getGlassSettingsGenerationId();
+        if (lastGlassSettingsGeneration != gen || isLiquidGlassEnabled != gs.isLiquidGlassEnabled) {
+            lastGlassSettingsGeneration = gen;
+            isLiquidGlassEnabled = gs.isLiquidGlassEnabled;
+            k = (isLiquidGlassEnabled || allowNoiseSuppress) ? 1 : 8;
+            if ((isLiquidGlassEnabled || !simpleMode) && resultRenderNodes.length < 2) {
+                resultRenderNodes = new RenderNode[] {
+                    resultRenderNodes[0],
+                    new RenderNode(null)
+                };
+            }
+            for (int a = 0; a < rectRenderNodes.size(); a++) {
+                final SourcePart sp = rectRenderNodes.get(a);
+                sp.applyGlassEffects(gs);
+                sp.lastHash = 0;
+            }
+            lastHash = 0;
         }
     }
 
@@ -216,12 +243,6 @@ public class DownscaleScrollableNoiseSuppressor {
             canvas.drawRenderNode(renderNode);
             renderNodeOriginalWithOffset.endRecording();
 
-            renderNodeDownsampled[0].setPosition(0, 0, downsampledWidth, downsampledHeight);
-            canvas = renderNodeDownsampled[0].beginRecording(downsampledWidth, downsampledHeight);
-            canvas.scale(scaleX, scaleY);
-            canvas.drawRenderNode(renderNodeOriginalWithOffset);
-            renderNodeDownsampled[0].endRecording();
-
             for (int a = 0; a < renderNodeDownsampled.length; a++) {
                 renderNodeDownsampled[a].setPosition(0, 0, downsampledWidth, downsampledHeight);
                 canvas = renderNodeDownsampled[a].beginRecording(downsampledWidth, downsampledHeight);
@@ -309,7 +330,7 @@ public class DownscaleScrollableNoiseSuppressor {
      * Glass Mode: [0] - weak blur, saturation up.      [1] - strong blur, saturation up
      * Blur Mode:  [0] - strong blur, no color matrix.  [1] - strong blur, saturation up
      * */
-    private final RenderNode[] resultRenderNodes;
+    private RenderNode[] resultRenderNodes;
 
     long lastHash;
 
@@ -384,6 +405,7 @@ public class DownscaleScrollableNoiseSuppressor {
     private final Blur3HashImpl builder = new Blur3HashImpl();
 
     public boolean invalidateResultRenderNodes(IBlur3Capture capture, int width, int height) {
+        syncGlassSettings();
         int updatedCount = 0;
         for (int a = 0; a < rectRenderNodesCount; a++) {
             final SourcePart sourcePart = rectRenderNodes.get(a);
@@ -420,36 +442,50 @@ public class DownscaleScrollableNoiseSuppressor {
     private class SourcePart {
         final RenderNode renderNode = new RenderNode(null);
         final DownscaledRenderNode renderNodesForBlur;
-        final @Nullable DownscaledRenderNode renderNodesForGlass;
+        @Nullable DownscaledRenderNode renderNodesForGlass;
         final Rect position = new Rect();
         long lastHash;
 
         private SourcePart() {
             if (isLiquidGlassEnabled) {
-                if (simpleMode) {
-                    renderNodesForGlass = new DownscaledRenderNode("glass", 0, true);
-                    renderNodesForGlass.setScale(4, 4);
-                    renderNodesForGlass.setPrimaryEffectBlur(dpf2(6f), RenderNodeEffects.getSaturationX3RenderEffect());
-                } else {
-                    renderNodesForGlass = new DownscaledRenderNode("glass", 1, true);
-                    renderNodesForGlass.setScale(4, 4);
-                    renderNodesForGlass.setPrimaryEffectBlur(dpf2(6f));
-                    renderNodesForGlass.setSecondaryEffect(0, RenderNodeEffects.getSaturationX3RenderEffect());
-                }
-                renderNodesForBlur = new DownscaledRenderNode("blur", 0);
-                renderNodesForBlur.setScale(8, 8);
-                renderNodesForBlur.setPrimaryEffectBlur(dpf2(40 - 1.66f));
-            } else if (simpleMode) {
-                renderNodesForBlur = new DownscaledRenderNode("blur", 0);
-                renderNodesForBlur.setScale(allowNoiseSuppress ? 16 : 8, allowNoiseSuppress ? 16 : 8);
-                renderNodesForBlur.setPrimaryEffectBlur(dpf2(40), RenderNodeEffects.getSaturationX3RenderEffect());
-                renderNodesForGlass = null;
+                renderNodesForGlass = new DownscaledRenderNode("glass", simpleMode ? 0 : 1, true);
+                renderNodesForGlass.setScale(4, 4);
+                renderNodesForBlur = new DownscaledRenderNode("blur", simpleMode ? 0 : 1);
             } else {
-                renderNodesForBlur = new DownscaledRenderNode("blur", 1);
-                renderNodesForBlur.setScale(8, 8);
-                renderNodesForBlur.setPrimaryEffectBlur(dpf2(40));
-                renderNodesForBlur.setSecondaryEffect(0, RenderNodeEffects.getSaturationX3RenderEffect());
+                renderNodesForBlur = new DownscaledRenderNode("blur", simpleMode ? 0 : 1);
                 renderNodesForGlass = null;
+            }
+            applyGlassEffects(GlassEngine.getCurrentGlassSettings());
+        }
+
+        private void applyGlassEffects(GlassSettings gs) {
+            final float blurScale = Math.max(0.25f, Math.min(1.45f, gs.blurScale));
+            final android.graphics.RenderEffect satEffect = RenderNodeEffects.getConfiguredSaturationRenderEffect();
+            final float glassBlur = Math.max(0.5f, dpf2(6f) * blurScale);
+            final float frostedBlur = Math.max(1.0f, dpf2(isLiquidGlassEnabled ? (40f - 1.66f) : 40f) * blurScale);
+
+            if (isLiquidGlassEnabled) {
+                if (renderNodesForGlass == null) {
+                    renderNodesForGlass = new DownscaledRenderNode("glass", simpleMode ? 0 : 1, true);
+                    renderNodesForGlass.setScale(4, 4);
+                }
+                if (simpleMode) {
+                    renderNodesForGlass.setPrimaryEffectBlur(glassBlur, satEffect);
+                } else {
+                    renderNodesForGlass.setPrimaryEffectBlur(glassBlur);
+                    renderNodesForGlass.setSecondaryEffect(0, satEffect);
+                }
+                renderNodesForBlur.setScale(8, 8);
+                renderNodesForBlur.setPrimaryEffectBlur(frostedBlur);
+            } else if (simpleMode) {
+                renderNodesForGlass = null;
+                renderNodesForBlur.setScale(allowNoiseSuppress ? 16 : 8, allowNoiseSuppress ? 16 : 8);
+                renderNodesForBlur.setPrimaryEffectBlur(frostedBlur, satEffect);
+            } else {
+                renderNodesForGlass = null;
+                renderNodesForBlur.setScale(8, 8);
+                renderNodesForBlur.setPrimaryEffectBlur(frostedBlur);
+                renderNodesForBlur.setSecondaryEffect(0, satEffect);
             }
         }
 
@@ -488,6 +524,7 @@ public class DownscaleScrollableNoiseSuppressor {
     }
 
     public void setupRenderNodes(GlassPositionsArray positions) {
+        syncGlassSettings();
         rectRenderNodesCount = positions.size();
 
         while (rectRenderNodesCount > rectRenderNodes.size()) {
@@ -500,6 +537,7 @@ public class DownscaleScrollableNoiseSuppressor {
     }
 
     public void setupRenderNodes(List<RectF> positions, int count) {
+        syncGlassSettings();
         rectRenderNodesCount = count;
 
         while (rectRenderNodesCount > rectRenderNodes.size()) {

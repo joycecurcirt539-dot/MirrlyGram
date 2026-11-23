@@ -10,6 +10,7 @@ import android.text.TextPaint;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BillingController;
 import org.telegram.messenger.LocaleController;
+import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.ChannelMonetizationLayout;
 import org.telegram.ui.Charts.data.ChartData;
@@ -30,6 +31,8 @@ public class ChartHorizontalLinesData {
     public int alpha;
 
     public int fixedAlpha = 255;
+    private int leftDualFormatter = 0;
+    private int rightDualFormatter = 0;
 
     public ChartHorizontalLinesData(
         long newMaxHeight,
@@ -39,6 +42,21 @@ public class ChartHorizontalLinesData {
         int formatter,
         TextPaint firstTextPaint, TextPaint secondTextPaint
     ) {
+        this(newMaxHeight, newMinHeight, useMinHeight, k, formatter, 0, 0, firstTextPaint, secondTextPaint);
+    }
+
+    public ChartHorizontalLinesData(
+        long newMaxHeight,
+        long newMinHeight,
+        boolean useMinHeight,
+        float k,
+        int formatter,
+        int leftUnit,
+        int rightUnit,
+        TextPaint firstTextPaint, TextPaint secondTextPaint
+    ) {
+        this.leftDualFormatter = leftUnit;
+        this.rightDualFormatter = rightUnit;
         if (!useMinHeight) {
             long v = newMaxHeight;
             if (newMaxHeight > 100) {
@@ -73,13 +91,13 @@ public class ChartHorizontalLinesData {
                 if (k > 0) {
                     float v2 = (values[i] / k);
                     if (skipFloatValues) {
-                        if (v2 - ((long) v2) < 0.01f || formatter == ChartData.FORMATTER_TON || formatter == ChartData.FORMATTER_XTR) {
-                            valuesStr2[i] = format(1, secondTextPaint, (long) v2, formatter);
+                        if (v2 - ((long) v2) < 0.01f || formatter == ChartData.FORMATTER_TON || formatter == ChartData.FORMATTER_XTR || formatter == ChartData.FORMATTER_DUAL_UNIT) {
+                            valuesStr2[i] = format(1, secondTextPaint, formatter == ChartData.FORMATTER_DUAL_UNIT ? Math.round(v2) : (long) v2, formatter);
                         } else {
                             valuesStr2[i] = "";
                         }
                     } else {
-                        valuesStr2[i] = format(1, secondTextPaint, (long) v2, formatter);
+                        valuesStr2[i] = format(1, secondTextPaint, formatter == ChartData.FORMATTER_DUAL_UNIT ? Math.round(v2) : (long) v2, formatter);
                     }
                 }
             }
@@ -121,13 +139,13 @@ public class ChartHorizontalLinesData {
                 if (k > 0) {
                     float v = (values[i] / k);
                     if (skipFloatValues) {
-                        if (v - ((long) v) < 0.01f || formatter == ChartData.FORMATTER_TON || formatter == ChartData.FORMATTER_XTR) {
-                            valuesStr2[i] = format(1, secondTextPaint, (long) v, formatter);
+                        if (v - ((long) v) < 0.01f || formatter == ChartData.FORMATTER_TON || formatter == ChartData.FORMATTER_XTR || formatter == ChartData.FORMATTER_DUAL_UNIT) {
+                            valuesStr2[i] = format(1, secondTextPaint, formatter == ChartData.FORMATTER_DUAL_UNIT ? Math.round(v) : (long) v, formatter);
                         } else {
                             valuesStr2[i] = "";
                         }
                     } else {
-                        valuesStr2[i] = format(1, secondTextPaint, (long) v, formatter);
+                        valuesStr2[i] = format(1, secondTextPaint, formatter == ChartData.FORMATTER_DUAL_UNIT ? Math.round(v) : (long) v, formatter);
                     }
                 }
             }
@@ -136,7 +154,35 @@ public class ChartHorizontalLinesData {
 
     private DecimalFormat formatterTON;
     public CharSequence format(int a, TextPaint paint, long v, int formatter) {
-        if (formatter == ChartData.FORMATTER_TON) {
+        if (formatter == ChartData.FORMATTER_DUAL_UNIT) {
+            int sub = a == 0 ? leftDualFormatter : rightDualFormatter;
+            if (sub != 0 && sub != ChartData.FORMATTER_DUAL_UNIT) {
+                return format(a, paint, v, sub);
+            }
+        } else if (formatter == ChartData.FORMATTER_ENERGY_MAH_TENTHS) {
+            String unit = LocaleController.getString(R.string.MirrlyPowerUnitMah);
+            if (v <= 0) {
+                return "0 " + unit;
+            }
+            if (v < 1000) {
+                return String.format(Locale.US, "%.1f %s", v / 10.0, unit);
+            }
+            return String.format(Locale.US, "%d %s", Math.round(v / 10.0), unit);
+        } else if (formatter == ChartData.FORMATTER_ENERGY_PCT_TENTHS) {
+            if (v <= 0) {
+                return "0%";
+            }
+            return String.format(Locale.US, "%.1f%%", v / 10.0);
+        } else if (formatter == ChartData.FORMATTER_ENERGY_MW) {
+            long clamped = Math.max(0L, v);
+            if (clamped >= 10_000L) {
+                return String.format(Locale.US, "%.1f %s", clamped / 1000.0, LocaleController.getString(R.string.MirrlyPowerUnitW));
+            }
+            return clamped + " " + LocaleController.getString(R.string.MirrlyPowerUnitMw);
+        } else if (formatter == ChartData.FORMATTER_BATTERY_PCT) {
+            long clamped = Math.max(0L, Math.min(100L, v));
+            return clamped + "%";
+        } else if (formatter == ChartData.FORMATTER_TON) {
             if (a == 1) {
                 return "≈" + BillingController.getInstance().formatCurrency(v, "USD");
             }

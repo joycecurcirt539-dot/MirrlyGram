@@ -86,6 +86,18 @@ public class ChatActivityBlurredRoundPageDownButton extends FrameLayout {
         }
     }
 
+    public void applyAdaptiveGlassContrast(float invertFactor) {
+        if (buttonView != null) {
+            buttonView.applyAdaptiveGlassContrast(invertFactor);
+        }
+    }
+
+    public void applyAdaptiveIconColor(int color) {
+        if (buttonView != null) {
+            buttonView.setIconColor(color);
+        }
+    }
+
     public static ChatActivityBlurredRoundPageDownButton create(
         Context context,
         int size, int iconSize,

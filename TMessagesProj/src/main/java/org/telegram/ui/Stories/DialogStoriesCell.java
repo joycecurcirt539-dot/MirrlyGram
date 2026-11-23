@@ -20,6 +20,7 @@ import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.text.Layout;
@@ -43,6 +44,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.ColorUtils;
 import androidx.core.math.MathUtils;
@@ -93,6 +95,8 @@ import org.telegram.ui.Components.TypefaceSpan;
 import org.telegram.ui.PremiumPreviewFragment;
 import org.telegram.ui.Stories.recorder.HintView2;
 import org.telegram.ui.Stories.recorder.StoryRecorder;
+import org.telegram.utils.glass.GlassContrastHelper;
+import org.telegram.utils.glass.source.GlassSource;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -922,7 +926,8 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
 
         float progress = Math.min(collapsedProgress, collapsedProgress2);
 
-        final float clipRightPadding = actionBar.menu.getVisibleItemsMeasuredWidthWithAlpha() * progress - dp(6);
+        final float menuExtraShift = actionBar.isGlassMenuIndividualCircles() ? Math.max(0f, -actionBar.menu.getTranslationX()) : 0f;
+        final float clipRightPadding = (actionBar.menu.getVisibleItemsMeasuredWidthWithAlpha() + menuExtraShift) * progress - dp(actionBar.isGlassMenuIndividualCircles() ? 0 : 6);
         final boolean needSaveLayer = progress != 0 && clipRightPadding > 0;
         if (needSaveLayer) {
             final float clipWidth = getWidth() - clipRightPadding;
@@ -944,7 +949,7 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
             int cellWidth = dp(72);
             lastViewRight += -cellWidth + getAvatarRight(cellWidth, collapsedProgress) + dp(12);
             titleView.setTranslationX(lastViewRight);
-            titleView.getDrawable().setRightPadding(lastViewRight - dp(12) + actionBar.menu.getVisibleItemsMeasuredWidthWithAlpha() * progress);
+            titleView.getDrawable().setRightPadding(lastViewRight - dp(12) + (actionBar.menu.getVisibleItemsMeasuredWidthWithAlpha() + menuExtraShift) * progress);
 
             float logoOffset = (telegramLogoView.getMeasuredHeight() - telegramLogoView.getTextHeight()) / 2f;
             telegramLogoView.setTranslationX(titleView.getTranslationX());
@@ -955,6 +960,10 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
 
             subtitleOverlayContainer.setTranslationX(titleView.getTranslationX());
             subtitleOverlayContainer.setTranslationY(bottomY - barOffset + dp(15 + FAKE_TOP_PADDING + 4.333f + 8));
+
+            updateCompactHeaderTracking(progress);
+        } else {
+            clearCompactHeaderTracking();
         }
 
         super.dispatchDraw(canvas);
@@ -2224,6 +2233,131 @@ public class DialogStoriesCell extends FrameLayout implements NotificationCenter
     public void onFactorChanged(int id, float factor, float fraction, FactorAnimator callee) {
         if (id == ANIMATOR_ID_HAS_TITLE_TEXT) {
             checkUi_titleVisibility();
+        }
+    }
+
+    private float compactHeaderLeft = -1f;
+    private float compactHeaderTop = 0f;
+    private float compactHeaderWidth = 0f;
+    private float compactHeaderHeight = 0f;
+    private float compactHeaderAlpha = 0f;
+    private final GlassContrastHelper.HorizontalAdaptiveBand headerAdaptiveBand = new GlassContrastHelper.HorizontalAdaptiveBand();
+    private boolean headerAdaptiveApplied = false;
+
+    private void clearCompactHeaderTracking() {
+        final boolean changed = compactHeaderAlpha > 0.005f || compactHeaderWidth > 0.5f;
+        compactHeaderLeft = -1f;
+        compactHeaderWidth = 0f;
+        compactHeaderHeight = 0f;
+        compactHeaderAlpha = 0f;
+        if (changed && actionBar != null) {
+            actionBar.postInvalidateOnAnimation();
+        }
+    }
+
+    private void updateCompactHeaderTracking(float progress) {
+        final float titleVis = animatorHasTitleText != null ? animatorHasTitleText.getFloatValue() : 0f;
+        final boolean hasEmoji = statusDrawable != null && statusDrawable.isNotEmpty() > 0.05f;
+        final float logoW = telegramLogoView != null ? telegramLogoView.getTextWidth() : 0f;
+        final float statusW = hasEmoji ? (dp(4) + dp(26)) : 0f;
+        final float animatedW = (titleView != null && titleView.getDrawable() != null) ? (titleView.getDrawable().getCurrentWidth() * titleView.getScaleX()) : 0f;
+        final float subW = (subtitleOverlayContainer != null
+                && subtitleOverlayContainer.getVisibility() == VISIBLE
+                && subtitleOverlayContainer.getTotalVisibility() > 0.05f)
+                ? subtitleOverlayContainer.getTotalWidth() : 0f;
+        final float effectiveW = Math.max(lerp(logoW + statusW, animatedW, titleVis), subW);
+        final float headerX = titleView != null ? titleView.getTranslationX() : 0f;
+        final float headerTop = telegramLogoView != null ? telegramLogoView.getTranslationY() : 0f;
+        final float headerH = ActionBar.getCurrentActionBarHeight();
+        final float effAlpha = (effectiveW > 1f && progress > 0.005f) ? MathUtils.clamp(progress * getAlpha(), 0f, 1f) : 0f;
+
+        final boolean changed = Math.abs(compactHeaderLeft - headerX) > 0.5f
+                || Math.abs(compactHeaderWidth - effectiveW) > 0.5f
+                || Math.abs(compactHeaderAlpha - effAlpha) > 0.01f;
+        compactHeaderLeft = headerX;
+        compactHeaderTop = headerTop;
+        compactHeaderWidth = effectiveW;
+        compactHeaderHeight = headerH;
+        compactHeaderAlpha = effAlpha;
+        if (changed && actionBar != null) {
+            actionBar.postInvalidateOnAnimation();
+        }
+    }
+
+    public float getCompactHeaderTitleBoundsInActionBar(@NonNull ActionBar targetBar, @NonNull RectF outBounds) {
+        if (getVisibility() != VISIBLE || compactHeaderAlpha <= 0.01f || compactHeaderWidth <= 1f || compactHeaderLeft < 0f) {
+            outBounds.setEmpty();
+            return 0f;
+        }
+        final float left = getX() + compactHeaderLeft - targetBar.getX();
+        final float top = getY() + compactHeaderTop - targetBar.getY();
+        outBounds.set(left, top, left + compactHeaderWidth, top + compactHeaderHeight);
+        return compactHeaderAlpha;
+    }
+
+    public void updateSmartAdaptiveGlassContrast(
+            @Nullable ViewGroup sampleTarget,
+            int glassBgColor,
+            @Nullable GlassSource backdropSource,
+            @Nullable Drawable backdropDrawable,
+            int viewportW,
+            int viewportH,
+            float fallbackBgLuma,
+            @Nullable Theme.ResourcesProvider rp,
+            boolean liquidShaderActive,
+            boolean resetToBase
+    ) {
+        final int baseLogoColor = getTextLogoColor();
+        if (resetToBase || getVisibility() != VISIBLE || compactHeaderAlpha <= 0.01f) {
+            if (headerAdaptiveApplied) {
+                headerAdaptiveApplied = false;
+                if (telegramLogoView != null) {
+                    telegramLogoView.clearAdaptiveHorizontalGradient();
+                    telegramLogoView.setGlassOpticalHaloStrength(0f);
+                    telegramLogoView.setTextColor(baseLogoColor);
+                }
+                if (titleView != null) {
+                    titleView.clearAdaptiveHorizontalGradient();
+                    titleView.setTextColor(baseLogoColor);
+                    GlassContrastHelper.applyOpticalTextHalo(titleView.getPaint(), baseLogoColor, 0f);
+                }
+                if (subtitleOverlayContainer != null) {
+                    subtitleOverlayContainer.updateColors();
+                }
+            }
+            return;
+        }
+
+        final View anchor = (animatorHasTitleText != null && animatorHasTitleText.getFloatValue() > 0.5f)
+                ? titleView : telegramLogoView;
+        if (anchor == null || compactHeaderWidth <= 1f) {
+            return;
+        }
+        final float localLeft = compactHeaderLeft;
+        final float localTop = Math.max(0f, telegramLogoView.getY());
+        final float localRight = Math.min(getWidth(), localLeft + compactHeaderWidth);
+        final float localBottom = Math.min(getHeight(), localTop + ActionBar.getCurrentActionBarHeight());
+
+        GlassContrastHelper.computeHorizontalAdaptiveBand(
+                this, sampleTarget,
+                localLeft, localTop, localRight, localBottom,
+                glassBgColor, baseLogoColor, backdropSource, backdropDrawable,
+                viewportW, viewportH, fallbackBgLuma, rp,
+                false, false, liquidShaderActive, headerAdaptiveBand
+        );
+        headerAdaptiveApplied = true;
+        if (telegramLogoView != null) {
+            telegramLogoView.setGlassOpticalHaloStrength(headerAdaptiveBand.haloStrength);
+            telegramLogoView.setTextColor(headerAdaptiveBand.solidColor);
+            telegramLogoView.setAdaptiveHorizontalGradient(headerAdaptiveBand, 0f);
+        }
+        if (titleView != null) {
+            titleView.setTextColor(headerAdaptiveBand.solidColor);
+            GlassContrastHelper.applyOpticalTextHalo(titleView.getPaint(), headerAdaptiveBand.solidColor, headerAdaptiveBand.haloStrength);
+            titleView.setAdaptiveHorizontalGradient(headerAdaptiveBand, 0f);
+        }
+        if (subtitleOverlayContainer != null && subtitleOverlayContainer.getVisibility() == VISIBLE) {
+            subtitleOverlayContainer.applyAdaptiveColors(headerAdaptiveBand.solidColor, headerAdaptiveBand.haloStrength);
         }
     }
 

@@ -63,6 +63,7 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SecretChatHelper;
 import org.telegram.messenger.SharedConfig;
+import org.telegram.messenger.mirrly.MirrlyInterfaceConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
@@ -188,6 +189,7 @@ public class ContactsActivity extends BaseFragment implements FactorAnimator.Tar
         NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.updateInterfaces);
         NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.encryptedChatCreated);
         NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.closeChats);
+        NotificationCenter.getGlobalInstance().addWeakObserver(this, NotificationCenter.mirrlyBottomBarConfigChanged);
         checkPermission = UserConfig.getInstance(currentAccount).syncContacts;
         if (arguments != null) {
             onlyUsers = arguments.getBoolean("onlyUsers", false);
@@ -217,10 +219,15 @@ public class ContactsActivity extends BaseFragment implements FactorAnimator.Tar
         getContactsController().checkInviteText();
         getContactsController().reloadContactsStatusesMaybe(false);
 
-        additionNavigationBarHeight = hasMainTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS) : 0;
-        additionFloatingButtonOffset = hasMainTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN) : 0;
+        updateMainTabsOffsets();
 
         return true;
+    }
+
+    private void updateMainTabsOffsets() {
+        final boolean showTabs = hasMainTabs && !MirrlyInterfaceConfig.isBottomBarCompletelyHidden();
+        additionNavigationBarHeight = showTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT_WITH_MARGINS) : 0;
+        additionFloatingButtonOffset = showTabs ? dp(DialogsActivity.MAIN_TABS_HEIGHT + DialogsActivity.MAIN_TABS_MARGIN) : 0;
     }
 
     @Override
@@ -230,6 +237,7 @@ public class ContactsActivity extends BaseFragment implements FactorAnimator.Tar
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.updateInterfaces);
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.encryptedChatCreated);
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.closeChats);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.mirrlyBottomBarConfigChanged);
         delegate = null;
     }
 
@@ -411,6 +419,7 @@ public class ContactsActivity extends BaseFragment implements FactorAnimator.Tar
             }
         };
         listView.setSections();
+        listView.setSectionsDrawBackground(true);
         ThemeBind.backgroundColor(contentView, Theme.key_windowBackgroundGray, getResourceProvider());
 
         FlickerLoadingView flickerLoadingView = new FlickerLoadingView(context);
@@ -761,6 +770,7 @@ public class ContactsActivity extends BaseFragment implements FactorAnimator.Tar
 
         if (!createSecretChat && !returnAsResult) {
             floatingButton = new FragmentFloatingButton(context, resourceProvider);
+            floatingButton.setBlurredBackgroundFactory(getBaseSimpleGlass().factory, true, resourceProvider);
             contentView.addView(floatingButton, FragmentFloatingButton.createDefaultLayoutParams());
             floatingButton.setOnClickListener(v -> {
                 if (MessagesController.getInstance(currentAccount).isFrozen()) {
@@ -1214,6 +1224,13 @@ public class ContactsActivity extends BaseFragment implements FactorAnimator.Tar
             if (!creatingChat) {
                 removeSelfFromStack(true);
             }
+        } else if (id == NotificationCenter.mirrlyBottomBarConfigChanged) {
+            updateMainTabsOffsets();
+            if (listView != null) {
+                checkUi_listViewPadding();
+            }
+            checkUi_floatingButtonPosition();
+            checkUi_emptyView();
         }
     }
 
@@ -1462,6 +1479,9 @@ public class ContactsActivity extends BaseFragment implements FactorAnimator.Tar
 
     private void cellDelegateThemeColors() {
         // the simple header is a Theme.Colorable, recolored by ThemeBind
+        if (floatingButton != null) {
+            floatingButton.updateColors();
+        }
     }
 
     /** theme editor: colors this page shows (former ThemeDescription keys) */

@@ -1,6 +1,7 @@
 package org.telegram.ui.Components;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
+import static org.telegram.messenger.AndroidUtilities.dpf2;
 import static org.telegram.messenger.AndroidUtilities.lerp;
 import static org.telegram.messenger.LocaleController.formatString;
 import static org.telegram.messenger.LocaleController.getPluralString;
@@ -15,6 +16,8 @@ import android.content.DialogInterface;
 import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
@@ -22,6 +25,7 @@ import android.graphics.PorterDuffColorFilter;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
@@ -55,6 +59,7 @@ import org.telegram.messenger.TopicsController;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.mirrly.MirrlyConfig;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
@@ -145,7 +150,14 @@ public class TopicsTabsView extends FrameLayout implements NotificationCenter.No
             private final AnimatedFloat animatedClipL = new AnimatedFloat(this, 320, CubicBezierInterpolator.EASE_OUT_QUINT);
             private final AnimatedFloat animatedClipR = new AnimatedFloat(this, 320, CubicBezierInterpolator.EASE_OUT_QUINT);
             private final RectF lineRect = new RectF();
+            private final RectF glassLensRect = new RectF();
             private final Paint linePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint glassLensFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final Paint glassLensRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            private final LinearGradient glassLensFillGradient = new LinearGradient(0, 0, 0, 1, 0x18FFFFFF, 0x04FFFFFF, Shader.TileMode.CLAMP);
+            private final LinearGradient glassLensRimDarkGradient = new LinearGradient(0, 0, 0, 1, 0x33FFFFFF, 0x16FFFFFF, Shader.TileMode.CLAMP);
+            private final LinearGradient glassLensRimLightGradient = new LinearGradient(0, 0, 0, 1, 0xD9FFFFFF, 0x33FFFFFF, Shader.TileMode.CLAMP);
+            private final Matrix glassLensMatrix = new Matrix();
             private final AnimatedFloat animateTab = new AnimatedFloat(this, 420, CubicBezierInterpolator.EASE_OUT_QUINT);
             @Override
             protected void dispatchDraw(Canvas canvas) {
@@ -193,7 +205,33 @@ public class TopicsTabsView extends FrameLayout implements NotificationCenter.No
                         lerp(AndroidUtilities.rectTmp, lineRect, animateTab.set(1.0f), lineRect);
                     }
                     linePaint.setColor(ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_featuredStickers_addButton, resourcesProvider), 31));
-                    canvas.drawRoundRect(lineRect, dp(14), dp(14), linePaint);
+                    final float rad = dp(14);
+                    canvas.drawRoundRect(lineRect, rad, rad, linePaint);
+                    if (MirrlyConfig.isGlassLiquidEnabled() && lineRect.width() > 1f && lineRect.height() > 1f) {
+                        final float h = Math.max(1f, lineRect.height());
+                        glassLensMatrix.reset();
+                        glassLensMatrix.setScale(1f, h);
+                        glassLensMatrix.postTranslate(0f, lineRect.top);
+                        glassLensFillGradient.setLocalMatrix(glassLensMatrix);
+                        glassLensFillPaint.setShader(glassLensFillGradient);
+                        glassLensFillPaint.setAlpha(255);
+                        canvas.drawRoundRect(lineRect, rad, rad, glassLensFillPaint);
+
+                        final float rimScale = MirrlyConfig.getGlassRimScale();
+                        if (rimScale > 0.01f) {
+                            final boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
+                            final LinearGradient rimShader = isDark ? glassLensRimDarkGradient : glassLensRimLightGradient;
+                            rimShader.setLocalMatrix(glassLensMatrix);
+                            final float strokeW = dpf2(0.55f) * rimScale;
+                            final float inset = strokeW * 0.5f;
+                            glassLensRimPaint.setStyle(Paint.Style.STROKE);
+                            glassLensRimPaint.setStrokeWidth(strokeW);
+                            glassLensRimPaint.setShader(rimShader);
+                            glassLensRimPaint.setAlpha(255);
+                            glassLensRect.set(lineRect.left + inset, lineRect.top + inset, lineRect.right - inset, lineRect.bottom - inset);
+                            canvas.drawRoundRect(glassLensRect, Math.max(0f, rad - inset), Math.max(0f, rad - inset), glassLensRimPaint);
+                        }
+                    }
                 }
                 if (needClip) {
                     canvas.save();
@@ -622,6 +660,12 @@ public class TopicsTabsView extends FrameLayout implements NotificationCenter.No
     public void updateColors() {
         try {
             applyToggleButtonColors();
+            if (sideMenuBackgroundDrawable != null) {
+                sideMenuBackgroundDrawable.updateColors();
+            }
+            if (topMenuBackgroundDrawable != null) {
+                topMenuBackgroundDrawable.updateColors();
+            }
         } catch (Exception e) {
             FileLog.e(e);
         }

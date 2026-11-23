@@ -258,7 +258,8 @@ public class VideoPlayer implements Player.Listener, VideoListener, AnalyticsLis
             // factory.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER);
             ExoPlayer.Builder builder = new ExoPlayer.Builder(ApplicationLoader.applicationContext).setRenderersFactory(factory)
                     .setTrackSelector(trackSelector)
-                    .setLoadControl(loadControl);
+                    .setLoadControl(loadControl)
+                    .setVideoChangeFrameRateStrategy(C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF);
             if (looper != null) {
                 builder.setLooper(looper);
             }

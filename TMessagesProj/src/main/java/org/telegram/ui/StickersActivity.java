@@ -215,7 +215,7 @@ public class StickersActivity extends BaseFragment implements NotificationCenter
     @Override
     public View createView(Context context) {
         setHasOwnBackground(true);
-        simpleActionBar.setBackButtonDrawable(new BackDrawable(false));
+        simpleActionBar.setBackButtonImage(R.drawable.ic_ab_back);
         if (currentType == TYPE_IMAGE) {
             simpleActionBar.setTitle(getString(R.string.StickersName));
         } else if (currentType == TYPE_MASK) {

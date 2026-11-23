@@ -835,6 +835,9 @@ public class ActionBarPopupWindow extends PopupWindow {
     @Override
     public void showAsDropDown(View anchor, int xoff, int yoff) {
         try {
+            if (org.telegram.messenger.mirrly.MirrlyHaptics.isDisabled()) {
+                org.telegram.messenger.mirrly.MirrlyHaptics.syncViewTreeHaptics(getContentView());
+            }
             super.showAsDropDown(anchor, xoff, yoff);
             registerListener(anchor);
         } catch (Exception e) {
@@ -1010,6 +1013,9 @@ public class ActionBarPopupWindow extends PopupWindow {
 
     @Override
     public void showAtLocation(View parent, int gravity, int x, int y) {
+        if (org.telegram.messenger.mirrly.MirrlyHaptics.isDisabled()) {
+            org.telegram.messenger.mirrly.MirrlyHaptics.syncViewTreeHaptics(getContentView());
+        }
         super.showAtLocation(parent, gravity, x, y);
         unregisterListener();
     }

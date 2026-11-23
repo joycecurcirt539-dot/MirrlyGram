@@ -11,6 +11,22 @@ import androidx.annotation.RequiresApi;
 public class RenderNodeEffects {
     private RenderNodeEffects() {}
 
+    private static float cachedConfiguredSaturation = Float.NaN;
+    private static RenderEffect cachedConfiguredSaturationEffect;
+
+    @RequiresApi(api = Build.VERSION_CODES.S)
+    public static RenderEffect getConfiguredSaturationRenderEffect() {
+        final float target = org.telegram.messenger.mirrly.MirrlyConfig.getEffectiveGlassSaturation();
+        if (Math.abs(target - 3.0f) < 0.01f) {
+            return getSaturationX3RenderEffect();
+        }
+        if (cachedConfiguredSaturationEffect == null || Math.abs(cachedConfiguredSaturation - target) > 0.005f) {
+            cachedConfiguredSaturation = target;
+            cachedConfiguredSaturationEffect = createSaturationXRenderEffect(target);
+        }
+        return cachedConfiguredSaturationEffect;
+    }
+
     private static RenderEffect saturationUpX2Effect;
     private static RenderEffect saturationUpX3Effect;
     private static RenderEffect saturationUpX4Effect;

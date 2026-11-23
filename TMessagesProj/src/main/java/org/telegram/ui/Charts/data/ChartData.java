@@ -32,6 +32,11 @@ public class ChartData {
 
     public static final int FORMATTER_TON = 1;
     public static final int FORMATTER_XTR = 2;
+    public static final int FORMATTER_ENERGY_MAH_TENTHS = 10;
+    public static final int FORMATTER_ENERGY_PCT_TENTHS = 11;
+    public static final int FORMATTER_ENERGY_MW = 12;
+    public static final int FORMATTER_BATTERY_PCT = 13;
+    public static final int FORMATTER_DUAL_UNIT = 14;
 
     public int xTickFormatter = 0;
     public int xTooltipFormatter = 0;
@@ -42,7 +47,7 @@ public class ChartData {
     protected ChartData() {
     }
 
-    protected long timeStep;
+    public long timeStep;
 
     public ChartData(JSONObject jsonObject) throws JSONException {
         JSONArray columns = jsonObject.getJSONArray("columns");
@@ -79,12 +84,13 @@ public class ChartData {
 
         JSONObject colors = jsonObject.optJSONObject("colors");
         JSONObject names = jsonObject.optJSONObject("names");
+        JSONObject units = jsonObject.optJSONObject("units");
 
         try {
-            xTickFormatter = getFormatter(jsonObject.getString("xTickFormatter"));
-            yTickFormatter = getFormatter(jsonObject.getString("yTickFormatter"));
-            xTooltipFormatter = getFormatter(jsonObject.getString("xTooltipFormatter"));
-            yTooltipFormatter = getFormatter(jsonObject.getString("yTooltipFormatter"));
+            xTickFormatter = getFormatter(jsonObject.optString("xTickFormatter"));
+            yTickFormatter = getFormatter(jsonObject.optString("yTickFormatter"));
+            xTooltipFormatter = getFormatter(jsonObject.optString("xTooltipFormatter"));
+            yTooltipFormatter = getFormatter(jsonObject.optString("yTooltipFormatter"));
         } catch (Exception ignore) {}
 
         Pattern colorPattern = Pattern.compile("(.*)(#.*)");
@@ -108,11 +114,19 @@ public class ChartData {
                 line.name = names.getString(line.id);
             }
 
+            if (units != null) {
+                line.unitType = getFormatter(units.optString(line.id));
+            }
         }
     }
 
     public int getFormatter(String value) {
         if (TextUtils.isEmpty(value)) return 0;
+        if ("ENERGY_MAH_TENTHS".equals(value)) return FORMATTER_ENERGY_MAH_TENTHS;
+        if ("ENERGY_PCT_TENTHS".equals(value)) return FORMATTER_ENERGY_PCT_TENTHS;
+        if ("ENERGY_MW".equals(value)) return FORMATTER_ENERGY_MW;
+        if ("BATTERY_PCT".equals(value)) return FORMATTER_BATTERY_PCT;
+        if ("DUAL_UNIT".equals(value)) return FORMATTER_DUAL_UNIT;
         if (value.contains("TON")) return FORMATTER_TON;
         if (value.contains(StarsController.currency)) return FORMATTER_XTR;
         return 0;
@@ -166,7 +180,13 @@ public class ChartData {
     }
 
     public String getDayString(int i) {
-        return daysLookup[(int) ((x[i] - x[0]) / timeStep)];
+        if (daysLookup == null || daysLookup.length == 0 || x == null || i < 0 || i >= x.length || timeStep <= 0) {
+            return "";
+        }
+        int idx = (int) ((x[i] - x[0]) / timeStep);
+        if (idx < 0) idx = 0;
+        if (idx >= daysLookup.length) idx = daysLookup.length - 1;
+        return daysLookup[idx];
     }
 
     public int findStartIndex(float v) {
@@ -260,5 +280,6 @@ public class ChartData {
         public int colorKey;
         public int color = Color.BLACK;
         public int colorDark = Color.WHITE;
+        public int unitType = 0;
     }
 }

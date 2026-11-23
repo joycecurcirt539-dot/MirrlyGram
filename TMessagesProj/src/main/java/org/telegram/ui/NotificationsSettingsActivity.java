@@ -50,6 +50,7 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.mirrly.MirrlyConfig;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.tgnet.tl.TL_account;
@@ -68,6 +69,7 @@ import org.telegram.ui.Cells.TextDetailSettingsCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Cells.TextSettingsCell;
 import org.telegram.ui.Components.AlertsCreator;
+import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.utils.glass.BaseFragmentSimpleGlass;
@@ -231,6 +233,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
         resetNotificationsSectionRow = rowCount++;
 
         NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.notificationsSettingsUpdated);
+        NotificationCenter.getGlobalInstance().addWeakObserver(this, NotificationCenter.mirrlyVibrationSettingsChanged);
 
         getMessagesController().reloadReactionsNotifySettings();
 
@@ -475,6 +478,7 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
     public void onFragmentDestroy() {
         super.onFragmentDestroy();
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.notificationsSettingsUpdated);
+        NotificationCenter.getGlobalInstance().removeObserver(this, NotificationCenter.mirrlyVibrationSettingsChanged);
     }
 
     @Override
@@ -657,6 +661,10 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                 editor.putBoolean("EnableInAppSounds", !enabled);
                 editor.commit();
             } else if (position == inappVibrateRow) {
+                if (MirrlyConfig.isDisableAllVibrations()) {
+                    showGloballyDisabledVibrationBulletin();
+                    return;
+                }
                 SharedPreferences preferences = MessagesController.getNotificationsSettings(currentAccount);
                 SharedPreferences.Editor editor = preferences.edit();
                 enabled = preferences.getBoolean("EnableInAppVibrate", true);
@@ -774,6 +782,10 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                 editor.commit();
                 ApplicationLoader.startPushService();
             } else if (position == callsVibrateRow) {
+                if (MirrlyConfig.isDisableAllVibrations()) {
+                    showGloballyDisabledVibrationBulletin();
+                    return;
+                }
                 if (getParentActivity() == null) {
                     return;
                 }
@@ -998,10 +1010,31 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
         }
     }
 
+    private void showGloballyDisabledVibrationBulletin() {
+        if (!BulletinFactory.canShowBulletin(this)) {
+            return;
+        }
+        BulletinFactory.of(this).createSimpleBulletin(
+                R.raw.info,
+                LocaleController.getString(R.string.MirrlyVibrationDisableAll),
+                LocaleController.getString(R.string.MirrlySettingsChatsTitle),
+                () -> {
+                    if (!isFinishing() && !isFinished && getParentLayout() != null) {
+                        presentFragment(new MirrlyChatsSettingsActivity());
+                    }
+                }
+        ).show();
+    }
+
     @Override
     public void didReceivedNotification(int id, int account, Object... args) {
-        if (id == NotificationCenter.notificationsSettingsUpdated) {
-            adapter.notifyDataSetChanged();
+        if (id == NotificationCenter.notificationsSettingsUpdated || id == NotificationCenter.mirrlyVibrationSettingsChanged) {
+            if (id == NotificationCenter.mirrlyVibrationSettingsChanged) {
+                updateVibrate = true;
+            }
+            if (adapter != null) {
+                adapter.notifyDataSetChanged();
+            }
         }
     }
 
@@ -1089,7 +1122,11 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                     if (position == inappSoundRow) {
                         checkCell.setTextAndCheck(getString(R.string.InAppSounds), preferences.getBoolean("EnableInAppSounds", true), true);
                     } else if (position == inappVibrateRow) {
-                        checkCell.setTextAndCheck(getString(R.string.InAppVibrate), preferences.getBoolean("EnableInAppVibrate", true), true);
+                        if (MirrlyConfig.isDisableAllVibrations()) {
+                            checkCell.setTextAndValueAndCheck(getString(R.string.InAppVibrate), getString(R.string.MirrlyVibrationDisabledGloballyStatus), false, true, true);
+                        } else {
+                            checkCell.setTextAndCheck(getString(R.string.InAppVibrate), preferences.getBoolean("EnableInAppVibrate", true), true);
+                        }
                     } else if (position == inappPreviewRow) {
                         checkCell.setTextAndCheck(getString(R.string.InAppPreview), preferences.getBoolean("EnableInAppPreview", true), true);
                     } else if (position == inappPriorityRow) {
@@ -1247,17 +1284,21 @@ public class NotificationsSettingsActivity extends BaseFragment implements Notif
                         textCell.setTextAndValue(getString("VoipSettingsRingtone", R.string.VoipSettingsRingtone), value, updateRingtone, false);
                         updateRingtone = false;
                     } else if (position == callsVibrateRow) {
-                        int value = preferences.getInt("vibrate_calls", 0);
-                        if (value == 0) {
-                            textCell.setTextAndValue(getString("Vibrate", R.string.Vibrate), getString("VibrationDefault", R.string.VibrationDefault), updateVibrate, true);
-                        } else if (value == 1) {
-                            textCell.setTextAndValue(getString("Vibrate", R.string.Vibrate), getString("Short", R.string.Short), updateVibrate, true);
-                        } else if (value == 2) {
-                            textCell.setTextAndValue(getString("Vibrate", R.string.Vibrate), getString("VibrationDisabled", R.string.VibrationDisabled), updateVibrate, true);
-                        } else if (value == 3) {
-                            textCell.setTextAndValue(getString("Vibrate", R.string.Vibrate), getString("Long", R.string.Long), updateVibrate, true);
-                        } else if (value == 4) {
-                            textCell.setTextAndValue(getString("Vibrate", R.string.Vibrate), getString("OnlyIfSilent", R.string.OnlyIfSilent), updateVibrate, true);
+                        if (MirrlyConfig.isDisableAllVibrations()) {
+                            textCell.setTextAndValue(getString("Vibrate", R.string.Vibrate), getString(R.string.MirrlyVibrationDisabledGloballyStatus), updateVibrate, true);
+                        } else {
+                            int value = preferences.getInt("vibrate_calls", 0);
+                            if (value == 0) {
+                                textCell.setTextAndValue(getString("Vibrate", R.string.Vibrate), getString("VibrationDefault", R.string.VibrationDefault), updateVibrate, true);
+                            } else if (value == 1) {
+                                textCell.setTextAndValue(getString("Vibrate", R.string.Vibrate), getString("Short", R.string.Short), updateVibrate, true);
+                            } else if (value == 2) {
+                                textCell.setTextAndValue(getString("Vibrate", R.string.Vibrate), getString("VibrationDisabled", R.string.VibrationDisabled), updateVibrate, true);
+                            } else if (value == 3) {
+                                textCell.setTextAndValue(getString("Vibrate", R.string.Vibrate), getString("Long", R.string.Long), updateVibrate, true);
+                            } else if (value == 4) {
+                                textCell.setTextAndValue(getString("Vibrate", R.string.Vibrate), getString("OnlyIfSilent", R.string.OnlyIfSilent), updateVibrate, true);
+                            }
                         }
                         updateVibrate = false;
                     } else if (position == repeatRow) {

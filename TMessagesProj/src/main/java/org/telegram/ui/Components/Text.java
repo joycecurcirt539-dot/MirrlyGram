@@ -21,9 +21,11 @@ import android.util.Log;
 import android.view.View;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.utils.glass.GlassContrastHelper;
 
 public class Text {
 
@@ -256,6 +258,45 @@ public class Text {
     private Matrix ellipsizeMatrix;
     private Paint ellipsizePaint;
     private int vertPad;
+    private boolean adaptiveGradientActive;
+    private LinearGradient adaptiveGradientShader;
+    private Matrix adaptiveGradientMatrix;
+    private int[] adaptiveGradientColors;
+    private float[] adaptiveGradientPositions;
+    private int adaptiveGradientWidth;
+
+    public void setAdaptiveHorizontalGradient(@Nullable GlassContrastHelper.HorizontalAdaptiveBand band) {
+        if (band == null || !band.useGradient || band.gradientWidth <= 0) {
+            adaptiveGradientActive = false;
+            return;
+        }
+        final int n = GlassContrastHelper.HorizontalAdaptiveBand.SAMPLE_COUNT;
+        boolean changed = !adaptiveGradientActive || adaptiveGradientShader == null || Math.abs(adaptiveGradientWidth - band.gradientWidth) > 2;
+        if (adaptiveGradientColors == null) {
+            adaptiveGradientColors = new int[n];
+            adaptiveGradientPositions = new float[n];
+            changed = true;
+        }
+        if (!changed) {
+            for (int i = 0; i < n; i++) {
+                if (adaptiveGradientColors[i] != band.colors[i]) {
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        this.adaptiveGradientActive = true;
+        if (changed) {
+            System.arraycopy(band.colors, 0, adaptiveGradientColors, 0, n);
+            System.arraycopy(band.positions, 0, adaptiveGradientPositions, 0, n);
+            adaptiveGradientWidth = Math.max(1, band.gradientWidth);
+            adaptiveGradientShader = new LinearGradient(0f, 0f, adaptiveGradientWidth, 0f,
+                    adaptiveGradientColors, adaptiveGradientPositions, Shader.TileMode.CLAMP);
+            if (adaptiveGradientMatrix == null) {
+                adaptiveGradientMatrix = new Matrix();
+            }
+        }
+    }
 
     public Text setVerticalClipPadding(int pad) {
         vertPad = pad;
@@ -277,11 +318,18 @@ public class Text {
         }
         canvas.save();
         canvas.translate(-left, 0);
+        final Shader savedShader = paint.getShader();
+        if (adaptiveGradientActive && adaptiveGradientShader != null) {
+            adaptiveGradientMatrix.setTranslate(left, 0f);
+            adaptiveGradientShader.setLocalMatrix(adaptiveGradientMatrix);
+            paint.setShader(adaptiveGradientShader);
+        }
         if (hackClipBounds) {
             canvas.drawText(layout.getText().toString(), 0, -paint.getFontMetricsInt().ascent, paint);
         } else {
             layout.draw(canvas);
         }
+        paint.setShader(savedShader);
         if (drawAnimatedEmojis) {
             if (animatedEmojisColorFilter == null || paint.getColor() != animatedEmojisColorFilterColor) {
                 animatedEmojisColorFilter = new PorterDuffColorFilter(animatedEmojisColorFilterColor = paint.getColor(), PorterDuff.Mode.SRC_IN);

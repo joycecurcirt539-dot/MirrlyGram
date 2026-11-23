@@ -353,20 +353,24 @@ public class ChannelAdminLogActivity extends BaseFragment implements Notificatio
             glassBackgroundSourceFrostedRenderNode.setScrollableNoiseSuppressor(scrollableViewNoiseSuppressor, DownscaleScrollableNoiseSuppressor.DRAW_FROSTED_GLASS);
             glassBackgroundSourceFrostedRenderNode.setUnderSource(navbarContentSourceWallpaper);
 
-            if (LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS)) {
+            if (Build.VERSION.SDK_INT >= 33) {
                 glassBackgroundSourceRenderNode = new GlassSourceRenderNode(navbarContentSourceWallpaper);
                 glassBackgroundSourceRenderNode.setScrollableNoiseSuppressor(scrollableViewNoiseSuppressor, DownscaleScrollableNoiseSuppressor.DRAW_GLASS);
                 glassBackgroundSourceRenderNode.setUnderSource(navbarContentSourceWallpaper);
-                glassBackgroundDrawableFactory = new BlurredBackgroundDrawableViewFactory(glassBackgroundSourceRenderNode);
+                glassBackgroundDrawableFactory = new BlurredBackgroundDrawableViewFactory(
+                        glassBackgroundSourceRenderNode,
+                        glassBackgroundSourceFrostedRenderNode,
+                        navbarContentSourceWallpaper
+                );
                 glassBackgroundDrawableFactory.setGlassEngine(glassEngine);
                 glassBackgroundDrawableFactory.setOutset(LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) ? dp(8) : dp(48));
                 glassBackgroundDrawableFactory.setLiquidGlassEffectAllowed(true);
-                recommendedAdditionalSizeY = 0;
+                recommendedAdditionalSizeY = LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) ? 0 : dp(48);
             } else {
                 glassBackgroundSourceRenderNode = null;
                 glassBackgroundDrawableFactory = new BlurredBackgroundDrawableViewFactory(glassBackgroundSourceFrostedRenderNode);
                 glassBackgroundDrawableFactory.setGlassEngine(glassEngine);
-                glassBackgroundDrawableFactory.setOutset(LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) ? dp(8) : dp(48));
+                glassBackgroundDrawableFactory.setOutset(dp(48));
                 recommendedAdditionalSizeY = dp(48);
             }
         } else {

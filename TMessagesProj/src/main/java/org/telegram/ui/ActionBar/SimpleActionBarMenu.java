@@ -11,8 +11,12 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.LinearLayout;
 
+import androidx.annotation.Nullable;
+
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.RLottieDrawable;
+import org.telegram.utils.glass.GlassContrastHelper;
+import org.telegram.utils.glass.source.GlassSource;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -149,6 +153,58 @@ public class SimpleActionBarMenu extends LinearLayout {
                     item.textView.setTextColor(color);
                 }
                 item.setBackground(Theme.createSelectorDrawable(selector, item.textView != null ? 5 : 1));
+            }
+        }
+    }
+
+    public void applyAdaptiveItemsColor(int color) {
+        for (int a = 0, N = getChildCount(); a < N; a++) {
+            final View view = getChildAt(a);
+            if (view instanceof ActionBarMenuItem) {
+                final ActionBarMenuItem item = (ActionBarMenuItem) view;
+                item.setIconColor(color);
+                if (item.textView != null) {
+                    item.textView.setTextColor(color);
+                }
+            }
+        }
+    }
+
+    public void applyAdaptiveItemsContrast(
+            @Nullable ViewGroup sampleTarget,
+            int glassBgColor,
+            int baseIconColor,
+            @Nullable GlassSource backdropSource,
+            @Nullable Drawable backdropDrawable,
+            int viewportW,
+            int viewportH,
+            float fallbackBgLuma,
+            @Nullable Theme.ResourcesProvider rp,
+            boolean liquidShaderActive
+    ) {
+        for (int a = 0, N = getChildCount(); a < N; a++) {
+            final View view = getChildAt(a);
+            if (!(view instanceof ActionBarMenuItem) || view.getVisibility() != VISIBLE || view.getAlpha() <= 0.01f) {
+                continue;
+            }
+            final int color = GlassContrastHelper.estimateIconAdaptiveColor(
+                    view,
+                    sampleTarget,
+                    glassBgColor,
+                    baseIconColor,
+                    backdropSource,
+                    backdropDrawable,
+                    viewportW,
+                    viewportH,
+                    fallbackBgLuma,
+                    rp,
+                    false,
+                    liquidShaderActive
+            );
+            final ActionBarMenuItem item = (ActionBarMenuItem) view;
+            item.setIconColor(color);
+            if (item.textView != null) {
+                item.textView.setTextColor(color);
             }
         }
     }

@@ -1220,14 +1220,18 @@ public class RecyclerListView extends RecyclerView implements IBlur3Capture {
                     if (onItemLongClickListener != null) {
                         if (onItemLongClickListener.onItemClick(currentChildView, currentChildPosition)) {
                             try {
-                                child.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                                if (!org.telegram.messenger.mirrly.MirrlyHaptics.isDisabled()) {
+                                    child.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                                }
                             } catch (Exception ignored) {}
                             child.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_LONG_CLICKED);
                         }
                     } else {
                         if (onItemLongClickListenerExtended.onItemClick(currentChildView, currentChildPosition, event.getX() - currentChildView.getX(), event.getY() - currentChildView.getY())) {
                             try {
-                                child.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                                if (!org.telegram.messenger.mirrly.MirrlyHaptics.isDisabled()) {
+                                    child.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+                                }
                             } catch (Exception ignored) {}
                             child.sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_LONG_CLICKED);
                             longPressCalled = true;
@@ -1561,6 +1565,7 @@ public class RecyclerListView extends RecyclerView implements IBlur3Capture {
                 if (scrollingByUser) {
                     scrolledByUserOnce = true;
                 }
+                updateHighFrameRateCategory(newState != SCROLL_STATE_IDLE);
             }
 
             @Override
@@ -2806,6 +2811,7 @@ public class RecyclerListView extends RecyclerView implements IBlur3Capture {
 
     @Override
     protected void onDetachedFromWindow() {
+        updateHighFrameRateCategory(false);
         super.onDetachedFromWindow();
         selectorPosition = NO_POSITION;
         selectorView = null;
@@ -3234,6 +3240,57 @@ public class RecyclerListView extends RecyclerView implements IBlur3Capture {
             captureChild(canvas, child, drawingTime);
             ignoreClipChild = false;
         }
+        if (!skipDrawSection) {
+            if (sectionsType == SECTIONS_TYPE_STICKY_HEADERS) {
+                if (sectionsAdapter != null && headers != null && !headers.isEmpty()) {
+                    for (int a = 0; a < headers.size(); a++) {
+                        View header = headers.get(a);
+                        Object tag = header.getTag();
+                        if (!(tag instanceof Integer)) {
+                            continue;
+                        }
+                        int top = (Integer) tag;
+                        int left = LocaleController.isRTL ? getWidth() - header.getWidth() : 0;
+                        int right = left + getWidth();
+                        int bottom = top + header.getMeasuredHeight();
+                        if (!position.intersects(left, top, right, bottom)) {
+                            continue;
+                        }
+                        int saveCount = canvas.save();
+                        canvas.translate(left, top);
+                        canvas.clipRect(0, 0, getWidth(), header.getMeasuredHeight());
+                        header.draw(canvas);
+                        canvas.restoreToCount(saveCount);
+                    }
+                }
+            } else if (sectionsType == SECTIONS_TYPE_DATE) {
+                if (sectionsAdapter != null && pinnedHeader != null && pinnedHeader.getAlpha() != 0) {
+                    Object tag = pinnedHeader.getTag();
+                    if (tag instanceof Integer) {
+                        int top = (Integer) tag;
+                        int left = LocaleController.isRTL ? getWidth() - pinnedHeader.getWidth() : 0;
+                        int right = left + getWidth();
+                        int bottom = top + pinnedHeader.getMeasuredHeight();
+                        if (position.intersects(left, top, right, bottom)) {
+                            int saveCount = canvas.save();
+                            canvas.translate(left, top);
+                            canvas.clipRect(0, 0, getWidth(), pinnedHeader.getMeasuredHeight());
+                            pinnedHeader.draw(canvas);
+                            canvas.restoreToCount(saveCount);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean highFrameRateActive;
+
+    private void updateHighFrameRateCategory(boolean active) {
+        if (highFrameRateActive != active) {
+            highFrameRateActive = active;
+            AndroidUtilities.setHighFrameRateCategory(this, active);
+        }
     }
 
     protected void captureChild(Canvas canvas, View child, long drawingTime) {
@@ -3277,6 +3334,42 @@ public class RecyclerListView extends RecyclerView implements IBlur3Capture {
             }
 
             builder.add(child);
+        }
+        if (!skipDrawSection) {
+            if (sectionsType == SECTIONS_TYPE_STICKY_HEADERS) {
+                if (sectionsAdapter != null && headers != null && !headers.isEmpty()) {
+                    for (int a = 0; a < headers.size(); a++) {
+                        View header = headers.get(a);
+                        Object tag = header.getTag();
+                        if (!(tag instanceof Integer)) {
+                            continue;
+                        }
+                        int top = (Integer) tag;
+                        int left = LocaleController.isRTL ? getWidth() - header.getWidth() : 0;
+                        int right = left + getWidth();
+                        int bottom = top + header.getMeasuredHeight();
+                        if (!position.intersects(left, top, right, bottom)) {
+                            continue;
+                        }
+                        builder.add(header);
+                        builder.add(top);
+                    }
+                }
+            } else if (sectionsType == SECTIONS_TYPE_DATE) {
+                if (sectionsAdapter != null && pinnedHeader != null && pinnedHeader.getAlpha() != 0) {
+                    Object tag = pinnedHeader.getTag();
+                    if (tag instanceof Integer) {
+                        int top = (Integer) tag;
+                        int left = LocaleController.isRTL ? getWidth() - pinnedHeader.getWidth() : 0;
+                        int right = left + getWidth();
+                        int bottom = top + pinnedHeader.getMeasuredHeight();
+                        if (position.intersects(left, top, right, bottom)) {
+                            builder.add(pinnedHeader);
+                            builder.add(top);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -3968,6 +4061,22 @@ public class RecyclerListView extends RecyclerView implements IBlur3Capture {
         return sectionsItemDecoration != null && sectionsItemDecoration.isSectionItem.run(view);
     }
 
+    public boolean isVisualSectionChild(@Nullable View view) {
+        return view != null && hasSections() && isVisualSectionItem(view);
+    }
+
+    public int getSectionHorizontalPadding() {
+        return sectionPadding > 0 ? sectionPadding : dp(12);
+    }
+
+    public int getSectionSurfaceColor() {
+        return getSectionColorForDecoration();
+    }
+
+    public int getSectionsBackdropColor() {
+        return getSectionsBackgroundColorForDecoration();
+    }
+
     public static class SectionsDrawer {
 
         public static class Section {
@@ -4134,5 +4243,21 @@ public class RecyclerListView extends RecyclerView implements IBlur3Capture {
 
             return new float[]{drawFrom, drawTo, topRadius, bottomRadius, alpha};
         }
+    }
+
+    @Override
+    public boolean performHapticFeedback(int feedbackConstant) {
+        if (org.telegram.messenger.mirrly.MirrlyHaptics.isDisabled()) {
+            return false;
+        }
+        return super.performHapticFeedback(feedbackConstant);
+    }
+
+    @Override
+    public boolean performHapticFeedback(int feedbackConstant, int flags) {
+        if (org.telegram.messenger.mirrly.MirrlyHaptics.isDisabled()) {
+            return false;
+        }
+        return super.performHapticFeedback(feedbackConstant, flags);
     }
 }

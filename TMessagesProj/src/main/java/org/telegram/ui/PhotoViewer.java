@@ -313,6 +313,9 @@ import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
 import org.telegram.ui.Components.blur3.DownscaleScrollableNoiseSuppressor;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
+import org.telegram.utils.glass.GlassEngine;
+import org.telegram.utils.glass.GlassSettings;
+import org.telegram.utils.glass.fade.GlassFadeBlurredDrawable;
 import org.telegram.utils.glass.source.GlassSource;
 import org.telegram.ui.Components.blur3.utils.Blur3Utils;
 import org.telegram.ui.Components.chat.ViewPositionWatcher;
@@ -880,11 +883,12 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
 
     private GlassSource blurredBackgroundSource;
 
-    private interface GlassSourceWithDrawables extends GlassSource, BlurredBackgroundDrawableViewFactory.DrawableOwner {
+    private interface GlassSourceWithDrawables extends GlassSource, BlurredBackgroundDrawableViewFactory.DrawableOwner, GlassFadeBlurredDrawable.GlassFadeDownsampledSource {
     }
     private BlurredBackgroundDrawableViewFactory iBlur3FactoryFrostedLiquidGlass;
     private ReferenceList<BlurredBackgroundDrawable> iBlur3BlurredDrawables = new ReferenceList<>();
     private ReferenceList<View> glassAttachedViews;
+    private Runnable glassBlurInvalidator;
 
     public BlurringShader.BlurManager blurManager;
     private BlurringShader.StoryBlurDrawer shadowBlurer;
@@ -4792,6 +4796,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             @Override
             public BlurredBackgroundDrawable createDrawable() {
                 final BlurredBackgroundDrawable d = new BlurredBackgroundDrawable(this);
+                d.setExcludeFromGlobalLiquidGlass(!isPhotoViewerLiquidGlassSupported());
                 iBlur3BlurredDrawables.add(d);
                 return d;
             }
@@ -4800,15 +4805,50 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             public void draw(@NonNull Canvas canvas, float left, float top, float right, float bottom) {
                 canvas.save();
                 canvas.clipRect(left, top, right, bottom);
-                drawCaptionBlur(canvas, blur, 0xFF262626, 0x33000000, false, true, true);
+                final boolean useGlass = isPhotoViewerLiquidGlassActive() && !usedSurfaceView;
+                drawCaptionBlur(canvas, blur, 0xFF262626, 0x33000000, false, true, true, useGlass);
                 canvas.drawColor(0x26000000);
+                canvas.restore();
+            }
+
+            @Override
+            public boolean isDownsampledSourceSupported() {
+                return BLUR_RENDERNODE() && isPhotoViewerLiquidGlassActive() && !usedSurfaceView;
+            }
+
+            @Override
+            public int getDownsample() {
+                return 3;
+            }
+
+            @Override
+            public int getDownsampleOffsetX() {
+                return 0;
+            }
+
+            @Override
+            public int getDownsampleOffsetY() {
+                return 0;
+            }
+
+            @Override
+            public void drawDownsampled(@NonNull Canvas canvas, @NonNull RectF boundsRelativeRoot, int targetDownsample, float targetOriginX, float targetOriginY) {
+                canvas.save();
+                canvas.scale(1f / targetDownsample, 1f / targetDownsample);
+                canvas.translate(-targetOriginX, -targetOriginY);
+                draw(canvas, boundsRelativeRoot.left, boundsRelativeRoot.top, boundsRelativeRoot.right, boundsRelativeRoot.bottom);
                 canvas.restore();
             }
         };
         glassAttachedViews = new ReferenceList<>();
         iBlur3BlurredDrawables = new ReferenceList<>();
+        glassBlurInvalidator = () -> {
+            if (isVisible && animationInProgress == 0 && (stickerMakerView == null || !stickerMakerView.isThanosInProgress)) {
+                invalidateAllGlassAttachedViews();
+            }
+        };
+        blurManager.attach(glassBlurInvalidator);
         iBlur3FactoryFrostedLiquidGlass = new BlurredBackgroundDrawableViewFactory(blurredBackgroundSource);
-        // iBlur3FactoryFrostedLiquidGlass.setLiquidGlassEffectAllowed(true);
         iBlur3FactoryFrostedLiquidGlass.setSourceRootView(new ViewPositionWatcher(containerView), containerView);
         iBlur3FactoryFrostedLiquidGlass.setLinkedViewsRef(glassAttachedViews);
 
@@ -5422,11 +5462,8 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                             if (obj.isSent()) {
                                 closePhoto(false, false);
                                 ArrayList<Integer> arr = new ArrayList<>();
-                                if (slideshowMessageId != 0) {
-                                    arr.add(slideshowMessageId);
-                                } else {
-                                    arr.add(obj.getId());
-                                }
+                                int targetMsgId = slideshowMessageId != 0 ? slideshowMessageId : obj.getId();
+                                arr.add(targetMsgId);
 
                                 ArrayList<Long> random_ids = null;
                                 TLRPC.EncryptedChat encryptedChat = null;
@@ -5434,6 +5471,14 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
                                     random_ids = new ArrayList<>();
                                     random_ids.add(obj.messageOwner.random_id);
                                     encryptedChat = MessagesController.getInstance(currentAccount).getEncryptedChat(DialogObject.getEncryptedChatId(obj.getDialogId()));
+                                }
+
+                                org.telegram.messenger.mirrly.MirrlyDeletedStorage pvDeletedStorage = org.telegram.messenger.mirrly.MirrlyDeletedStorage.getInstance(currentAccount);
+                                if (obj.isMirrlyDeleted()) {
+                                    pvDeletedStorage.markForcePhysicalDelete(obj.getDialogId(), targetMsgId);
+                                    pvDeletedStorage.deleteRecordByUid(org.telegram.messenger.mirrly.MirrlyDeletedStorage.buildUid(obj.getDialogId(), targetMsgId));
+                                } else if (org.telegram.messenger.mirrly.MirrlyConfig.isSaveDeletedMessages() && obj.getDialogId() != UserConfig.getInstance(currentAccount).getClientUserId()) {
+                                    pvDeletedStorage.markPendingLocalDeleteAsKeepByMe(obj.getDialogId(), targetMsgId);
                                 }
 
                                 MessagesController.getInstance(currentAccount).deleteMessages(arr, random_ids, encryptedChat, obj.getDialogId(), obj.getQuickReplyId(), deleteForAll[0], obj.getChatMode());
@@ -18638,6 +18683,14 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         }
         removeObservers();
         releasePlayer(false);
+        if (blurManager != null && glassBlurInvalidator != null) {
+            blurManager.detach(glassBlurInvalidator);
+            glassBlurInvalidator = null;
+        }
+        renderNode = null;
+        renderNodeBlurred = null;
+        renderNodeGlassed = null;
+        matrixRenderNodes.clear();
         try {
             if (windowView.getParent() != null) {
                 WindowManager wm = (WindowManager) parentActivity.getSystemService(Context.WINDOW_SERVICE);
@@ -22014,10 +22067,24 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
             && !AndroidUtilities.makingGlobalBlurBitmap;
     }
 
+    private static boolean isPhotoViewerLiquidGlassSupported() {
+        return Build.VERSION.SDK_INT >= 33
+            && SharedConfig.useNewBlur
+            && SharedConfig.getDevicePerformanceClass() >= SharedConfig.PERFORMANCE_CLASS_HIGH;
+    }
+
+    private boolean isPhotoViewerLiquidGlassActive() {
+        if (!isPhotoViewerLiquidGlassSupported() || !BLUR_RENDERNODE()) {
+            return false;
+        }
+        final GlassSettings gs = GlassEngine.getCurrentGlassSettings();
+        return gs.isBlurEnabled && gs.isLiquidGlassEnabled && gs.isLiquidGlassEverywhere;
+    }
+
 
     @RequiresApi(api = Build.VERSION_CODES.S)
     private RenderNode getRenderNodeBlurred(boolean glass) {
-        if (renderNode == null) {
+        if (renderNode == null || renderNode.getWidth() <= 0 || renderNode.getHeight() <= 0 || !renderNode.hasDisplayList()) {
             return null;
         }
 
@@ -22068,6 +22135,7 @@ public class PhotoViewer implements NotificationCenter.NotificationCenterDelegat
         if (renderNode == null) {
             renderNode = new RenderNode("pv_mat_" + hash + "_" + glass);
             renderNode.setRenderEffect(RenderEffect.createColorFilterEffect(new ColorMatrixColorFilter(colorMatrix)));
+            matrixRenderNodes.put(hash, renderNode);
         }
 
         boolean needUpdateDisplayList = !renderNode.hasDisplayList();

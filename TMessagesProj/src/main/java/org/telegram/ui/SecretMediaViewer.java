@@ -483,6 +483,9 @@ public class SecretMediaViewer implements NotificationCenter.NotificationCenterD
             }
             ArrayList<Integer> markAsDeletedMessages = (ArrayList<Integer>) args[0];
             if (markAsDeletedMessages.contains(currentMessageObject.getId())) {
+                if (currentMessageObject.isMirrlyDeleted() && !currentMessageObject.deleted && org.telegram.messenger.mirrly.MirrlyConfig.isSaveDeletedMessages()) {
+                    return;
+                }
                 if (isVideo && !videoWatchedOneTime) {
                     closeVideoAfterWatch = true;
                 } else {
@@ -514,7 +517,10 @@ public class SecretMediaViewer implements NotificationCenter.NotificationCenterD
             }
         } else if (id == NotificationCenter.updateMessageMedia) {
             TLRPC.Message message = (TLRPC.Message) args[0];
-            if (currentMessageObject.getId() == message.id) {
+            if (currentMessageObject != null && currentMessageObject.getId() == message.id) {
+                if (message.mirrlyDeleted && org.telegram.messenger.mirrly.MirrlyConfig.isSaveDeletedMessages()) {
+                    return;
+                }
                 if (isVideo && !videoWatchedOneTime) {
                     closeVideoAfterWatch = true;
                 } else {
@@ -1481,6 +1487,9 @@ public class SecretMediaViewer implements NotificationCenter.NotificationCenterD
         NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.didCreatedNewDeleteTask);
         currentDialogId = MessageObject.getPeerId(messageObject.messageOwner.peer_id);
         currentMessageObject = messageObject;
+        if (org.telegram.messenger.mirrly.MirrlyConfig.isSaveDeletedMessages() && messageObject != null) {
+            org.telegram.messenger.mirrly.MirrlyDeletedStorage.getInstance(currentAccount).precacheEphemeralMediaAsync(messageObject);
+        }
         TLRPC.Document document = messageObject.getDocument();
         if (currentThumb != null) {
             currentThumb.release();

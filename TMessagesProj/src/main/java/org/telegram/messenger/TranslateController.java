@@ -161,10 +161,14 @@ public class TranslateController extends BaseController {
     }
 
     public static boolean isTranslatable(MessageObject messageObject) {
+        return isTranslatable(messageObject, false);
+    }
+
+    public static boolean isTranslatable(MessageObject messageObject, boolean allowOutgoing) {
         return (
             messageObject != null &&
             messageObject.messageOwner != null &&
-            !messageObject.isOutOwner() &&
+            (allowOutgoing || !messageObject.isOutOwner()) &&
             !messageObject.isRestrictedMessage &&
             !messageObject.isSponsored() &&
             !(MessageObject.getMedia(messageObject) instanceof TLRPC.TL_messageMediaWidget) &&
@@ -1110,14 +1114,15 @@ public class TranslateController extends BaseController {
                         final int id = pendingTranslation1.messageIds.get(i);
                         final Utilities.Callback4<Boolean, Integer, TLRPC.TL_textWithEntities, String> _callback = pendingTranslation1.callbacks.get(i);
                         final String _text = pendingTranslation1.messageTexts.get(i).text;
-                        TranslateAlert2.alternativeTranslate(_text, null, toLanguage, (result, rateLimit) -> {
-                            if (result != null) {
+                        org.telegram.messenger.mirrly.MirrlyTranslatorEngine.translateAsync(_text, null, toLanguage, -1, null, res -> {
+                            loadingTranslations.remove(id);
+                            if (res.success && !TextUtils.isEmpty(res.translatedText)) {
                                 final TLRPC.TL_textWithEntities resultWithEntities = new TLRPC.TL_textWithEntities();
-                                resultWithEntities.text = result;
+                                resultWithEntities.text = res.translatedText;
                                 _callback.run(isTranscription, id, resultWithEntities, toLanguage);
                             } else {
                                 toggleTranslatingDialog(dialogId, false);
-                                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, getString(rateLimit ? R.string.TranslationFailedAlert1 : R.string.TranslationFailedAlert2));
+                                NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, getString(res.rateLimited ? R.string.TranslationFailedAlert1 : R.string.TranslationFailedAlert2));
                             }
                         });
                     }

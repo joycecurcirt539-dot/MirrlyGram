@@ -58,15 +58,18 @@ public class NotificationsService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
-        acquireShortWakeLock(8_000L);
+        long wakeLockMs = org.telegram.messenger.mirrly.MirrlyPowerPolicy.getEffectivePushWakeLockTimeoutMs();
+        acquireShortWakeLock(wakeLockMs);
         scheduleKeepAliveAlarm(this, true);
         ApplicationLoader.postInitApplication();
         org.telegram.messenger.mirrly.MirrlyEngineController.ensureStarted();
         org.telegram.messenger.mirrly.MirrlyEngineController.notifyNetworkState();
         boolean pushConnPref = preferences.getBoolean("pushConnection", true);
+        int activeAccounts = 0;
         for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
             try {
                 if (UserConfig.getInstance(a).isClientActivated()) {
+                    activeAccounts++;
                     ConnectionsManager cm = ConnectionsManager.getInstance(a);
                     if (pushConnPref || cm.isPushConnectionEnabled()) {
                         cm.setPushConnectionEnabled(true);
@@ -77,6 +80,9 @@ public class NotificationsService extends Service {
                 FileLog.e(t);
             }
         }
+        org.telegram.messenger.mirrly.MirrlyPowerTelemetry.recordPushWakeup(ApplicationLoader.isScreenOn, activeAccounts);
+        org.telegram.messenger.mirrly.MirrlyPowerTelemetry.recordPushWakeLockMs(wakeLockMs, ApplicationLoader.isScreenOn);
+        org.telegram.messenger.mirrly.MirrlyPowerTelemetry.sampleFromServiceAsync();
         return START_STICKY;
     }
 
@@ -119,7 +125,11 @@ public class NotificationsService extends Service {
                 am.cancel(pendingIntent);
                 return;
             }
-            long triggerAt = SystemClock.elapsedRealtime() + KEEPALIVE_INTERVAL_MS;
+            long intervalMs = org.telegram.messenger.mirrly.MirrlyPowerPolicy.getEffectivePushKeepAliveIntervalMs();
+            if (intervalMs < 60_000L) {
+                intervalMs = KEEPALIVE_INTERVAL_MS;
+            }
+            long triggerAt = SystemClock.elapsedRealtime() + intervalMs;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pendingIntent);
             } else {

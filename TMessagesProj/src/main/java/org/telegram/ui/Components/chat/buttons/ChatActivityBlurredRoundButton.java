@@ -99,18 +99,42 @@ public class ChatActivityBlurredRoundButton extends FrameLayout implements Facto
     }
 
     private int appliedIconColor;
+    private boolean hasAppliedIconColor;
+    private android.graphics.ColorFilter cachedIconColorFilter;
+    private float lastAdaptiveInvertFactor = -1f;
 
     public void setIconColor(int color) {
         if (imageView == null) {
             return;
         }
+        if (hasAppliedIconColor && appliedIconColor == color && cachedIconColorFilter != null) {
+            return;
+        }
+        hasAppliedIconColor = true;
         appliedIconColor = color;
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            imageView.setColorFilter(new BlendModeColorFilter(color, BlendMode.SRC_IN));
+            cachedIconColorFilter = new BlendModeColorFilter(color, BlendMode.SRC_IN);
         } else {
-            imageView.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
+            cachedIconColorFilter = new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN);
         }
+        imageView.setColorFilter(cachedIconColorFilter);
+    }
+
+    public void applyAdaptiveGlassContrast(float invertFactor) {
+        final float clamped = Math.max(0f, Math.min(1f, invertFactor));
+        if (lastAdaptiveInvertFactor >= 0f && Math.abs(lastAdaptiveInvertFactor - clamped) < 0.008f) {
+            return;
+        }
+        lastAdaptiveInvertFactor = clamped;
+        final int baseColor = Theme.getColor(Theme.key_glass_defaultIcon, resourcesProvider);
+        final int adapted = org.telegram.utils.glass.GlassContrastHelper.blendAdaptiveIconColor(baseColor, clamped);
+        setIconColor(adapted);
+    }
+
+    @Nullable
+    public BlurredBackgroundDrawable getBlurredBackgroundDrawable() {
+        return backgroundDrawable;
     }
 
     @Override

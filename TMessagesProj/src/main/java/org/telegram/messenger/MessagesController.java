@@ -1776,7 +1776,11 @@ public class MessagesController extends BaseController implements NotificationCe
         channelRevenueWithdrawalEnabled = mainPreferences.getBoolean("channelRevenueWithdrawalEnabled", false);
         newNoncontactPeersRequirePremiumWithoutOwnpremium = mainPreferences.getBoolean("newNoncontactPeersRequirePremiumWithoutOwnpremium", false);
         reactionsUniqMax = mainPreferences.getInt("reactionsUniqMax", 11);
-        premiumManageSubscriptionUrl = mainPreferences.getString("premiumManageSubscriptionUrl", ApplicationLoader.isStandaloneBuild() ? "https://t.me/premiumbot?start=status" : "https://play.google.com/store/account/subscriptions?sku=telegram_premium&package=org.telegram.messenger");
+        final boolean invoiceBilling = ApplicationLoader.isStandaloneBuild() || BuildVars.useInvoiceBilling();
+        premiumManageSubscriptionUrl = mainPreferences.getString("premiumManageSubscriptionUrl", invoiceBilling ? "https://t.me/premiumbot?start=status" : "https://play.google.com/store/account/subscriptions?sku=telegram_premium&package=org.telegram.messenger");
+        if (invoiceBilling && premiumManageSubscriptionUrl != null && premiumManageSubscriptionUrl.startsWith("https://play.google.com/store/account/subscriptions")) {
+            premiumManageSubscriptionUrl = "https://t.me/premiumbot?start=status";
+        }
         androidDisableRoundCamera2 = mainPreferences.getBoolean("androidDisableRoundCamera2", true);
         storiesPinnedToTopCountMax = mainPreferences.getInt("storiesPinnedToTopCountMax", 3);
         showAnnualPerMonth = mainPreferences.getBoolean("showAnnualPerMonth", false);
@@ -4449,8 +4453,12 @@ public class MessagesController extends BaseController implements NotificationCe
                 case "premium_manage_subscription_url": {
                     if (value.value instanceof TLRPC.TL_jsonString) {
                         TLRPC.TL_jsonString str = (TLRPC.TL_jsonString) value.value;
-                        if (!TextUtils.equals(str.value, premiumManageSubscriptionUrl)) {
-                            premiumManageSubscriptionUrl = str.value;
+                        String nextUrl = str.value;
+                        if (BuildVars.useInvoiceBilling() && nextUrl != null && nextUrl.startsWith("https://play.google.com/store/account/subscriptions")) {
+                            nextUrl = "https://t.me/premiumbot?start=status";
+                        }
+                        if (!TextUtils.equals(nextUrl, premiumManageSubscriptionUrl)) {
+                            premiumManageSubscriptionUrl = nextUrl;
                             editor.putString("premiumManageSubscriptionUrl", premiumManageSubscriptionUrl);
                             changed = true;
                         }
@@ -7454,6 +7462,56 @@ public class MessagesController extends BaseController implements NotificationCe
         return array.get(uid);
     }
 
+    private static final class SelfRankEntry {
+        final String rank;
+        final int date;
+        final boolean authoritative;
+
+        SelfRankEntry(String rank, int date, boolean authoritative) {
+            this.rank = rank;
+            this.date = date;
+            this.authoritative = authoritative;
+        }
+    }
+
+    private final java.util.concurrent.ConcurrentHashMap<Long, SelfRankEntry> selfChatRanks = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public void recordSelfChatRank(long chatId, String rank, int date, boolean authoritative) {
+        if (chatId <= 0) return;
+        final String normalized = TextUtils.isEmpty(rank) ? null : rank;
+        for (;;) {
+            final SelfRankEntry entry = selfChatRanks.get(chatId);
+            if (entry == null) {
+                final SelfRankEntry next = new SelfRankEntry(normalized, date, authoritative);
+                if (selfChatRanks.putIfAbsent(chatId, next) == null) {
+                    return;
+                }
+            } else if ((authoritative && date >= entry.date) || date > entry.date) {
+                final SelfRankEntry next = new SelfRankEntry(normalized, date, authoritative);
+                if (selfChatRanks.replace(chatId, entry, next)) {
+                    return;
+                }
+            } else {
+                return;
+            }
+        }
+    }
+
+    public String getSelfChatRank(long chatId) {
+        if (chatId <= 0) return null;
+        final String adminRank = getAdminRank(chatId, getUserConfig().getClientUserId());
+        if (!TextUtils.isEmpty(adminRank)) {
+            return adminRank;
+        }
+        final SelfRankEntry entry = selfChatRanks.get(chatId);
+        return entry != null ? entry.rank : null;
+    }
+
+    public boolean hasCachedSelfChatRank(long chatId) {
+        if (chatId <= 0) return false;
+        return selfChatRanks.containsKey(chatId);
+    }
+
     public String getAdminRank(long chatId, long uid) {
         if (chatId == uid) return "";
         final LongSparseArray<TLRPC.ChannelParticipant> array = channelAdmins.get(chatId);
@@ -7517,6 +7575,9 @@ public class MessagesController extends BaseController implements NotificationCe
                 }
             }
         }
+        if (uid == getUserConfig().getClientUserId()) {
+            recordSelfChatRank(chatId, rank, getConnectionsManager().getCurrentTime(), true);
+        }
         NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.updateInterfaces, 0);
         NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.updatedChatRanks, chatId, uid, rank);
         MessagesStorage.getInstance(currentAccount).updateRanksInLastMessages(-chatId, uid, rank);
@@ -7534,6 +7595,7 @@ public class MessagesController extends BaseController implements NotificationCe
                     }
                 }
             }
+            return null;
         }
         return array.get(uid);
     }
@@ -7547,10 +7609,15 @@ public class MessagesController extends BaseController implements NotificationCe
                 for (int i = 0; i < chatFull.participants.participants.size(); ++i) {
                     final TLRPC.ChatParticipant p = chatFull.participants.participants.get(i);
                     if (p.user_id == uid) {
+                        if (p instanceof TLRPC.TL_chatChannelParticipant) {
+                            final TLRPC.ChannelParticipant pp = ((TLRPC.TL_chatChannelParticipant) p).channelParticipant;
+                            return pp instanceof TLRPC.TL_channelParticipantAdmin || pp instanceof TLRPC.TL_channelParticipantCreator;
+                        }
                         return p instanceof TLRPC.TL_chatParticipantAdmin || p instanceof TLRPC.TL_chatParticipantCreator;
                     }
                 }
             }
+            return false;
         }
         final TLRPC.ChannelParticipant participant = array.get(uid);
         return participant instanceof TLRPC.TL_channelParticipantAdmin || participant instanceof TLRPC.TL_channelParticipantCreator;
@@ -7567,10 +7634,15 @@ public class MessagesController extends BaseController implements NotificationCe
                 for (int i = 0; i < chatFull.participants.participants.size(); ++i) {
                     final TLRPC.ChatParticipant p = chatFull.participants.participants.get(i);
                     if (p.user_id == uid) {
+                        if (p instanceof TLRPC.TL_chatChannelParticipant) {
+                            final TLRPC.ChannelParticipant pp = ((TLRPC.TL_chatChannelParticipant) p).channelParticipant;
+                            return pp instanceof TLRPC.TL_channelParticipantCreator;
+                        }
                         return p instanceof TLRPC.TL_chatParticipantCreator;
                     }
                 }
             }
+            return false;
         }
         final TLRPC.ChannelParticipant participant = array.get(uid);
         return participant instanceof TLRPC.TL_channelParticipantCreator;
@@ -7616,11 +7688,16 @@ public class MessagesController extends BaseController implements NotificationCe
         }
         AndroidUtilities.runOnUIThread(() -> {
             channelAdmins.put(chatId, array);
+            final long selfId = getUserConfig().getClientUserId();
+            final TLRPC.ChannelParticipant selfPart = selfId != 0 && array != null ? array.get(selfId) : null;
+            if (selfPart != null) {
+                recordSelfChatRank(chatId, selfPart.rank, getConnectionsManager().getCurrentTime(), !cache);
+            }
             if (cache) {
                 loadingChannelAdmins.delete(chatId);
                 loadChannelAdmins(chatId, false);
-                getNotificationCenter().postNotificationName(NotificationCenter.didLoadChatAdmins, chatId);
             }
+            getNotificationCenter().postNotificationName(NotificationCenter.didLoadChatAdmins, chatId);
         });
     }
 
@@ -8321,13 +8398,29 @@ public class MessagesController extends BaseController implements NotificationCe
                 if (taskMedia != null) {
                     final boolean checkViewer = SecretMediaViewer.hasInstance() && SecretMediaViewer.getInstance().isVisible();
                     final MessageObject viewerObject = checkViewer ? SecretMediaViewer.getInstance().getCurrentMessageObject() : null;
+                    final boolean saveDeleted = org.telegram.messenger.mirrly.MirrlyConfig.isSaveDeletedMessages();
+                    final org.telegram.messenger.mirrly.MirrlyDeletedStorage deletedStorage = org.telegram.messenger.mirrly.MirrlyDeletedStorage.getInstance(currentAccount);
                     for (int a = 0, N = taskMedia.size(); a < N; a++) {
                         long dialogId = taskMedia.keyAt(a);
                         ArrayList<Integer> mids = taskMedia.valueAt(a);
+                        if (saveDeleted) {
+                            for (int b = 0; b < mids.size(); b++) {
+                                Integer m = mids.get(b);
+                                MessageObject msgObj = dialogMessagesByIds.get(m);
+                                if (msgObj != null) {
+                                    deletedStorage.precacheEphemeralMediaAsync(msgObj);
+                                }
+                            }
+                        }
                         if (checkViewer && viewerObject != null && viewerObject.currentAccount == currentAccount && viewerObject.getDialogId() == dialogId && mids.contains(viewerObject.getId())) {
                             final int id = viewerObject.getId();
                             mids.remove((Integer) id);
-                            viewerObject.forceExpired = true;
+                            if (saveDeleted) {
+                                deletedStorage.precacheEphemeralMediaAsync(viewerObject);
+                            }
+                            if (!saveDeleted || deletedStorage.peekForcePhysicalDelete(dialogId, id)) {
+                                viewerObject.forceExpired = true;
+                            }
                             final long taskId = createDeleteShowOnceTask(dialogId, id);
                             SecretMediaViewer.getInstance().setOnClose(() -> doDeleteShowOnceTask(taskId, dialogId, id));
                             getNotificationCenter().postNotificationName(NotificationCenter.updateMessageMedia, viewerObject.messageOwner);
@@ -9315,6 +9408,41 @@ public class MessagesController extends BaseController implements NotificationCe
         return inputWallPaper;
     }
 
+    private void markMessageDeletedOrPreserved(MessageObject obj, long fallbackDialogId, boolean byMe) {
+        if (obj == null) {
+            return;
+        }
+        long did = obj.getDialogId();
+        if (did == 0) {
+            did = fallbackDialogId;
+        }
+        long currentUserId = getUserConfig().getClientUserId();
+        org.telegram.messenger.mirrly.MirrlyDeletedStorage deletedStorage = org.telegram.messenger.mirrly.MirrlyDeletedStorage.getInstance(currentAccount);
+        boolean forcePhysical = deletedStorage.peekForcePhysicalDelete(did, obj.getId());
+        boolean shouldPreserve = org.telegram.messenger.mirrly.MirrlyConfig.isSaveDeletedMessages()
+                && !forcePhysical
+                && did != 0
+                && did != currentUserId
+                && obj.messageOwner != null
+                && !(obj.messageOwner instanceof TLRPC.TL_messageService && !(obj.messageOwner.action instanceof TLRPC.TL_messageActionPhoneCall));
+        if (shouldPreserve) {
+            boolean effectiveByMe = byMe || deletedStorage.peekPendingKeepByMe(did, obj.getId());
+            obj.messageOwner.mirrlyDeleted = true;
+            if (obj.messageOwner.mirrlyDeletedAt == 0) {
+                obj.messageOwner.mirrlyDeletedAt = (int) (System.currentTimeMillis() / 1000L);
+            }
+            if (effectiveByMe) {
+                obj.messageOwner.mirrlyDeletedByMe = true;
+            }
+            obj.deleted = false;
+            if (obj.isSecretMedia()) {
+                deletedStorage.precacheEphemeralMediaAsync(obj);
+            }
+        } else {
+            obj.deleted = true;
+        }
+    }
+
     public void markDialogMessageAsDeleted(long dialogId, ArrayList<Integer> messages) {
         ArrayList<MessageObject> objs = dialogMessage.get(dialogId);
         if (objs != null) {
@@ -9324,7 +9452,7 @@ public class MessagesController extends BaseController implements NotificationCe
                     for (int a = 0; a < messages.size(); a++) {
                         Integer id = messages.get(a);
                         if (obj.getId() == id) {
-                            obj.deleted = true;
+                            markMessageDeletedOrPreserved(obj, dialogId, false);
                             break;
                         }
                     }
@@ -9385,7 +9513,7 @@ public class MessagesController extends BaseController implements NotificationCe
                         Integer id = messages.get(a);
                         MessageObject obj = dialogMessagesByIds.get(id);
                         if (obj != null) {
-                            obj.deleted = true;
+                            markMessageDeletedOrPreserved(obj, dialogId, false);
                         }
                     }
                 } else {
@@ -14506,6 +14634,12 @@ public class MessagesController extends BaseController implements NotificationCe
 
     public void doDeleteShowOnceTask(long taskId, long dialogId, int mid) {
         getMessagesStorage().removePendingTask(taskId);
+        if (org.telegram.messenger.mirrly.MirrlyConfig.isSaveDeletedMessages()) {
+            MessageObject obj = dialogMessagesByIds.get(mid);
+            if (obj != null) {
+                org.telegram.messenger.mirrly.MirrlyDeletedStorage.getInstance(currentAccount).precacheEphemeralMediaAsync(obj);
+            }
+        }
         ArrayList<Integer> mids = new ArrayList<>();
         mids.add(mid);
         getMessagesStorage().emptyMessagesMedia(dialogId, mids);
@@ -17636,13 +17770,12 @@ public class MessagesController extends BaseController implements NotificationCe
     protected void deleteMessagesByPush(long dialogId, ArrayList<Integer> ids, long channelId) {
         getMessagesStorage().getStorageQueue().postRunnable(() -> {
             AndroidUtilities.runOnUIThread(() -> {
-                getNotificationCenter().postNotificationName(NotificationCenter.messagesDeleted, ids, channelId, false);
                 if (channelId == 0) {
                     for (int b = 0, size2 = ids.size(); b < size2; b++) {
                         Integer id = ids.get(b);
                         MessageObject obj = dialogMessagesByIds.get(id);
                         if (obj != null) {
-                            obj.deleted = true;
+                            markMessageDeletedOrPreserved(obj, dialogId, false);
                         }
                     }
                 } else {
@@ -17652,13 +17785,14 @@ public class MessagesController extends BaseController implements NotificationCe
                             MessageObject obj = objs.get(i);
                             for (int b = 0, size2 = ids.size(); b < size2; b++) {
                                 if (obj.getId() == ids.get(b)) {
-                                    obj.deleted = true;
+                                    markMessageDeletedOrPreserved(obj, -channelId, false);
                                     break;
                                 }
                             }
                         }
                     }
                 }
+                getNotificationCenter().postNotificationName(NotificationCenter.messagesDeleted, ids, channelId, false);
             });
             getMessagesStorage().deletePushMessages(dialogId, ids);
             ArrayList<Long> dialogIds = getMessagesStorage().markMessagesAsDeleted(dialogId, ids, false, true, 0, 0);
@@ -21211,7 +21345,6 @@ public class MessagesController extends BaseController implements NotificationCe
                     if (arrayList == null) {
                         continue;
                     }
-                    getNotificationCenter().postNotificationName(NotificationCenter.messagesDeleted, arrayList, -dialogId, false);
                     if (dialogId == 0) {
                         for (int b = 0, size2 = arrayList.size(); b < size2; b++) {
                             Integer id = arrayList.get(b);
@@ -21220,7 +21353,7 @@ public class MessagesController extends BaseController implements NotificationCe
                                 if (BuildVars.LOGS_ENABLED) {
                                     FileLog.d("mark messages " + obj.getId() + " deleted");
                                 }
-                                obj.deleted = true;
+                                markMessageDeletedOrPreserved(obj, 0, false);
                             }
                         }
                     } else {
@@ -21231,7 +21364,7 @@ public class MessagesController extends BaseController implements NotificationCe
                                 if (obj != null) {
                                     for (int b = 0, size2 = arrayList.size(); b < size2; b++) {
                                         if (obj.getId() == arrayList.get(b)) {
-                                            obj.deleted = true;
+                                            markMessageDeletedOrPreserved(obj, dialogId, false);
                                             break;
                                         }
                                     }
@@ -21239,6 +21372,7 @@ public class MessagesController extends BaseController implements NotificationCe
                             }
                         }
                     }
+                    getNotificationCenter().postNotificationName(NotificationCenter.messagesDeleted, arrayList, -dialogId, false);
                 }
                 getNotificationsController().removeDeletedMessagesFromNotifications(deletedMessagesFinal, false);
             }

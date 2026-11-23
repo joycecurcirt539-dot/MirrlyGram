@@ -21,13 +21,17 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.InsetDrawable;
 import android.os.SystemClock;
 import android.text.Layout;
 import android.text.SpannableStringBuilder;
@@ -46,6 +50,7 @@ import android.widget.FrameLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import androidx.core.graphics.ColorUtils;
 import androidx.recyclerview.widget.DefaultItemAnimator;
@@ -63,6 +68,7 @@ import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.mirrly.MirrlyConfig;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
@@ -205,8 +211,9 @@ public class FilterTabsView extends FrameLayout {
         boolean animateTextX;
 
         boolean animateTabCounter;
-        int lastTabCount = -1;
-        int animateFromTabCount;
+        private int lastTabCount = -1;
+        private int animateFromTabCount;
+        private float adaptiveTabWcagLuma = -1f;
         StaticLayout inCounter;
         StaticLayout outCounter;
         StaticLayout stableCounter;
@@ -357,7 +364,28 @@ public class FilterTabsView extends FrameLayout {
                     textPaint.setColor(ColorUtils.blendARGB(color1, color2, animationValue));
                 }
             }
-            emojiColorFilter = new PorterDuffColorFilter(textPaint.getColor(), PorterDuff.Mode.SRC_IN);
+            if (adaptiveTabWcagLuma >= 0f) {
+                textPaint.setColor(org.telegram.utils.glass.GlassContrastHelper.resolveAdaptiveColorFromWcag(
+                        textPaint.getColor(), adaptiveTabWcagLuma, false, false));
+            } else if (adaptiveInvertFactor > 0.001f) {
+                textPaint.setColor(org.telegram.utils.glass.GlassContrastHelper.blendAdaptiveTextColor(
+                        textPaint.getColor(), adaptiveInvertFactor, false));
+            }
+            final float haloStrength = adaptiveTabWcagLuma >= 0f
+                    ? ((adaptiveTabWcagLuma > 0.08f && adaptiveTabWcagLuma < 0.35f) ? 0.58f : 0.45f)
+                    : (adaptiveInvertFactor > 0.005f
+                            ? Math.max(0.45f, adaptiveInvertFactor * 0.78f)
+                            : (blurredBackgroundDrawable != null ? 0.25f : 0f));
+            final int curTextColor = textPaint.getColor();
+            if (lastHaloColor != curTextColor || Math.abs(lastHaloStrength - haloStrength) > 0.02f) {
+                lastHaloColor = curTextColor;
+                lastHaloStrength = haloStrength;
+                org.telegram.utils.glass.GlassContrastHelper.applyOpticalTextHalo(textPaint, curTextColor, haloStrength);
+            }
+            if (emojiColorFilter == null || lastEmojiFilterColor != curTextColor) {
+                lastEmojiFilterColor = curTextColor;
+                emojiColorFilter = new PorterDuffColorFilter(curTextColor, PorterDuff.Mode.SRC_IN);
+            }
 
             float counterWidth;
             int countWidth;
@@ -1508,13 +1536,51 @@ public class FilterTabsView extends FrameLayout {
             final float add = additionalTabWidth / 2f;
 
             final int y = height / 2 - dp(14);
-            selectorDrawable.setBounds((int) (indicatorX - dp(TAB_INTERNAL_PADDING) - add), y, (int) (indicatorX + indicatorWidth + dp(TAB_INTERNAL_PADDING) + add), y + dp(28));
+            final int selL = (int) (indicatorX - dp(TAB_INTERNAL_PADDING) - add);
+            final int selR = (int) (indicatorX + indicatorWidth + dp(TAB_INTERNAL_PADDING) + add);
+            final int selB = y + dp(28);
+            selectorDrawable.setBounds(selL, y, selR, selB);
             selectorDrawable.setAlpha(31);
             selectorDrawable.draw(canvas);
+            if (MirrlyConfig.isGlassLiquidEnabled() && selR > selL) {
+                final float rad = dpf2(14);
+                final float h = Math.max(1f, selB - y);
+                final int pillAlpha = Math.round(255f * listView.getAlpha());
+                glassLensMatrix.reset();
+                glassLensMatrix.setScale(1f, h);
+                glassLensMatrix.postTranslate(0f, y);
+                glassLensFillGradient.setLocalMatrix(glassLensMatrix);
+                glassLensFillPaint.setShader(glassLensFillGradient);
+                glassLensFillPaint.setAlpha(pillAlpha);
+                glassLensRect.set(selL, y, selR, selB);
+                canvas.drawRoundRect(glassLensRect, rad, rad, glassLensFillPaint);
+
+                final float rimScale = MirrlyConfig.getGlassRimScale();
+                if (rimScale > 0.01f) {
+                    final boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
+                    final LinearGradient rimShader = isDark ? glassLensRimDarkGradient : glassLensRimLightGradient;
+                    rimShader.setLocalMatrix(glassLensMatrix);
+                    final float strokeW = dpf2(0.55f) * rimScale;
+                    final float inset = strokeW * 0.5f;
+                    glassLensRimPaint.setStyle(Paint.Style.STROKE);
+                    glassLensRimPaint.setStrokeWidth(strokeW);
+                    glassLensRimPaint.setShader(rimShader);
+                    glassLensRimPaint.setAlpha(pillAlpha);
+                    glassLensRect.set(selL + inset, y + inset, selR - inset, selB - inset);
+                    canvas.drawRoundRect(glassLensRect, Math.max(0f, rad - inset), Math.max(0f, rad - inset), glassLensRimPaint);
+                }
+            }
             canvas.restore();
         }
     }
 
+    private final Paint glassLensFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint glassLensRimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final LinearGradient glassLensFillGradient = new LinearGradient(0, 0, 0, 1, 0x18FFFFFF, 0x04FFFFFF, Shader.TileMode.CLAMP);
+    private final LinearGradient glassLensRimDarkGradient = new LinearGradient(0, 0, 0, 1, 0x33FFFFFF, 0x16FFFFFF, Shader.TileMode.CLAMP);
+    private final LinearGradient glassLensRimLightGradient = new LinearGradient(0, 0, 0, 1, 0xD9FFFFFF, 0x33FFFFFF, Shader.TileMode.CLAMP);
+    private final Matrix glassLensMatrix = new Matrix();
+    private final RectF glassLensRect = new RectF();
     private final Path clipPath = new Path();
 
     @Override
@@ -1531,6 +1597,81 @@ public class FilterTabsView extends FrameLayout {
         canvas.clipPath(clipPath);
         super.dispatchDraw(canvas);
         canvas.restore();
+    }
+
+    private float adaptiveInvertFactor = 0f;
+    private int lastEmojiFilterColor;
+    private int lastHaloColor;
+    private float lastHaloStrength = -1f;
+
+    public void applyAdaptiveGlassContrast(float invertFactor) {
+        final float clamped = Math.max(0f, Math.min(1f, invertFactor));
+        if (Math.abs(this.adaptiveInvertFactor - clamped) < 0.008f) {
+            return;
+        }
+        this.adaptiveInvertFactor = clamped;
+        if (listView != null) {
+            for (int i = 0, n = listView.getChildCount(); i < n; i++) {
+                final View child = listView.getChildAt(i);
+                if (child instanceof TabView) {
+                    ((TabView) child).adaptiveTabWcagLuma = -1f;
+                    child.invalidate();
+                } else if (child != null) {
+                    child.invalidate();
+                }
+            }
+        }
+        invalidate();
+    }
+
+    private long lastAdaptiveSampleMs;
+
+    public void updateSmartAdaptiveGlassContrast(
+            @Nullable android.view.ViewGroup sampleTarget,
+            int glassBgColor,
+            int viewportW,
+            int viewportH,
+            float fallbackBgLuma,
+            boolean resetToBase
+    ) {
+        if (listView == null) {
+            return;
+        }
+        if (resetToBase) {
+            lastAdaptiveSampleMs = 0L;
+            adaptiveInvertFactor = 0f;
+            for (int i = 0, n = listView.getChildCount(); i < n; i++) {
+                final View child = listView.getChildAt(i);
+                if (child instanceof TabView) {
+                    final TabView tv = (TabView) child;
+                    if (tv.adaptiveTabWcagLuma >= 0f) {
+                        tv.adaptiveTabWcagLuma = -1f;
+                        tv.invalidate();
+                    }
+                }
+            }
+            return;
+        }
+        final long now = android.os.SystemClock.uptimeMillis();
+        if (now - lastAdaptiveSampleMs < 80L) {
+            return;
+        }
+        lastAdaptiveSampleMs = now;
+        for (int i = 0, n = listView.getChildCount(); i < n; i++) {
+            final View child = listView.getChildAt(i);
+            if (!(child instanceof TabView) || child.getVisibility() != VISIBLE || child.getWidth() <= 0 || child.getHeight() <= 0) {
+                continue;
+            }
+            final TabView tv = (TabView) child;
+            final float underLuma = org.telegram.utils.glass.GlassContrastHelper.estimateUnderlyingLuminanceInBand(
+                    tv, sampleTarget, 0f, 0f, tv.getWidth(), tv.getHeight(),
+                    null, null, viewportW, viewportH, fallbackBgLuma, resourcesProvider);
+            final float nextWcag = org.telegram.utils.glass.GlassContrastHelper.computeCompositeWcagLuminance(glassBgColor, underLuma);
+            if (tv.adaptiveTabWcagLuma < 0f || Math.abs(tv.adaptiveTabWcagLuma - nextWcag) >= 0.015f) {
+                tv.adaptiveTabWcagLuma = nextWcag;
+                tv.invalidate();
+            }
+        }
     }
 
     public void updateColors() {
@@ -1947,7 +2088,18 @@ public class FilterTabsView extends FrameLayout {
             if (actionState != ItemTouchHelper.ACTION_STATE_IDLE) {
                 listView.cancelClickRunnables(false);
                 viewHolder.itemView.setPressed(true);
-                ThemeBind.backgroundColor(viewHolder.itemView, backgroundColorKey, resourcesProvider);
+                if (blurredBackgroundDrawable != null) {
+                    final GradientDrawable dragHighlight = new GradientDrawable();
+                    dragHighlight.setCornerRadius(dpf2(14));
+                    final int accent = Theme.getColor(tabLineColorKey, resourcesProvider);
+                    dragHighlight.setColor(Theme.multAlpha(accent, 0.16f));
+                    dragHighlight.setStroke(Math.max(1, dp(0.6f)), Theme.multAlpha(accent, 0.34f));
+                    final int h = viewHolder.itemView.getMeasuredHeight();
+                    final int vInset = h > dp(28) ? (h - dp(28)) / 2 : dp(2);
+                    viewHolder.itemView.setBackground(new InsetDrawable(dragHighlight, dp(2), vInset, dp(2), vInset));
+                } else {
+                    ThemeBind.backgroundColor(viewHolder.itemView, backgroundColorKey, resourcesProvider);
+                }
             } else {
                 AndroidUtilities.cancelRunOnUIThread(resetDefaultPosition);
                 AndroidUtilities.runOnUIThread(resetDefaultPosition, 320);

@@ -26,6 +26,8 @@ import org.telegram.messenger.Utilities;
 import org.telegram.ui.Adapters.FiltersView;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.RLottieDrawable;
+import org.telegram.utils.glass.GlassContrastHelper;
+import org.telegram.utils.glass.source.GlassSource;
 
 import java.util.ArrayList;
 import java.util.Map;
@@ -632,21 +634,47 @@ public class ActionBarMenu extends LinearLayout {
         this.onLayoutListener = listener;
     }
 
+    private boolean glassIndividualCircles;
+
     public void setGlassMode(boolean glassMode) {
         this.glassMode = glassMode;
+    }
+
+    public void setGlassIndividualCircles(boolean individual) {
+        if (this.glassIndividualCircles != individual) {
+            this.glassIndividualCircles = individual;
+            requestLayout();
+        }
     }
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         if (glassMode) {
+            final int margin = glassIndividualCircles ? -dp(1) : -dp(5);
             for (int a = 0, N = getChildCount(); a < N; a++) {
                 final View view = getChildAt(a);
                 if (view instanceof ActionBarMenuItem) {
                     final ViewGroup.LayoutParams lp = view.getLayoutParams();
                     if (lp instanceof MarginLayoutParams) {
                         MarginLayoutParams mlp = (MarginLayoutParams) lp;
-                        mlp.leftMargin = -dp(5);
-                        mlp.rightMargin = -dp(5);
+                        mlp.leftMargin = margin;
+                        mlp.rightMargin = margin;
+                    }
+                }
+            }
+        } else {
+            for (int a = 0, N = getChildCount(); a < N; a++) {
+                final View view = getChildAt(a);
+                if (view instanceof ActionBarMenuItem) {
+                    final ViewGroup.LayoutParams lp = view.getLayoutParams();
+                    if (lp instanceof MarginLayoutParams) {
+                        MarginLayoutParams mlp = (MarginLayoutParams) lp;
+                        if (mlp.leftMargin == -dp(5) || mlp.leftMargin == -dp(1)) {
+                            mlp.leftMargin = 0;
+                        }
+                        if (mlp.rightMargin == -dp(5) || mlp.rightMargin == -dp(1)) {
+                            mlp.rightMargin = 0;
+                        }
                     }
                 }
             }
@@ -694,6 +722,42 @@ public class ActionBarMenu extends LinearLayout {
         }
 
         return found ? (int)(mRight - mLeft) : 0;
+    }
+
+    public void applyAdaptiveItemsContrast(
+            @Nullable ViewGroup sampleTarget,
+            int glassBgColor,
+            int baseIconColor,
+            @Nullable GlassSource backdropSource,
+            @Nullable Drawable backdropDrawable,
+            int viewportW,
+            int viewportH,
+            float fallbackBgLuma,
+            @Nullable Theme.ResourcesProvider rp,
+            boolean liquidShaderActive
+    ) {
+        final int count = getChildCount();
+        for (int a = 0; a < count; a++) {
+            final View view = getChildAt(a);
+            if (!(view instanceof ActionBarMenuItem) || view.getVisibility() != VISIBLE || view.getAlpha() <= 0.01f) {
+                continue;
+            }
+            final int color = GlassContrastHelper.estimateIconAdaptiveColor(
+                    view,
+                    sampleTarget,
+                    glassBgColor,
+                    baseIconColor,
+                    backdropSource,
+                    backdropDrawable,
+                    viewportW,
+                    viewportH,
+                    fallbackBgLuma,
+                    rp,
+                    false,
+                    liquidShaderActive
+            );
+            ((ActionBarMenuItem) view).setIconColor(color);
+        }
     }
 
     @Override

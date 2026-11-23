@@ -93,6 +93,7 @@ import android.widget.Toast;
 import androidx.annotation.Nullable;
 
 import org.json.JSONObject;
+import org.telegram.messenger.mirrly.MirrlyConfig;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
@@ -4265,7 +4266,7 @@ public class VoIPService extends Service implements SensorEventListener, AudioMa
 				} else {
 					vibrate = prefs.getInt("vibrate_calls", 0);
 				}
-				if ((vibrate != 2 && vibrate != 4 && (am.getRingerMode() == AudioManager.RINGER_MODE_VIBRATE || am.getRingerMode() == AudioManager.RINGER_MODE_NORMAL)) || (vibrate == 4 && am.getRingerMode() == AudioManager.RINGER_MODE_VIBRATE)) {
+				if (!MirrlyConfig.isDisableAllVibrations() && ((vibrate != 2 && vibrate != 4 && (am.getRingerMode() == AudioManager.RINGER_MODE_VIBRATE || am.getRingerMode() == AudioManager.RINGER_MODE_NORMAL)) || (vibrate == 4 && am.getRingerMode() == AudioManager.RINGER_MODE_VIBRATE))) {
 					vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
 					long duration = 700;
 					if (vibrate == 1) {

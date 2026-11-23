@@ -179,13 +179,35 @@ public class SimpleActionBarDoneButton extends View implements FactorAnimator.Ta
         accentColor = Theme.getColor(Theme.key_featuredStickers_addButton, resourcesProvider);
         inactiveColor = ColorUtils.blendARGB(Theme.getColor(Theme.key_windowBackgroundGray, resourcesProvider), accentColor, 0.5f);
         contentColor = Theme.getColor(Theme.key_featuredStickers_buttonText, resourcesProvider);
-        glassContentColor = parentBar.getItemsColor(false);
+        glassContentColor = adaptiveGlassContentColor != 0 ? adaptiveGlassContentColor : parentBar.getItemsColor(false);
         final int color = style == Style.ACCENT ? contentColor : glassContentColor;
-        checkDrawable.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
-        progressDrawable.setColor(color);
-        textPaint.setColor(color);
+        applyContentColor(color);
         setBackground(Theme.createRadSelectorDrawable(style == Style.ACCENT ? Theme.multAlpha(contentColor, 0.2f) : parentBar.getItemsBackgroundColor(false), dp(23), dp(23)));
         invalidate();
+    }
+
+    private int adaptiveGlassContentColor = 0;
+    private int lastContentFilterColor = 0;
+
+    private void applyContentColor(int color) {
+        if (lastContentFilterColor != color) {
+            lastContentFilterColor = color;
+            checkDrawable.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
+        }
+        progressDrawable.setColor(color);
+        textPaint.setColor(color);
+    }
+
+    public void applyAdaptiveGlassColor(int color) {
+        if (adaptiveGlassContentColor == color) {
+            return;
+        }
+        adaptiveGlassContentColor = color;
+        glassContentColor = color != 0 ? color : parentBar.getItemsColor(false);
+        if (style != Style.ACCENT) {
+            applyContentColor(glassContentColor);
+            invalidate();
+        }
     }
 
     private void updateTextWidth() {

@@ -17,7 +17,7 @@ if (-not $Auto -and -not $Full) {
 }
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-if (-not (Test-Path (Join-Path $repoRoot 'TMessagesProj')) -or -not (Test-Path (Join-Path $repoRoot 'mirrlyengine'))) {
+if (-not (Test-Path (Join-Path $repoRoot 'TMessagesProj'))) {
     throw "Refusing to run: '$repoRoot' is not the MirrlyGram V2 repository root."
 }
 

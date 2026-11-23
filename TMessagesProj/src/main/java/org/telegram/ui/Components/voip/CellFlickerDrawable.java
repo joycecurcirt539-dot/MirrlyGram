@@ -11,6 +11,7 @@ import android.graphics.PixelFormat;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
+import android.os.SystemClock;
 import android.view.View;
 
 import androidx.annotation.NonNull;
@@ -32,6 +33,7 @@ public class CellFlickerDrawable {
     int parentWidth;
     public float progress;
     long lastUpdateTime;
+    private long scheduledWakeElapsedMs;
 
     Matrix matrix = new Matrix();
 
@@ -102,18 +104,34 @@ public class CellFlickerDrawable {
         }
     }
 
+    private void scheduleNextFrame(@Nullable View view, long currentTime) {
+        if (view == null || (!repeatEnabled && progress >= 1f)) {
+            scheduledWakeElapsedMs = 0L;
+            return;
+        }
+        if (repeatEnabled && progress > 1.0f && progress < repeatProgress && animationSpeedScale > 0f) {
+            final float remainingProgress = repeatProgress - progress;
+            final long delayMs = Math.max(16L, (long) Math.ceil(remainingProgress * 1200f / animationSpeedScale));
+            if (scheduledWakeElapsedMs == 0L || currentTime >= scheduledWakeElapsedMs) {
+                scheduledWakeElapsedMs = currentTime + delayMs;
+                view.postInvalidateDelayed(delayMs);
+            }
+            return;
+        }
+        scheduledWakeElapsedMs = 0L;
+        view.invalidate();
+    }
+
     private void update(View view) {
         if (repeatEnabled || progress < 1) {
-            if (view != null) {
-                view.invalidate();
-            }
-            long currentTime = System.currentTimeMillis();
+            long currentTime = SystemClock.elapsedRealtime();
             if (lastUpdateTime != 0) {
-                long dt = currentTime - lastUpdateTime;
-                if (dt > 10) {
+                long dt = Math.max(0L, currentTime - lastUpdateTime);
+                if (dt > 0) {
                     progress += (dt / 1200f) * animationSpeedScale;
                     if (progress > repeatProgress) {
                         progress = 0;
+                        scheduledWakeElapsedMs = 0L;
                         if (onRestartCallback != null) {
                             onRestartCallback.run();
                         }
@@ -123,6 +141,9 @@ public class CellFlickerDrawable {
             } else {
                 lastUpdateTime = currentTime;
             }
+            scheduleNextFrame(view, currentTime);
+        } else {
+            scheduledWakeElapsedMs = 0L;
         }
 
         float x = (parentWidth + size * 2) * progress - size;
@@ -218,7 +239,7 @@ public class CellFlickerDrawable {
                 );
                 svgDrawable.draw(canvas);
             }
-            parentView.invalidate();
+            scheduleNextFrame(parentView, SystemClock.elapsedRealtime());
         }
 
         @Override

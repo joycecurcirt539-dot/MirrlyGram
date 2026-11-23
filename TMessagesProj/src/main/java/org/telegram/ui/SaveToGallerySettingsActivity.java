@@ -35,13 +35,12 @@ import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
-import org.telegram.ui.ActionBar.ActionBarMenuItem;
-import org.telegram.ui.ActionBar.ActionBarMenuSubItem;
-import org.telegram.ui.ActionBar.ActionBarPopupWindow;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BackDrawable;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Components.ItemOptions;
+import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
 import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.ShadowSectionCell;
@@ -233,30 +232,32 @@ public class SaveToGallerySettingsActivity extends BaseFragment {
         });
         recyclerListView.setOnItemLongClickListener((view, position, x, y) -> {
             if (items.get(position).viewType == VIEW_TYPE_CHAT) {
-
                 SaveToGallerySettingsHelper.DialogException exception = items.get(position).exception;
-                ActionBarPopupWindow.ActionBarPopupWindowLayout actionBarPopupWindowLayout = new ActionBarPopupWindow.ActionBarPopupWindowLayout(getContext());
-                ActionBarMenuSubItem edit = ActionBarMenuItem.addItem(actionBarPopupWindowLayout, R.drawable.msg_customize, LocaleController.getString(R.string.EditException), false, null);
-                ActionBarMenuSubItem delete = ActionBarMenuItem.addItem(actionBarPopupWindowLayout, R.drawable.msg_delete, LocaleController.getString(R.string.DeleteException), false, null);
-                delete.setColors(Theme.getColor(Theme.key_text_RedRegular), Theme.getColor(Theme.key_text_RedRegular));
-                ActionBarPopupWindow popupWindow = AlertsCreator.createSimplePopup(SaveToGallerySettingsActivity.this, actionBarPopupWindowLayout, view, x, y);
-                actionBarPopupWindowLayout.setParentWindow(popupWindow);
-
-                edit.setOnClickListener(v -> {
-                    popupWindow.dismiss();
+                ItemOptions options = ItemOptions.makeOptions(SaveToGallerySettingsActivity.this, view)
+                        .setBlur(true)
+                        .setBlurBackground(
+                                getBaseSimpleGlass().menuFactory,
+                                BlurredBackgroundProviderImpl.messageMenuBackground(getResourceProvider()),
+                                false
+                        );
+                options.add(R.drawable.msg_customize, LocaleController.getString(R.string.EditException), () -> {
                     Bundle args2 = new Bundle();
-                    args2.putLong("dialog_id", items.get(position).exception.dialogId);
+                    args2.putLong("dialog_id", exception.dialogId);
                     args2.putInt("type", type);
                     SaveToGallerySettingsActivity addExceptionActivity = new SaveToGallerySettingsActivity(args2);
                     presentFragment(addExceptionActivity);
                 });
-                delete.setOnClickListener(v -> {
-                    popupWindow.dismiss();
+                options.add(R.drawable.msg_delete, LocaleController.getString(R.string.DeleteException), true, () -> {
                     LongSparseArray<SaveToGallerySettingsHelper.DialogException> allExceptions = getUserConfig().getSaveGalleryExceptions(type);
                     allExceptions.remove(exception.dialogId);
                     getUserConfig().updateSaveGalleryExceptions(type, allExceptions);
                     updateRows();
                 });
+                if (LocaleController.isRTL) {
+                    options.setGravity(Gravity.LEFT);
+                }
+                options.setScrimViewBackground(recyclerListView.getClipBackground(view));
+                options.show();
                 return true;
             }
             return false;

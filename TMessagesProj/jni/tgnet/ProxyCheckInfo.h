@@ -29,6 +29,9 @@ public:
     std::string password;
     std::string secret;
     int64_t pingId = 0;
+    uint32_t targetDatacenterId = DEFAULT_DATACENTER_ID;
+    bool isDatacenterCheck = false;
+    int64_t deadlineMillis = 0;
     onRequestTimeFunc onRequestTime;
     int32_t instanceNum = 0;
 

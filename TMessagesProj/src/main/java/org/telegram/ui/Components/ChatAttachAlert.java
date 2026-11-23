@@ -1021,8 +1021,43 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
         }
 
         protected void setBlur3Capture(RecyclerListView iBlur3Capture) {
+            if (iBlur3Capture != null) {
+                iBlur3Capture.setCaptureSectionsDecoratorAllowed(true);
+            }
             parentAlert.glassEngine.addScrolledView(iBlur3Capture);
             this.iBlur3Capture = iBlur3Capture;
+            if (this.iBlur3CaptureView == null) {
+                this.iBlur3CaptureView = iBlur3Capture;
+            }
+        }
+
+        void ensureBlur3CaptureIfNeeded() {
+            if (iBlur3Capture != null) {
+                return;
+            }
+            final RecyclerListView found = findPrimaryRecyclerListView(this);
+            if (found != null) {
+                setBlur3Capture(found);
+            }
+        }
+
+        private static RecyclerListView findPrimaryRecyclerListView(ViewGroup root) {
+            for (int i = 0, n = root.getChildCount(); i < n; i++) {
+                final View child = root.getChildAt(i);
+                if (child instanceof RecyclerListView && child.getVisibility() == View.VISIBLE) {
+                    return (RecyclerListView) child;
+                }
+            }
+            for (int i = 0, n = root.getChildCount(); i < n; i++) {
+                final View child = root.getChildAt(i);
+                if (child instanceof ViewGroup && child.getVisibility() == View.VISIBLE) {
+                    final RecyclerListView nested = findPrimaryRecyclerListView((ViewGroup) child);
+                    if (nested != null) {
+                        return nested;
+                    }
+                }
+            }
+            return null;
         }
     }
 
@@ -1332,7 +1367,7 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
             iBlur3FactoryLiquidGlass.setLiquidGlassEffectAllowed(true);
             iBlur3FactoryLiquidGlass.setOutset(LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) ? dp(8) : dp(48));
 
-            iBlur3FactoryFrostedLiquidGlass = new BlurredBackgroundDrawableViewFactory(iBlur3SourceGlassFrosted);
+            iBlur3FactoryFrostedLiquidGlass = new BlurredBackgroundDrawableViewFactory(iBlur3SourceGlass, iBlur3SourceGlassFrosted, iBlur3SourceColor);
             iBlur3FactoryFrostedLiquidGlass.setLiquidGlassEffectAllowed(true);
             iBlur3FactoryFrostedLiquidGlass.setOutset(dp(48));
         } else {
@@ -1347,6 +1382,9 @@ public class ChatAttachAlert extends BottomSheet implements NotificationCenter.N
         iBlur3Capture = (canvas, position) -> {
             for (int a = 0; a < 2; a++) {
                 AttachAlertLayout layout = a == 0 ? currentAttachLayout : nextAttachLayout;
+                if (layout != null && layout.getVisibility() == View.VISIBLE) {
+                    layout.ensureBlur3CaptureIfNeeded();
+                }
                 if (layout != null && layout.iBlur3Capture != null && layout.getVisibility() == View.VISIBLE) {
                     final float alphaF;
                     if (a == 0 && nextAttachLayout != null && nextAttachLayout.getVisibility() == View.VISIBLE) {

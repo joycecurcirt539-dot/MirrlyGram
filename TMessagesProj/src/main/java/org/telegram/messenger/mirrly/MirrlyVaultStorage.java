@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.net.Uri;
+import android.os.Looper;
 import android.text.TextUtils;
 import android.util.Base64;
 
@@ -72,10 +73,16 @@ public final class MirrlyVaultStorage {
     public static final class EditRevision {
         public final int timestamp;
         public final String text;
+        public final boolean isOriginal;
 
         public EditRevision(int timestamp, String text) {
+            this(timestamp, text, false);
+        }
+
+        public EditRevision(int timestamp, String text, boolean isOriginal) {
             this.timestamp = timestamp;
             this.text = text != null ? text : "";
+            this.isOriginal = isOriginal;
         }
     }
 
@@ -260,11 +267,19 @@ public final class MirrlyVaultStorage {
     private static final ConcurrentHashMap<String, DossierNote> notesByPrefKey = new ConcurrentHashMap<>();
     private static final AtomicInteger quickSeq = new AtomicInteger(1);
     private static volatile boolean initialized = false;
+    private static volatile boolean warmupStarted = false;
 
     private MirrlyVaultStorage() {
     }
 
-    private static synchronized void ensureInit() {
+    private static void ensureInit() {
+        if (initialized) {
+            return;
+        }
+        initInternal();
+    }
+
+    private static synchronized void initInternal() {
         if (initialized) {
             return;
         }
@@ -274,6 +289,20 @@ public final class MirrlyVaultStorage {
         }
         loadAllNotesFromPrefs();
         initialized = true;
+    }
+
+    public static void warmupAsync() {
+        if (initialized || warmupStarted || ApplicationLoader.applicationContext == null) {
+            return;
+        }
+        warmupStarted = true;
+        Utilities.globalQueue.postRunnable(() -> {
+            boolean wasInitialized = initialized;
+            initInternal();
+            if (!wasInitialized && initialized && !notesByPrefKey.isEmpty()) {
+                notifyNotesUpdated();
+            }
+        });
     }
 
     private static SharedPreferences getPrefs() {
@@ -706,13 +735,18 @@ public final class MirrlyVaultStorage {
             String json = serializeNote(note);
             if (json != null) {
                 getPrefs().edit().putString(note.prefKey, json).apply();
+                MirrlyPowerTelemetry.recordVaultIo(MirrlyPowerTelemetry.VAULT_KIND_NOTE, json.length() * 2L, 0L);
             }
         }
         notifyNotesUpdated();
     }
 
     public static void recordEdit(long dialogId, int msgId, String previousText, int timestampSec) {
-        if (TextUtils.isEmpty(previousText)) {
+        recordEdit(dialogId, msgId, previousText, timestampSec, false);
+    }
+
+    public static synchronized void recordEdit(long dialogId, int msgId, String previousText, int timestampSec, boolean isOriginal) {
+        if (TextUtils.isEmpty(previousText) || dialogId == 0 || msgId == 0) {
             return;
         }
         ensureInit();
@@ -725,9 +759,16 @@ public final class MirrlyVaultStorage {
             }
         }
         List<EditRevision> updated = new ArrayList<>(list);
-        updated.add(new EditRevision(timestampSec > 0 ? timestampSec : nowSec(), previousText));
+        updated.add(new EditRevision(timestampSec > 0 ? timestampSec : nowSec(), previousText, isOriginal));
         if (updated.size() > MAX_REVISIONS_PER_MSG) {
-            updated = new ArrayList<>(updated.subList(updated.size() - MAX_REVISIONS_PER_MSG, updated.size()));
+            if (updated.get(0).isOriginal) {
+                List<EditRevision> trimmed = new ArrayList<>(MAX_REVISIONS_PER_MSG);
+                trimmed.add(updated.get(0));
+                trimmed.addAll(updated.subList(updated.size() - (MAX_REVISIONS_PER_MSG - 1), updated.size()));
+                updated = trimmed;
+            } else {
+                updated = new ArrayList<>(updated.subList(updated.size() - MAX_REVISIONS_PER_MSG, updated.size()));
+            }
         }
         editCache.put(key, updated);
         saveEditListToPrefs(key, updated);
@@ -756,7 +797,7 @@ public final class MirrlyVaultStorage {
             JSONArray arr = new JSONArray(raw);
             for (int i = 0; i < arr.length(); i++) {
                 JSONObject obj = arr.getJSONObject(i);
-                parsed.add(new EditRevision(obj.optInt("t", 0), obj.optString("v", "")));
+                parsed.add(new EditRevision(obj.optInt("t", 0), obj.optString("v", ""), obj.optBoolean("o", false)));
             }
         } catch (Throwable t) {
             FileLog.e(t);
@@ -776,9 +817,14 @@ public final class MirrlyVaultStorage {
                 JSONObject obj = new JSONObject();
                 obj.put("t", rev.timestamp);
                 obj.put("v", rev.text);
+                if (rev.isOriginal) {
+                    obj.put("o", true);
+                }
                 arr.put(obj);
             }
-            getPrefs().edit().putString(PREFIX_EDIT + key, arr.toString()).apply();
+            String serialized = arr.toString();
+            getPrefs().edit().putString(PREFIX_EDIT + key, serialized).apply();
+            MirrlyPowerTelemetry.recordVaultIo(MirrlyPowerTelemetry.VAULT_KIND_EDIT_HISTORY, serialized.length() * 2L, 0L);
         } catch (Throwable t) {
             FileLog.e(t);
         }
@@ -1018,6 +1064,10 @@ public final class MirrlyVaultStorage {
     }
 
     public static boolean hasDossierNote(long dialogId, int msgId) {
+        if (!initialized && Looper.myLooper() == Looper.getMainLooper()) {
+            warmupAsync();
+            return false;
+        }
         DossierNote record = getDossierNoteRecord(dialogId, msgId);
         return record != null && record.hasContent();
     }

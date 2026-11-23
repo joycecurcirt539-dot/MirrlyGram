@@ -10,29 +10,31 @@ package org.telegram.ui.Cells;
 
 import android.content.Context;
 import android.graphics.Canvas;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffColorFilter;
 import android.graphics.drawable.Drawable;
 import android.view.Gravity;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+
+import androidx.core.content.ContextCompat;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.AnimatedEmojiDrawable;
 import org.telegram.ui.Components.LayoutHelper;
 
-public class EmojiReplacementCell extends FrameLayout {
+import java.util.HashSet;
+
+public class EmojiReplacementCell extends FrameLayout implements Theme.Colorable {
 
     private ImageView imageView;
     private String emoji;
     private final Theme.ResourcesProvider resourcesProvider;
 
     private AnimatedEmojiDrawable emojiDrawable;
+    private int currentBgRes;
 
     public EmojiReplacementCell(Context context, Theme.ResourcesProvider resourcesProvider) {
         super(context);
@@ -70,24 +72,34 @@ public class EmojiReplacementCell extends FrameLayout {
             imageView.setImageDrawable(null);
         }
 
+        int bgRes = 0;
+        int padLeft = 0;
+        int padRight = 0;
         if (side == -1) {
-            setBackgroundResource(R.drawable.stickers_back_left);
-            setPadding(AndroidUtilities.dp(7), 0, 0, 0);
+            bgRes = R.drawable.stickers_back_left;
+            padLeft = AndroidUtilities.dp(7);
         } else if (side == 0) {
-            setBackgroundResource(R.drawable.stickers_back_center);
-            setPadding(0, 0, 0, 0);
+            bgRes = R.drawable.stickers_back_center;
         } else if (side == 1) {
-            setBackgroundResource(R.drawable.stickers_back_right);
-            setPadding(0, 0, AndroidUtilities.dp(7), 0);
+            bgRes = R.drawable.stickers_back_right;
+            padRight = AndroidUtilities.dp(7);
         } else if (side == 2) {
-            setBackgroundResource(R.drawable.stickers_back_all);
-            setPadding(AndroidUtilities.dp(3), 0, AndroidUtilities.dp(3), 0);
+            bgRes = R.drawable.stickers_back_all;
+            padLeft = AndroidUtilities.dp(3);
+            padRight = AndroidUtilities.dp(3);
         }
-        Drawable background = getBackground();
-        if (background != null) {
-            background.setAlpha(230);
-            ThemeBind.drawableColorFilter(this, background, Theme.key_chat_stickersHintPanel, resourcesProvider, PorterDuff.Mode.MULTIPLY);
+        if (bgRes != 0) {
+            if (bgRes != currentBgRes || getBackground() == null) {
+                Drawable bg = ContextCompat.getDrawable(getContext(), bgRes);
+                if (bg != null) {
+                    bg = bg.mutate();
+                }
+                setBackground(bg);
+                currentBgRes = bgRes;
+            }
+            setPadding(padLeft, 0, padRight, 0);
         }
+        StickerCell.applyHintPanelBackground(this, resourcesProvider);
     }
 
     @Override
@@ -113,6 +125,20 @@ public class EmojiReplacementCell extends FrameLayout {
         super.onAttachedToWindow();
         if (emojiDrawable != null) {
             emojiDrawable.addView(this);
+        }
+        updateColors();
+    }
+
+    @Override
+    public void updateColors() {
+        StickerCell.applyHintPanelBackground(this, resourcesProvider);
+    }
+
+    @Override
+    public void addColorKeys(HashSet<Integer> colors) {
+        if (colors != null) {
+            colors.add(Theme.key_chat_stickersHintPanel);
+            colors.add(Theme.key_actionBarDefaultSubmenuBackground);
         }
     }
 

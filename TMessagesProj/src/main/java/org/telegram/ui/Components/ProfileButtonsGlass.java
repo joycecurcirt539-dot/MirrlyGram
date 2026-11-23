@@ -15,10 +15,13 @@ import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.SharedConfig;
+import org.telegram.messenger.mirrly.MirrlyConfig;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
 import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundColorProvider;
+import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundProvider;
 import org.telegram.utils.glass.BaseFragmentSimpleGlass;
 import org.telegram.utils.glass.GlassCaptureSourceCanvas;
 import org.telegram.utils.glass.GlassEngine;
@@ -45,16 +48,18 @@ public final class ProfileButtonsGlass {
 
     private static final float[] IDENTITY = new ColorMatrix().getArray();
     private static final float[] PHOTO_MATRIX;
+    private static final ColorMatrixColorFilter FULL_PHOTO_FILTER;
 
     static {
         final ColorMatrix matrix = new ColorMatrix();
         AndroidUtilities.adjustSaturationColorMatrix(matrix, PHOTO_SATURATION);
         AndroidUtilities.multiplyBrightnessColorMatrix(matrix, PHOTO_BRIGHTNESS);
         PHOTO_MATRIX = matrix.getArray();
+        FULL_PHOTO_FILTER = new ColorMatrixColorFilter(PHOTO_MATRIX);
     }
 
-    /** Transparent: the color is the source's, the action buttons have no stroke and no shadow. */
-    public static final BlurredBackgroundColorProvider NO_COLORS = new BlurredBackgroundColorProvider() {
+    /** Transparent fill: the color is the source's; draws a directional specular rim when Liquid Glass is active. */
+    public static final BlurredBackgroundProvider NO_COLORS = new BlurredBackgroundProvider() {
         @Override
         public int getShadowColor() {
             return 0;
@@ -67,11 +72,36 @@ public final class ProfileButtonsGlass {
 
         @Override
         public int getStrokeColorTop() {
-            return 0;
+            return MirrlyConfig.isGlassLiquidEnabled() && MirrlyConfig.isLiquidGlassEverywhere() ? 0x38FFFFFF : 0;
         }
 
         @Override
         public int getStrokeColorBottom() {
+            return MirrlyConfig.isGlassLiquidEnabled() && MirrlyConfig.isLiquidGlassEverywhere() ? 0x18FFFFFF : 0;
+        }
+
+        @Override
+        public float getStrokeWidthTop() {
+            return AndroidUtilities.dpf2(0.55f);
+        }
+
+        @Override
+        public float getStrokeWidthBottom() {
+            return AndroidUtilities.dpf2(0.55f);
+        }
+
+        @Override
+        public float getShadowRadius() {
+            return 0;
+        }
+
+        @Override
+        public float getShadowDx() {
+            return 0;
+        }
+
+        @Override
+        public float getShadowDy() {
             return 0;
         }
     };
@@ -96,6 +126,7 @@ public final class ProfileButtonsGlass {
     private final ReferenceList<View> views = new ReferenceList<>();
     private final ReferenceList<BlurredBackgroundDrawable> drawables = new ReferenceList<>();
 
+    private final float[] photoMatrixTmp = new float[20];
     private int buttonColor;
     private boolean hasColorById;
     private float photoProgress;
@@ -111,10 +142,14 @@ public final class ProfileButtonsGlass {
             photoSource = null;
         }
 
-        actionsSource = new Source(null);
-        headerSource = new Source(new SettingsSource(simpleGlass.factory));
+        final SettingsSource simpleSource = new SettingsSource(simpleGlass.factory);
+        actionsSource = new Source(simpleSource);
+        headerSource = new Source(simpleSource);
 
         actionsFactory = createFactory(engine, actionsSource);
+        if (SharedConfig.getDevicePerformanceClass() >= SharedConfig.PERFORMANCE_CLASS_HIGH) {
+            actionsFactory.setLiquidGlassEffectAllowed(true);
+        }
         headerFactory = createFactory(engine, headerSource);
         headerFactory.setLiquidGlassEffectAllowed(true);
 
@@ -159,7 +194,16 @@ public final class ProfileButtonsGlass {
         if (photoProgress != progress) {
             photoProgress = progress;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && captureCanvas != null) {
-                setFilter(captureCanvas, progress > 0 ? new ColorMatrixColorFilter(lerp(IDENTITY, PHOTO_MATRIX, progress)) : null);
+                final ColorMatrixColorFilter filter;
+                if (progress <= 0f) {
+                    filter = null;
+                } else if (progress >= 1f) {
+                    filter = FULL_PHOTO_FILTER;
+                } else {
+                    lerp(IDENTITY, PHOTO_MATRIX, progress, photoMatrixTmp);
+                    filter = new ColorMatrixColorFilter(photoMatrixTmp);
+                }
+                setFilter(captureCanvas, filter);
             }
             invalidate();
         }
@@ -183,12 +227,10 @@ public final class ProfileButtonsGlass {
         }
     }
 
-    private static float[] lerp(float[] from, float[] to, float t) {
-        final float[] out = new float[from.length];
+    private static void lerp(float[] from, float[] to, float t, float[] out) {
         for (int i = 0; i < out.length; i++) {
             out[i] = AndroidUtilities.lerp(from[i], to[i], t);
         }
-        return out;
     }
 
     /** The source of a factory for the glass settings as they are now. */

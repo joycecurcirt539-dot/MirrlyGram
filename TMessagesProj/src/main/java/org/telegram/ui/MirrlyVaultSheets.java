@@ -1,8 +1,10 @@
 package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
+import static org.telegram.messenger.AndroidUtilities.dpf2;
 
 import android.content.Context;
+import android.graphics.Color;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextUtils;
@@ -16,6 +18,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.annotation.Nullable;
+import androidx.core.graphics.ColorUtils;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.DialogObject;
@@ -25,6 +28,7 @@ import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.mirrly.MirrlyVaultStorage;
+import org.telegram.messenger.utils.ViewOutlineProviderImpl;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.BottomSheet;
@@ -36,8 +40,10 @@ import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.EditTextBoldCursor;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.ScaleStateListAnimator;
 import org.telegram.ui.Components.TextStyleSpan;
 import org.telegram.ui.Components.spoilers.SpoilersTextView;
+import org.telegram.ui.Stories.recorder.ButtonWithCounterView;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -71,37 +77,72 @@ public final class MirrlyVaultSheets {
         scrollView.addView(listLayout, LayoutHelper.createScroll(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP));
 
         SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault());
+        final BottomSheet[] sheetHolder = new BottomSheet[1];
 
-        if (history.isEmpty()) {
+        boolean hasCurrent = !TextUtils.isEmpty(currentMessageText);
+        if (history.isEmpty() && !hasCurrent) {
             TextInfoPrivacyCell emptyCell = new TextInfoPrivacyCell(context, resourcesProvider);
             emptyCell.setText(LocaleController.getString(R.string.MirrlyEditHistoryEmpty));
             listLayout.addView(emptyCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         } else {
+            if (history.isEmpty()) {
+                TextInfoPrivacyCell emptyCell = new TextInfoPrivacyCell(context, resourcesProvider);
+                emptyCell.setText(LocaleController.getString(R.string.MirrlyEditHistoryEmpty));
+                listLayout.addView(emptyCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+            }
+            LinearLayout revisionsCard = new LinearLayout(context);
+            revisionsCard.setOrientation(LinearLayout.VERTICAL);
+            revisionsCard.setBackground(MirrlyUiKit.createTintedSurfaceDrawable(14, resourcesProvider));
+            revisionsCard.setOutlineProvider(ViewOutlineProviderImpl.boundsWithPaddingRoundRect(0, dp(14)));
+            revisionsCard.setClipToOutline(true);
+
+            int totalRows = history.size() + (hasCurrent ? 1 : 0);
+            int rowIndex = 0;
+            int versionNum = 1;
             for (int i = 0; i < history.size(); i++) {
                 MirrlyVaultStorage.EditRevision rev = history.get(i);
-                String timeLabel = LocaleController.formatString(R.string.MirrlyEditHistoryVersion, i + 1, sdf.format(new Date(rev.timestamp * 1000L)));
-                addRevisionRow(context, listLayout, timeLabel, rev.text, resourcesProvider, fragment);
+                String formattedDate = sdf.format(new Date(rev.timestamp * 1000L));
+                String timeLabel = rev.isOriginal
+                        ? LocaleController.formatString(R.string.MirrlyEditHistoryOriginal, formattedDate)
+                        : LocaleController.formatString(R.string.MirrlyEditHistoryVersion, versionNum++, formattedDate);
+                addRevisionRow(context, revisionsCard, timeLabel, rev.text, resourcesProvider, fragment, sheetHolder);
+                rowIndex++;
+                if (rowIndex < totalRows) {
+                    addRevisionDivider(context, revisionsCard, resourcesProvider);
+                }
             }
-        }
-
-        if (!TextUtils.isEmpty(currentMessageText)) {
-            addRevisionRow(context, listLayout, LocaleController.getString(R.string.MirrlyEditHistoryCurrent), currentMessageText.toString(), resourcesProvider, fragment);
+            if (hasCurrent) {
+                addRevisionRow(context, revisionsCard, LocaleController.getString(R.string.MirrlyEditHistoryCurrent), currentMessageText.toString(), resourcesProvider, fragment, sheetHolder);
+            }
+            listLayout.addView(revisionsCard, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 16, 4, 16, 4));
         }
 
         root.addView(scrollView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 1f));
 
-        TextView closeBtn = new TextView(context);
-        closeBtn.setGravity(Gravity.CENTER);
-        closeBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        closeBtn.setTypeface(AndroidUtilities.bold());
-        closeBtn.setTextColor(Theme.getColor(Theme.key_featuredStickers_buttonText, resourcesProvider));
-        closeBtn.setBackground(Theme.AdaptiveRipple.filledRectByKey(Theme.key_featuredStickers_addButton, 8));
-        closeBtn.setText(LocaleController.getString(R.string.Close));
+        ButtonWithCounterView closeBtn = new ButtonWithCounterView(context, resourcesProvider).setRound();
+        closeBtn.setText(LocaleController.getString(R.string.Close), false);
         root.addView(closeBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, 16, 12, 16, 0));
 
         BottomSheet sheet = MirrlyUiKit.createFrostedBottomSheet(context, false, resourcesProvider, root);
+        sheetHolder[0] = sheet;
         closeBtn.setOnClickListener(v -> sheet.dismiss());
         fragment.showDialog(sheet);
+    }
+
+    private static void addRevisionDivider(
+            Context context,
+            LinearLayout parent,
+            Theme.ResourcesProvider resourcesProvider
+    ) {
+        View divider = new View(context);
+        divider.setBackgroundColor(Theme.getColor(Theme.key_divider, resourcesProvider));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                Math.max(1, Math.round(dpf2(0.5f)))
+        );
+        lp.leftMargin = LocaleController.isRTL ? 0 : dp(16);
+        lp.rightMargin = LocaleController.isRTL ? dp(16) : 0;
+        parent.addView(divider, lp);
     }
 
     private static void addRevisionRow(
@@ -110,11 +151,12 @@ public final class MirrlyVaultSheets {
             String subtitle,
             String text,
             Theme.ResourcesProvider resourcesProvider,
-            BaseFragment fragment
+            BaseFragment fragment,
+            BottomSheet[] sheetHolder
     ) {
         LinearLayout card = new LinearLayout(context);
         card.setOrientation(LinearLayout.VERTICAL);
-        card.setPadding(dp(20), dp(10), dp(20), dp(10));
+        card.setPadding(dp(16), dp(11), dp(16), dp(11));
         card.setBackground(Theme.getSelectorDrawable(false));
 
         TextView metaView = new TextView(context);
@@ -133,7 +175,10 @@ public final class MirrlyVaultSheets {
 
         card.setOnClickListener(v -> {
             if (AndroidUtilities.addToClipboard(text)) {
-                BulletinFactory.of(fragment).createCopyBulletin(LocaleController.getString(R.string.TextCopied)).show();
+                BulletinFactory factory = sheetHolder != null && sheetHolder[0] != null
+                        ? BulletinFactory.of(sheetHolder[0].getContainer(), resourcesProvider)
+                        : BulletinFactory.of(fragment);
+                factory.createCopyBulletin(LocaleController.getString(R.string.TextCopied)).show();
             }
         });
         parent.addView(card, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
@@ -219,10 +264,17 @@ public final class MirrlyVaultSheets {
         TextView openAllBtn = new TextView(context);
         openAllBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
         openAllBtn.setTypeface(AndroidUtilities.bold());
-        openAllBtn.setTextColor(blueAccent);
+        openAllBtn.setTextColor(ColorUtils.blendARGB(blueAccent, textPrimary, 0.18f));
         openAllBtn.setText(LocaleController.getString(R.string.MirrlyNotesOpenInNotesChat));
-        openAllBtn.setPadding(dp(10), dp(6), dp(10), dp(6));
-        openAllBtn.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(8), Theme.multAlpha(blueAccent, 0.12f), Theme.multAlpha(blueAccent, 0.24f)));
+        openAllBtn.setPadding(dp(12), dp(7), dp(12), dp(7));
+        openAllBtn.setBackground(MirrlyUiKit.createTintedSurfaceDrawable(
+                14,
+                Theme.multAlpha(blueAccent, 0.16f),
+                ColorUtils.setAlphaComponent(blueAccent, 0x4C),
+                resourcesProvider,
+                true
+        ));
+        ScaleStateListAnimator.apply(openAllBtn, 0.03f, 1.0f);
         if (fragment instanceof MirrlyNotesChatActivity) {
             openAllBtn.setVisibility(View.GONE);
         }
@@ -234,8 +286,14 @@ public final class MirrlyVaultSheets {
         if (dialogId != 0 && (msgId != 0 || !TextUtils.isEmpty(finalPeerTitle))) {
             LinearLayout quoteCard = new LinearLayout(context);
             quoteCard.setOrientation(LinearLayout.HORIZONTAL);
-            quoteCard.setPadding(dp(10), dp(8), dp(12), dp(8));
-            quoteCard.setBackground(Theme.createRoundRectDrawable(dp(8), Theme.multAlpha(blueAccent, 0.10f)));
+            quoteCard.setPadding(LocaleController.isRTL ? dp(12) : dp(10), dp(8), LocaleController.isRTL ? dp(10) : dp(12), dp(8));
+            quoteCard.setBackground(MirrlyUiKit.createTintedSurfaceDrawable(
+                    12,
+                    Theme.multAlpha(blueAccent, 0.10f),
+                    ColorUtils.setAlphaComponent(blueAccent, 0x30),
+                    resourcesProvider,
+                    false
+            ));
 
             View stripe = new View(context);
             stripe.setBackground(Theme.createRoundRectDrawable(dp(2), blueAccent));
@@ -283,7 +341,7 @@ public final class MirrlyVaultSheets {
                 quoteCard.addView(stripe, LayoutHelper.createLinear(3, LayoutHelper.MATCH_PARENT, 9, 0, 0, 0));
             } else {
                 quoteCard.addView(stripe, LayoutHelper.createLinear(3, LayoutHelper.MATCH_PARENT, 0, 0, 9, 0));
-                quoteCard.addView(quoteTexts, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+                quoteCard.addView(quoteTexts, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
             }
             root.addView(quoteCard, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 20, 2, 20, 10));
         }
@@ -302,7 +360,7 @@ public final class MirrlyVaultSheets {
         LinearLayout noteReadCard = new LinearLayout(context);
         noteReadCard.setOrientation(LinearLayout.VERTICAL);
         noteReadCard.setPadding(dp(14), dp(12), dp(14), dp(12));
-        noteReadCard.setBackground(Theme.createRoundRectDrawable(dp(12), Theme.multAlpha(textPrimary, 0.05f)));
+        noteReadCard.setBackground(MirrlyUiKit.createTintedSurfaceDrawable(14, resourcesProvider));
 
         if (existing != null && existing.hasMedia()) {
             TextView mediaTagView = new TextView(context);
@@ -357,44 +415,49 @@ public final class MirrlyVaultSheets {
         readActionsRow.setOrientation(LinearLayout.HORIZONTAL);
         readActionsRow.setPadding(dp(16), 0, dp(16), 0);
 
-        TextView editActionBtn = new TextView(context);
-        editActionBtn.setGravity(Gravity.CENTER);
-        editActionBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        editActionBtn.setTypeface(AndroidUtilities.bold());
-        editActionBtn.setTextColor(Theme.getColor(Theme.key_featuredStickers_buttonText, resourcesProvider));
-        editActionBtn.setBackground(Theme.AdaptiveRipple.filledRectByKey(Theme.key_featuredStickers_addButton, 8));
-        editActionBtn.setText(LocaleController.getString(R.string.MirrlyNotesEdit));
-        readActionsRow.addView(editActionBtn, LayoutHelper.createLinear(0, 44, 1f, 0, 0, 6, 0));
+        ButtonWithCounterView editActionBtn = new ButtonWithCounterView(context, resourcesProvider).setRound();
+        editActionBtn.setText(LocaleController.getString(R.string.MirrlyNotesEdit), false);
 
-        TextView copyActionBtn = new TextView(context);
-        copyActionBtn.setGravity(Gravity.CENTER);
-        copyActionBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        copyActionBtn.setTypeface(AndroidUtilities.bold());
-        copyActionBtn.setTextColor(blueAccent);
-        copyActionBtn.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(8), Theme.multAlpha(blueAccent, 0.12f), Theme.multAlpha(blueAccent, 0.24f)));
-        copyActionBtn.setText(LocaleController.getString(R.string.Copy));
+        ButtonWithCounterView copyActionBtn = new ButtonWithCounterView(context, resourcesProvider).setRound();
+        copyActionBtn.setUseWrapContent(true);
         copyActionBtn.setPadding(dp(14), 0, dp(14), 0);
-        readActionsRow.addView(copyActionBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 44, 0, 0, 6, 0));
+        copyActionBtn.setColor(Theme.multAlpha(blueAccent, 0.14f));
+        copyActionBtn.setTextColor(blueAccent);
+        copyActionBtn.setText(LocaleController.getString(R.string.Copy), false);
 
         int redColor = Theme.getColor(Theme.key_text_RedRegular, resourcesProvider);
-        TextView deleteActionBtn = new TextView(context);
-        deleteActionBtn.setGravity(Gravity.CENTER);
-        deleteActionBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        deleteActionBtn.setTypeface(AndroidUtilities.bold());
-        deleteActionBtn.setTextColor(redColor);
-        deleteActionBtn.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(8), Theme.multAlpha(redColor, 0.10f), Theme.multAlpha(redColor, 0.22f)));
-        deleteActionBtn.setText(LocaleController.getString(R.string.Delete));
+        ButtonWithCounterView deleteActionBtn = new ButtonWithCounterView(context, resourcesProvider).setRound();
+        deleteActionBtn.setUseWrapContent(true);
         deleteActionBtn.setPadding(dp(14), 0, dp(14), 0);
-        readActionsRow.addView(deleteActionBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 44));
+        deleteActionBtn.setColor(Theme.multAlpha(redColor, 0.12f));
+        deleteActionBtn.setTextColor(redColor);
+        deleteActionBtn.setText(LocaleController.getString(R.string.Delete), false);
+
+        if (LocaleController.isRTL) {
+            readActionsRow.addView(deleteActionBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 48, 0, 0, 6, 0));
+            readActionsRow.addView(copyActionBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 48, 0, 0, 6, 0));
+            readActionsRow.addView(editActionBtn, LayoutHelper.createLinear(0, 48, 1f));
+        } else {
+            readActionsRow.addView(editActionBtn, LayoutHelper.createLinear(0, 48, 1f, 0, 0, 6, 0));
+            readActionsRow.addView(copyActionBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 48, 0, 0, 6, 0));
+            readActionsRow.addView(deleteActionBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 48));
+        }
 
         viewPanel.addView(readActionsRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         // Build Edit panel
+        boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
+        int surfaceFill = ColorUtils.setAlphaComponent(isDark ? Color.WHITE : Color.BLACK, isDark ? 0x16 : 0x0D);
+        int surfaceRim = MirrlyUiKit.resolveSurfaceHairlineColor(resourcesProvider);
+
+        FrameLayout inputBox = new FrameLayout(context);
+        inputBox.setBackground(MirrlyUiKit.createTintedSurfaceDrawable(14, surfaceFill, surfaceRim, resourcesProvider, false));
+
         EditTextBoldCursor editText = new EditTextBoldCursor(context);
         editText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
-        editText.setHintTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteHintText, resourcesProvider));
+        editText.setHintTextColor(ColorUtils.blendARGB(textSecondary, textPrimary, 0.28f));
         editText.setTextColor(textPrimary);
-        editText.setBackground(Theme.createEditTextDrawable(context, false));
+        editText.setBackground(null);
         editText.setCursorColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueHeader, resourcesProvider));
         editText.setCursorSize(dp(20));
         editText.setCursorWidth(1.5f);
@@ -403,23 +466,36 @@ public final class MirrlyVaultSheets {
         editText.setGravity(LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT);
         editText.setHint(LocaleController.getString(R.string.MirrlyDossierInputHint));
         editText.setImeOptions(EditorInfo.IME_FLAG_NO_EXTRACT_UI);
-        editText.setPadding(0, dp(8), 0, dp(8));
+        editText.setPadding(dp(14), dp(12), dp(14), dp(12));
         if (existing != null && !TextUtils.isEmpty(existing.text)) {
             editText.setText(existing.text);
             editText.setSelection(existing.text.length());
         }
-        editPanel.addView(editText, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 20, 4, 20, 6));
+        inputBox.addView(editText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        editPanel.addView(inputBox, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 20, 4, 20, 8));
 
-        TextCheckCell spoilerCheckCell = new TextCheckCell(context, resourcesProvider);
+        TextCheckCell spoilerCheckCell = new TextCheckCell(context, 16, true, resourcesProvider);
+        spoilerCheckCell.getCheckBox().setColors(
+                Theme.key_windowBackgroundWhiteGrayText,
+                Theme.key_switchTrackChecked,
+                Theme.key_windowBackgroundWhite,
+                Theme.key_windowBackgroundWhite
+        );
         spoilerCheckCell.setTextAndCheck(LocaleController.getString(R.string.MirrlyDossierSpoilerCheck), spoilerState[0], false);
-        spoilerCheckCell.setBackground(Theme.getSelectorDrawable(false));
+        spoilerCheckCell.setBackground(MirrlyUiKit.createTintedSurfaceDrawable(14, surfaceFill, surfaceRim, resourcesProvider, true));
+        spoilerCheckCell.setOutlineProvider(ViewOutlineProviderImpl.boundsWithPaddingRoundRect(0, dp(14)));
+        spoilerCheckCell.setClipToOutline(true);
         spoilerCheckCell.setOnClickListener(v -> {
             spoilerState[0] = !spoilerState[0];
             spoilerCheckCell.setChecked(spoilerState[0]);
         });
-        editPanel.addView(spoilerCheckCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
+        editPanel.addView(spoilerCheckCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 20, 0, 20, 4));
 
         TextInfoPrivacyCell infoCell = new TextInfoPrivacyCell(context, resourcesProvider);
+        infoCell.setBackground(null);
+        if (infoCell.getTextView() != null) {
+            infoCell.getTextView().setTextColor(ColorUtils.blendARGB(textSecondary, textPrimary, 0.18f));
+        }
         infoCell.setText(LocaleController.getString(R.string.MirrlyDossierPrivacyInfo));
         editPanel.addView(infoCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -427,27 +503,28 @@ public final class MirrlyVaultSheets {
         editButtonsRow.setOrientation(LinearLayout.HORIZONTAL);
         editButtonsRow.setPadding(dp(16), dp(6), dp(16), 0);
 
-        TextView cancelEditBtn = null;
+        ButtonWithCounterView cancelEditBtn = null;
         if (existing != null) {
-            cancelEditBtn = new TextView(context);
-            cancelEditBtn.setGravity(Gravity.CENTER);
-            cancelEditBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-            cancelEditBtn.setTypeface(AndroidUtilities.bold());
-            cancelEditBtn.setTextColor(blueAccent);
-            cancelEditBtn.setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(8), Theme.multAlpha(blueAccent, 0.12f), Theme.multAlpha(blueAccent, 0.22f)));
-            cancelEditBtn.setText(LocaleController.getString(R.string.Cancel));
+            cancelEditBtn = new ButtonWithCounterView(context, resourcesProvider).setRound().setNeutral();
+            cancelEditBtn.setUseWrapContent(true);
             cancelEditBtn.setPadding(dp(18), 0, dp(18), 0);
-            editButtonsRow.addView(cancelEditBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 48, 0, 0, 8, 0));
+            cancelEditBtn.setText(LocaleController.getString(R.string.Cancel), false);
         }
 
-        TextView saveBtn = new TextView(context);
-        saveBtn.setGravity(Gravity.CENTER);
-        saveBtn.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        saveBtn.setTypeface(AndroidUtilities.bold());
-        saveBtn.setTextColor(Theme.getColor(Theme.key_featuredStickers_buttonText, resourcesProvider));
-        saveBtn.setBackground(Theme.AdaptiveRipple.filledRectByKey(Theme.key_featuredStickers_addButton, 8));
-        saveBtn.setText(LocaleController.getString(R.string.Save));
-        editButtonsRow.addView(saveBtn, LayoutHelper.createLinear(0, 48, 1f));
+        ButtonWithCounterView saveBtn = new ButtonWithCounterView(context, resourcesProvider).setRound();
+        saveBtn.setText(LocaleController.getString(R.string.Save), false);
+
+        if (cancelEditBtn != null) {
+            if (LocaleController.isRTL) {
+                editButtonsRow.addView(saveBtn, LayoutHelper.createLinear(0, 48, 1f, 0, 0, 8, 0));
+                editButtonsRow.addView(cancelEditBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 48));
+            } else {
+                editButtonsRow.addView(cancelEditBtn, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 48, 0, 0, 8, 0));
+                editButtonsRow.addView(saveBtn, LayoutHelper.createLinear(0, 48, 1f));
+            }
+        } else {
+            editButtonsRow.addView(saveBtn, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48));
+        }
 
         editPanel.addView(editButtonsRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -496,7 +573,7 @@ public final class MirrlyVaultSheets {
 
         copyActionBtn.setOnClickListener(v -> {
             if (existing != null && AndroidUtilities.addToClipboard(existing.text)) {
-                BulletinFactory.of(fragment).createCopyBulletin(LocaleController.getString(R.string.TextCopied)).show();
+                BulletinFactory.of(sheet.getContainer(), resourcesProvider).createCopyBulletin(LocaleController.getString(R.string.TextCopied)).show();
             }
         });
 

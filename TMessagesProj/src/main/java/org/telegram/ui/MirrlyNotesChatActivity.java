@@ -1,6 +1,7 @@
 package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
+import static org.telegram.messenger.AndroidUtilities.dpf2;
 import static org.telegram.messenger.LocaleController.getString;
 
 import android.animation.Animator;
@@ -20,10 +21,13 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
@@ -58,6 +62,7 @@ import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.ColorUtils;
 import androidx.core.graphics.Insets;
+import androidx.core.math.MathUtils;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.dynamicanimation.animation.DynamicAnimation;
@@ -89,8 +94,10 @@ import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
 import org.telegram.messenger.VideoEditedInfo;
 import org.telegram.messenger.mirrly.MirrlyVaultStorage;
+import org.telegram.messenger.utils.ViewOutlineProviderImpl;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.Components.ScaleStateListAnimator;
 import org.telegram.ui.ActionBar.ActionBarMenu;
 import org.telegram.ui.ActionBar.ActionBarMenuItem;
 import org.telegram.ui.ActionBar.AdjustPanLayoutHelper;
@@ -130,8 +137,11 @@ import org.telegram.ui.Components.ThanosEffect;
 import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
 import org.telegram.ui.Components.blur3.DownscaleScrollableNoiseSuppressor;
 import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
+import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundColorProvider;
 import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundColorProviderThemed;
+import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundProvider;
 import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
+import org.telegram.utils.glass.GlassContrastHelper;
 import org.telegram.ui.Components.chat.ChatInputViewsContainer;
 import org.telegram.ui.Components.chat.ViewPositionWatcher;
 import org.telegram.ui.Components.chat.WallpaperBitmapProvider;
@@ -174,7 +184,6 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
     private static final int AM_FORWARD = 10;
     private static final int AM_DELETE = 11;
 
-    private final GlassEngine glassEngine = new GlassEngine();
     private final @NonNull GlassSourceWrapped navbarContentSourceWallpaper;
     private final @NonNull BlurredBackgroundDrawableViewFactory navbarContentDrawableFactory;
     private final @Nullable GlassSourceRenderNode glassBackgroundSourceRenderNode;
@@ -220,11 +229,13 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
     private TextView emptySubtitleView;
 
     private FrameLayout pinnedNoteBar;
+    private ImageView pinnedNoteIconView;
     private TextView pinnedNoteTitleView;
     private TextView pinnedNoteBodyView;
     private ImageView pinnedNoteUnpinBtn;
     private @Nullable MirrlyVaultStorage.DossierNote currentPinnedNote;
 
+    private FrameLayout filterChipsContainer;
     private HorizontalScrollView filterChipsScroll;
     private LinearLayout filterChipsRow;
     private final ArrayList<FilterChipView> filterChipViews = new ArrayList<>();
@@ -232,6 +243,8 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
     private FrameLayout filterBanner;
     private TextView filterBannerText;
     private ImageView filterBannerClear;
+
+    private float floatingDateOffset = 0f;
 
     private ChatActivityBlurredRoundPageDownButton scrollDownButton;
     private boolean scrollDownVisible = false;
@@ -241,6 +254,7 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
     private FrameLayout chatInputInAppContainer;
     private LinearLayout composerColumn;
     private LinearLayout editBannerRow;
+    private GradientDrawable editBannerAccentDrawable;
     private TextView editBannerTitle;
     private TextView editBannerPreview;
     private ImageView editBannerClose;
@@ -320,21 +334,32 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
             glassBackgroundSourceFrostedRenderNode.setScrollableNoiseSuppressor(scrollableViewNoiseSuppressor, DownscaleScrollableNoiseSuppressor.DRAW_FROSTED_GLASS);
             glassBackgroundSourceFrostedRenderNode.setUnderSource(navbarContentSourceWallpaper);
 
-            glassBackgroundDrawableFactoryFrosted = new BlurredBackgroundDrawableViewFactory(glassBackgroundSourceFrostedRenderNode);
-            glassBackgroundDrawableFactoryFrosted.setGlassEngine(glassEngine);
-            glassBackgroundDrawableFactoryFrosted.setOutset(dp(48));
-
-            if (LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS)) {
+            if (Build.VERSION.SDK_INT >= 33) {
                 glassBackgroundSourceRenderNode = new GlassSourceRenderNode(navbarContentSourceWallpaper);
                 glassBackgroundSourceRenderNode.setScrollableNoiseSuppressor(scrollableViewNoiseSuppressor, DownscaleScrollableNoiseSuppressor.DRAW_GLASS);
                 glassBackgroundSourceRenderNode.setUnderSource(navbarContentSourceWallpaper);
-                glassBackgroundDrawableFactory = new BlurredBackgroundDrawableViewFactory(glassBackgroundSourceRenderNode);
+                glassBackgroundDrawableFactory = new BlurredBackgroundDrawableViewFactory(
+                        glassBackgroundSourceRenderNode,
+                        glassBackgroundSourceFrostedRenderNode,
+                        navbarContentSourceWallpaper
+                );
                 glassBackgroundDrawableFactory.setGlassEngine(glassEngine);
-                glassBackgroundDrawableFactory.setOutset(dp(8));
+                glassBackgroundDrawableFactory.setOutset(LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) ? dp(8) : dp(48));
                 glassBackgroundDrawableFactory.setLiquidGlassEffectAllowed(true);
-                recommendedAdditionalSizeY = 0;
+
+                glassBackgroundDrawableFactoryFrosted = new BlurredBackgroundDrawableViewFactory(
+                        glassBackgroundSourceRenderNode,
+                        glassBackgroundSourceFrostedRenderNode,
+                        navbarContentSourceWallpaper
+                );
+                glassBackgroundDrawableFactoryFrosted.setGlassEngine(glassEngine);
+                glassBackgroundDrawableFactoryFrosted.setOutset(dp(48));
+                recommendedAdditionalSizeY = LiteMode.isEnabled(LiteMode.FLAG_LIQUID_GLASS) ? 0 : dp(48);
             } else {
                 glassBackgroundSourceRenderNode = null;
+                glassBackgroundDrawableFactoryFrosted = new BlurredBackgroundDrawableViewFactory(glassBackgroundSourceFrostedRenderNode);
+                glassBackgroundDrawableFactoryFrosted.setGlassEngine(glassEngine);
+                glassBackgroundDrawableFactoryFrosted.setOutset(dp(48));
                 glassBackgroundDrawableFactory = glassBackgroundDrawableFactoryFrosted;
                 recommendedAdditionalSizeY = dp(48);
             }
@@ -385,6 +410,7 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
     @Override
     public void onFragmentDestroy() {
         removingFromParent = true;
+        cancelNotesAdaptiveTick();
         AndroidUtilities.removeAdjustResize(getParentActivity(), classGuid);
         MediaController.getInstance().cleanupPlayer(true, true);
         if (chatActivityEnterView != null) {
@@ -417,6 +443,10 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         NotificationCenter.getInstance(currentAccount).removeObserver(this, NotificationCenter.messagePlayingProgressDidChanged);
 
         MirrlyVaultStorage.cleanupOrphanedMediaFiles();
+        if (notesAdaptiveTickPosted && contentView != null) {
+            contentView.removeCallbacks(notesAdaptiveTickRunnable);
+        }
+        notesAdaptiveTickPosted = false;
         super.onFragmentDestroy();
     }
 
@@ -609,6 +639,7 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         actionBar.addView(avatarContainer, 0, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.MATCH_PARENT, Gravity.TOP | Gravity.LEFT, 54, 0, 96, 0));
 
         ActionBarMenu menu = actionBar.createMenu();
+        actionBar.setGlassMenuIndividualCircles(true);
         searchIconItem = menu.addItem(MENU_SEARCH_ICON, R.drawable.outline_header_search);
         searchIconItem.setContentDescription(getString(R.string.Search));
 
@@ -618,6 +649,7 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
                     @Override
                     public void onSearchExpand() {
                         isSearching = true;
+                        actionBar.setSearchFactor(1f);
                         avatarContainer.setVisibility(View.GONE);
                         if (searchIconItem != null) {
                             searchIconItem.setVisibility(View.GONE);
@@ -639,6 +671,7 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
                     @Override
                     public void onSearchCollapse() {
                         isSearching = false;
+                        actionBar.setSearchFactor(0f);
                         searchQuery = "";
                         currentSearchNavPos = -1;
                         avatarContainer.setVisibility(View.VISIBLE);
@@ -687,8 +720,8 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         filterItem.setContentDescription(getString(R.string.MirrlyNotesFilterDesc));
 
         ActionBarMenu actionMode = actionBar.createActionMode();
-        actionMode.addItemWithWidth(AM_FORWARD, R.drawable.msg_forward, dp(54), getString(R.string.MirrlyNotesForwardToChat));
-        actionMode.addItemWithWidth(AM_DELETE, R.drawable.msg_delete, dp(54), getString(R.string.Delete));
+        ThemeBind.clear(actionMode);
+        actionMode.setBackgroundColor(Color.TRANSPARENT);
     }
 
     private void openNotesSearch() {
@@ -707,7 +740,7 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
             }
         };
         chatListView.setVerticalScrollBarEnabled(false);
-        chatListView.setClipToPadding(false);
+        chatListView.setClipToPadding(true);
         chatListView.setAdapter(notesAdapter = new NotesAdapter(context));
 
         chatLayoutManager = new LinearLayoutManager(context, LinearLayoutManager.VERTICAL, true) {
@@ -737,12 +770,20 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
                 } else if (newState == RecyclerView.SCROLL_STATE_IDLE) {
                     scrollingFloatingDate = false;
                     hideFloatingDateView(true);
+                    notesAdaptiveScrollGen++;
+                    scheduleNotesAdaptiveGlassContrastUpdate(true);
+                    if (floatingDateView != null && floatingDateView.getAlpha() > 0.01f) {
+                        floatingDateView.invalidate();
+                    }
                 }
             }
 
             @Override
             public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
                 chatListView.invalidate();
+                if (dy != 0) {
+                    notesAdaptiveScrollGen++;
+                }
                 if (dy != 0 && scrollingFloatingDate && !currentFloatingTopIsNotMessage) {
                     showFloatingDateView();
                 }
@@ -794,8 +835,13 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         emptyCardView = new LinearLayout(context);
         emptyCardView.setOrientation(LinearLayout.VERTICAL);
         emptyCardView.setGravity(Gravity.CENTER_HORIZONTAL);
-        emptyCardView.setPadding(dp(20), dp(18), dp(20), dp(18));
-        emptyCardView.setBackground(Theme.createServiceDrawable(dp(16), emptyCardView, contentView));
+        emptyCardView.setPadding(dp(24), dp(22), dp(24), dp(22));
+        emptyCardView.setOutlineProvider(ViewOutlineProviderImpl.boundsWithPaddingRoundRect(dp(4), dp(20)));
+        emptyCardView.setClipToOutline(true);
+        emptyCardView.setBackground(glassBackgroundDrawableFactory.create(emptyCardView)
+                .setColorProvider(BlurredBackgroundProviderImpl.topPanelChatActivity(resourceProvider))
+                .setRadius(dp(20))
+                .setPadding(dp(4)));
 
         emptyLottieView = new RLottieImageView(context);
         emptyLottieView.setAutoRepeat(true);
@@ -807,14 +853,14 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         emptyTitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 17);
         emptyTitleView.setTypeface(AndroidUtilities.bold());
         emptyTitleView.setGravity(Gravity.CENTER);
-        ThemeBind.textColor(emptyTitleView, Theme.key_chat_serviceText, resourceProvider);
+        ThemeBind.textColor(emptyTitleView, Theme.key_windowBackgroundWhiteBlackText, resourceProvider);
         emptyCardView.addView(emptyTitleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 6));
 
         emptySubtitleView = new TextView(context);
         emptySubtitleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         emptySubtitleView.setGravity(Gravity.CENTER);
         emptySubtitleView.setLineSpacing(dp(2), 1f);
-        ThemeBind.textColor(emptySubtitleView, Theme.key_chat_serviceText, resourceProvider);
+        ThemeBind.textColor(emptySubtitleView, Theme.key_windowBackgroundWhiteGrayText, resourceProvider);
         emptyCardView.addView(emptySubtitleView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
 
         emptyViewContainer.addView(emptyCardView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER));
@@ -829,16 +875,193 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         chatActivityFadeView.setFadeZoneTop(AndroidUtilities.statusBarHeight + ActionBar.getCurrentActionBarHeight());
         contentView.addView(chatActivityFadeView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-        floatingDateView = new ChatActionCell(context, false, resourceProvider);
+        floatingDateView = new ChatActionCell(context, false, resourceProvider) {
+            private boolean dateTickPosted;
+            private final Runnable invalidateSelfRunnable = () -> {
+                dateTickPosted = false;
+                invalidate();
+            };
+            private BlurredBackgroundDrawable glassBackground;
+            private BlurredBackgroundColorProvider glassColorProvider;
+            private int lastServiceBg;
+            private int lastTextColor;
+            private int lastGlassGeneration = -1;
+            private float lastGlassRadius;
+            private float dateInvertFactor = 0f;
+            private boolean dateAdaptiveSampled;
+            private long lastDateSampleMs;
+            private int lastDateScrollGen = Integer.MIN_VALUE;
+            private float lastDateTransY = Float.NaN;
+            private int lastDateSampleGlassGen = -1;
+            private int lastDateSampleTextColor;
+            private int lastDateValue = Integer.MIN_VALUE;
+            private float lastDateUnderLuma;
+
+            private void ensureGlassBackground() {
+                if (glassBackground == null && glassBackgroundDrawableFactory != null) {
+                    glassColorProvider = createNotesFloatingPillColorProvider(Theme.key_chat_serviceText);
+                    glassBackground = glassBackgroundDrawableFactory.create(
+                            this,
+                            glassColorProvider
+                    );
+                    glassBackground.setRadius(dp(12));
+                    glassBackground.setPadding(dp(4));
+                    glassBackground.setCallback(this);
+                }
+            }
+
+            @Override
+            protected boolean verifyDrawable(@NonNull Drawable who) {
+                return who == glassBackground || super.verifyDrawable(who);
+            }
+
+            @Override
+            public void drawBackground(Canvas canvas, boolean fromParent) {
+                final boolean useGlass = glassBackgroundDrawableFactory != null
+                        && (!Theme.isCompactMode(resourceProvider) || org.telegram.messenger.mirrly.MirrlyConfig.isLiquidGlassEverywhere())
+                        && BlurredBackgroundProviderImpl.checkBlurEnabled(currentAccount, resourceProvider);
+                if (!useGlass) {
+                    super.drawBackground(canvas, fromParent);
+                    return;
+                }
+                canvas.save();
+                canvas.clipRect(0, 0, 0, 0);
+                super.drawBackground(canvas, fromParent);
+                canvas.restore();
+
+                final int left = getBoundsLeft();
+                final int right = getBoundsRight();
+                final int top = getPaddingTop() + dp(4);
+                final int bottom = getMeasuredHeight() - getPaddingBottom() - dp(4);
+                if (right <= left || bottom <= top) {
+                    return;
+                }
+                ensureGlassBackground();
+                if (glassBackground == null) {
+                    return;
+                }
+                final int serviceBg = Theme.getColor(Theme.key_chat_serviceBackground, resourceProvider);
+                final int textColor = Theme.getColor(Theme.key_chat_serviceText, resourceProvider);
+                final int glassGeneration = org.telegram.utils.glass.GlassEngine.getGlassSettingsGenerationId();
+                if (lastServiceBg != serviceBg || lastTextColor != textColor || lastGlassGeneration != glassGeneration) {
+                    lastServiceBg = serviceBg;
+                    lastTextColor = textColor;
+                    lastGlassGeneration = glassGeneration;
+                    glassBackground.updateColors();
+                }
+                final float radius = Math.max(dp(12), (bottom - top) / 2f);
+                if (lastGlassRadius != radius) {
+                    lastGlassRadius = radius;
+                    glassBackground.setRadius(radius);
+                }
+                final int p = dp(4);
+                glassBackground.setBounds(left - p, top - p, right + p, bottom + p);
+                if (glassColorProvider != null) {
+                    final long now = SystemClock.uptimeMillis();
+                    final float curTransY = getTranslationY();
+                    final int curDate = getCustomDate();
+                    final boolean moved = lastDateScrollGen != notesAdaptiveScrollGen
+                            || Float.isNaN(lastDateTransY)
+                            || Math.abs(curTransY - lastDateTransY) > 1f;
+                    final boolean needsSample = !dateAdaptiveSampled
+                            || lastDateSampleGlassGen != glassGeneration
+                            || lastDateSampleTextColor != textColor
+                            || lastDateValue != curDate
+                            || (moved && (now - lastDateSampleMs >= 80L));
+                    if (needsSample) {
+                        dateAdaptiveSampled = true;
+                        lastDateSampleMs = now;
+                        lastDateScrollGen = notesAdaptiveScrollGen;
+                        lastDateTransY = curTransY;
+                        lastDateSampleGlassGen = glassGeneration;
+                        lastDateSampleTextColor = textColor;
+                        lastDateValue = curDate;
+                        final float bandLeft = Math.max(0f, left - sideMenuWidth / 2f - p);
+                        final float bandRight = Math.min(Math.max(bandLeft + 1f, getWidth()), right - sideMenuWidth / 2f + p);
+                        lastDateUnderLuma = GlassContrastHelper.estimateUnderlyingLuminanceInBand(
+                                this, chatListView, bandLeft, 0f, bandRight, getHeight(),
+                                getNotesTopBackdropLuminance(), resourceProvider);
+                    }
+                    final float effLuma = GlassContrastHelper.computeEffectiveGlassLuminance(
+                            glassColorProvider.getBackgroundColor(), lastDateUnderLuma, true);
+                    final boolean expectDark = GlassContrastHelper.computeLuminance(textColor) < 0.5f;
+                    final float nextFactor = GlassContrastHelper.updateContrastInvertFactor(
+                            dateInvertFactor, effLuma, expectDark, 0.28f);
+                    if (Math.abs(nextFactor - dateInvertFactor) > 0.008f && !dateTickPosted) {
+                        dateTickPosted = true;
+                        postOnAnimation(invalidateSelfRunnable);
+                    }
+                    dateInvertFactor = nextFactor;
+                    final int adaptedDateText = dateInvertFactor > 0.005f
+                            ? GlassContrastHelper.blendAdaptiveTextColor(textColor, dateInvertFactor, false)
+                            : 0;
+                    final boolean needHalo = dateInvertFactor > 0.05f || (effLuma > 0.28f && effLuma < 0.72f);
+                    setCustomDateAdaptiveStyle(adaptedDateText, needHalo);
+                }
+                canvas.save();
+                canvas.translate(-sideMenuWidth / 2f, -getPaddingTop());
+                glassBackground.draw(canvas);
+                canvas.restore();
+            }
+
+            @Override
+            public boolean isFloating() {
+                return true;
+            }
+
+            @Override
+            public void setTranslationY(float translationY) {
+                if (getTranslationY() != translationY) {
+                    invalidate();
+                }
+                super.setTranslationY(translationY);
+            }
+
+            @Override
+            protected void onDraw(Canvas canvas) {
+                float clipTop = getFloatingDateRestTop() - getY();
+                if (clipTop > 0f) {
+                    if (clipTop < getMeasuredHeight()) {
+                        canvas.save();
+                        canvas.clipRect(0, clipTop, getMeasuredWidth(), getMeasuredHeight());
+                        super.onDraw(canvas);
+                        canvas.restore();
+                    }
+                } else {
+                    super.onDraw(canvas);
+                }
+            }
+
+            @Override
+            public void setAlpha(float alpha) {
+                super.setAlpha(alpha);
+                int nextVisibility = alpha > 0f ? View.VISIBLE : View.INVISIBLE;
+                if (getVisibility() != nextVisibility) {
+                    setVisibility(nextVisibility);
+                }
+            }
+        };
+        floatingDateView.setCustomDate((int) (System.currentTimeMillis() / 1000), false, false);
         floatingDateView.setAlpha(0f);
         floatingDateView.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        floatingDateView.setInvalidateColors(true);
         contentView.addView(floatingDateView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, 4, 0, 0));
+    }
+
+    private float getFloatingDateRestTop() {
+        float top = chatListView != null && chatListView.getPaddingTop() > 0
+                ? chatListView.getY() + chatListView.getPaddingTop() - dp(4)
+                : AndroidUtilities.statusBarHeight + ActionBar.getCurrentActionBarHeight() + getTopExtraOverlayHeight() + dp(4);
+        return top + contentPanTranslation;
     }
 
     private void buildTopOverlays(Context context) {
         // Pinned note bar
         pinnedNoteBar = new FrameLayout(context);
         pinnedNoteBar.setVisibility(View.GONE);
+        pinnedNoteBar.setPadding(dp(4), dp(4), dp(4), dp(4));
+        pinnedNoteBar.setOutlineProvider(ViewOutlineProviderImpl.boundsWithPaddingRoundRect(dp(4), dp(16)));
+        pinnedNoteBar.setClipToOutline(true);
         pinnedNoteBar.setBackground(glassBackgroundDrawableFactory.create(pinnedNoteBar)
                 .setColorProvider(BlurredBackgroundProviderImpl.topPanelChatActivity(resourceProvider))
                 .setRadius(dp(16))
@@ -847,13 +1070,12 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         LinearLayout pinnedRow = new LinearLayout(context);
         pinnedRow.setOrientation(LinearLayout.HORIZONTAL);
         pinnedRow.setGravity(Gravity.CENTER_VERTICAL);
-        pinnedRow.setPadding(dp(12), dp(6), dp(6), dp(6));
+        pinnedRow.setPadding(LocaleController.isRTL ? dp(4) : dp(10), dp(4), LocaleController.isRTL ? dp(10) : dp(4), dp(4));
 
-        ImageView pinIcon = new ImageView(context);
-        pinIcon.setScaleType(ImageView.ScaleType.CENTER);
-        pinIcon.setImageResource(R.drawable.msg_pin);
-        pinIcon.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_chat_messagePanelSend, resourceProvider), PorterDuff.Mode.SRC_IN));
-        pinnedRow.addView(pinIcon, LayoutHelper.createLinear(22, 22, 0, 0, 8, 0));
+        pinnedNoteIconView = new ImageView(context);
+        pinnedNoteIconView.setScaleType(ImageView.ScaleType.CENTER);
+        pinnedNoteIconView.setImageResource(R.drawable.msg_pin);
+        pinnedNoteIconView.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_chat_messagePanelSend, resourceProvider), PorterDuff.Mode.SRC_IN));
 
         LinearLayout pinnedTexts = new LinearLayout(context);
         pinnedTexts.setOrientation(LinearLayout.VERTICAL);
@@ -875,12 +1097,10 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         pinnedNoteBodyView.setGravity(LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT);
         pinnedTexts.addView(pinnedNoteBodyView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        pinnedRow.addView(pinnedTexts, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
-
         pinnedNoteUnpinBtn = new ImageView(context);
         pinnedNoteUnpinBtn.setScaleType(ImageView.ScaleType.CENTER);
         pinnedNoteUnpinBtn.setImageResource(R.drawable.msg_close);
-        pinnedNoteUnpinBtn.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayIcon, resourceProvider), PorterDuff.Mode.MULTIPLY));
+        pinnedNoteUnpinBtn.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_chat_topPanelClose, resourceProvider), PorterDuff.Mode.MULTIPLY));
         pinnedNoteUnpinBtn.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector, resourceProvider), 1));
         pinnedNoteUnpinBtn.setOnClickListener(v -> {
             if (currentPinnedNote != null) {
@@ -889,7 +1109,16 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
                 BulletinFactory.of(this).createSimpleBulletin(R.raw.info, getString(R.string.MirrlyNotesUnpinnedToast)).show();
             }
         });
-        pinnedRow.addView(pinnedNoteUnpinBtn, LayoutHelper.createLinear(32, 32));
+
+        if (LocaleController.isRTL) {
+            pinnedRow.addView(pinnedNoteUnpinBtn, LayoutHelper.createLinear(32, 32));
+            pinnedRow.addView(pinnedTexts, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+            pinnedRow.addView(pinnedNoteIconView, LayoutHelper.createLinear(22, 22, 8, 0, 0, 0));
+        } else {
+            pinnedRow.addView(pinnedNoteIconView, LayoutHelper.createLinear(22, 22, 0, 0, 8, 0));
+            pinnedRow.addView(pinnedTexts, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+            pinnedRow.addView(pinnedNoteUnpinBtn, LayoutHelper.createLinear(32, 32));
+        }
 
         pinnedNoteBar.addView(pinnedRow, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
         pinnedNoteBar.setOnClickListener(v -> {
@@ -899,16 +1128,49 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         });
         contentView.addView(pinnedNoteBar, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP, 8, 0, 8, 0));
 
-        // Search filter chips strip
+        // Stationary glass capsule wrapping horizontally scrollable lightweight Canvas filter chips
+        filterChipsContainer = new FrameLayout(context) {
+            private final Path clipPath = new Path();
+            private final RectF clipRect = new RectF();
+            private int lastClipW = -1;
+            private int lastClipH = -1;
+
+            @Override
+            protected void dispatchDraw(Canvas canvas) {
+                final int w = getWidth();
+                final int h = getHeight();
+                if (w != lastClipW || h != lastClipH) {
+                    lastClipW = w;
+                    lastClipH = h;
+                    float inset = dp(4);
+                    clipRect.set(inset, inset, w - inset, h - inset);
+                    float radius = Math.min(dp(18), clipRect.height() * 0.5f);
+                    clipPath.rewind();
+                    clipPath.addRoundRect(clipRect, radius, radius, Path.Direction.CW);
+                }
+                canvas.save();
+                canvas.clipPath(clipPath);
+                super.dispatchDraw(canvas);
+                canvas.restore();
+            }
+        };
+        filterChipsContainer.setVisibility(View.GONE);
+        filterChipsContainer.setAlpha(0f);
+        filterChipsContainer.setPadding(dp(4), dp(4), dp(4), dp(4));
+        filterChipsContainer.setBackground(glassBackgroundDrawableFactory.create(filterChipsContainer)
+                .setColorProvider(BlurredBackgroundProviderImpl.topPanelChatActivity(resourceProvider))
+                .setPadding(dp(4))
+                .setRadius(dp(18)));
+
         filterChipsScroll = new HorizontalScrollView(context);
         filterChipsScroll.setHorizontalScrollBarEnabled(false);
         filterChipsScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        filterChipsScroll.setVisibility(View.GONE);
-        filterChipsScroll.setAlpha(0f);
+        filterChipsScroll.setClipChildren(true);
 
         filterChipsRow = new LinearLayout(context);
         filterChipsRow.setOrientation(LinearLayout.HORIZONTAL);
-        filterChipsRow.setPadding(dp(12), dp(2), dp(12), dp(2));
+        filterChipsRow.setGravity(Gravity.CENTER_VERTICAL | (LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT));
+        filterChipsRow.setPadding(dp(6), dp(2), dp(6), dp(2));
 
         addFilterChip(context, MirrlyVaultStorage.FILTER_ALL, getString(R.string.MirrlyNotesFilterChipAll));
         addFilterChip(context, MirrlyVaultStorage.FILTER_MESSAGES, getString(R.string.MirrlyNotesFilterChipMessages));
@@ -919,18 +1181,25 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         addFilterChip(context, MirrlyVaultStorage.FILTER_SPOILER, getString(R.string.MirrlyNotesFilterChipSpoiler));
 
         filterChipsScroll.addView(filterChipsRow, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(36)));
-        contentView.addView(filterChipsScroll, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 40, Gravity.TOP));
+        filterChipsContainer.addView(filterChipsScroll, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 36, Gravity.CENTER_VERTICAL));
+        contentView.addView(filterChipsContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 44, Gravity.TOP, 8, 0, 8, 0));
 
         // Filter active pill outside search mode
         filterBanner = new FrameLayout(context);
         filterBanner.setVisibility(View.GONE);
         filterBanner.setAlpha(0f);
-        filterBanner.setBackground(Theme.createServiceDrawable(dp(14), filterBanner, contentView));
+        filterBanner.setPadding(dp(4), dp(4), dp(4), dp(4));
+        filterBanner.setOutlineProvider(ViewOutlineProviderImpl.boundsWithPaddingRoundRect(dp(4), dp(16)));
+        filterBanner.setClipToOutline(true);
+        filterBanner.setBackground(glassBackgroundDrawableFactory.create(filterBanner)
+                .setColorProvider(BlurredBackgroundProviderImpl.topPanelChatActivity(resourceProvider))
+                .setRadius(dp(16))
+                .setPadding(dp(4)));
 
         filterBannerText = new TextView(context);
         filterBannerText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
         filterBannerText.setTypeface(AndroidUtilities.bold());
-        ThemeBind.textColor(filterBannerText, Theme.key_chat_serviceText, resourceProvider);
+        ThemeBind.textColor(filterBannerText, Theme.key_windowBackgroundWhiteBlackText, resourceProvider);
         filterBanner.addView(
                 filterBannerText,
                 LayoutHelper.createFrame(
@@ -947,7 +1216,7 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         filterBannerClear = new ImageView(context);
         filterBannerClear.setScaleType(ImageView.ScaleType.CENTER);
         filterBannerClear.setImageResource(R.drawable.msg_close);
-        ThemeBind.colorFilter(filterBannerClear, Theme.key_chat_serviceText, resourceProvider, PorterDuff.Mode.MULTIPLY);
+        ThemeBind.colorFilter(filterBannerClear, Theme.key_chat_topPanelClose, resourceProvider, PorterDuff.Mode.MULTIPLY);
         filterBanner.addView(
                 filterBannerClear,
                 LayoutHelper.createFrame(
@@ -972,12 +1241,14 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
 
     private void addFilterChip(Context context, int filterId, String label) {
         FilterChipView chip = new FilterChipView(context, filterId, label);
+        ScaleStateListAnimator.apply(chip, 0.04f, 1.2f);
+        MirrlyUiKit.attachDisallowInterceptTouch(chip);
         chip.setOnClickListener(v -> {
             applyFilter(filterId);
             updateSearchBottomBarState();
         });
         filterChipViews.add(chip);
-        filterChipsRow.addView(chip, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 32, 0, 2, 6, 2));
+        filterChipsRow.addView(chip, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 32, 3, 2, 3, 2));
     }
 
     private final class FilterChipView extends TextView {
@@ -999,19 +1270,25 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         void updateVisual(boolean selected) {
             this.chipSelected = selected;
             int bg;
+            int border;
             int textColor;
             if (selected) {
-                bg = Theme.getColor(Theme.key_chat_messagePanelSend, resourceProvider);
-                textColor = Color.WHITE;
-            } else {
-                bg = Theme.getColor(Theme.key_chat_serviceBackground, resourceProvider);
-                if (Color.alpha(bg) > 190) {
-                    bg = ColorUtils.setAlphaComponent(bg, 190);
+                bg = Theme.getColor(Theme.key_featuredStickers_addButton, resourceProvider);
+                if (Color.alpha(bg) == 0) {
+                    bg = Theme.getColor(Theme.key_chat_messagePanelSend, resourceProvider);
                 }
-                textColor = Theme.getColor(Theme.key_chat_serviceText, resourceProvider);
+                textColor = ColorUtils.calculateLuminance(bg) > 0.45 ? 0xFF101318 : Color.WHITE;
+                border = ColorUtils.setAlphaComponent(textColor == Color.WHITE ? Color.WHITE : Color.BLACK, 0x46);
+            } else {
+                int panelBg = Theme.getColor(Theme.key_chat_topPanelBackground, resourceProvider);
+                boolean isDark = AndroidUtilities.computePerceivedBrightness(panelBg) < 0.5f;
+                int primaryText = Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourceProvider);
+                bg = ColorUtils.setAlphaComponent(primaryText, isDark ? 0x1A : 0x12);
+                border = ColorUtils.setAlphaComponent(isDark ? Color.WHITE : primaryText, isDark ? 0x36 : 0x26);
+                textColor = ColorUtils.setAlphaComponent(primaryText, 0xE6);
             }
             setTextColor(textColor);
-            setBackground(Theme.createSimpleSelectorRoundRectDrawable(dp(16), bg, ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_chat_messagePanelSend, resourceProvider), 96)));
+            setBackground(MirrlyUiKit.createTintedSurfaceDrawable(16, bg, border, resourceProvider, true));
         }
 
         boolean isChipSelected() {
@@ -1073,12 +1350,15 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         editBannerRow = new LinearLayout(context);
         editBannerRow.setOrientation(LinearLayout.HORIZONTAL);
         editBannerRow.setGravity(Gravity.CENTER_VERTICAL);
-        editBannerRow.setPadding(dp(14), dp(8), dp(8), dp(4));
+        editBannerRow.setPadding(LocaleController.isRTL ? dp(8) : dp(14), dp(8), LocaleController.isRTL ? dp(14) : dp(8), dp(4));
         editBannerRow.setVisibility(View.GONE);
 
         View accentStripe = new View(context);
-        accentStripe.setBackgroundColor(Theme.getColor(Theme.key_chat_messagePanelSend, resourceProvider));
-        editBannerRow.addView(accentStripe, LayoutHelper.createLinear(2, 28, 0, 0, 8, 0));
+        editBannerAccentDrawable = new GradientDrawable();
+        editBannerAccentDrawable.setShape(GradientDrawable.RECTANGLE);
+        editBannerAccentDrawable.setCornerRadius(dpf2(1.5f));
+        editBannerAccentDrawable.setColor(Theme.getColor(Theme.key_chat_messagePanelSend, resourceProvider));
+        accentStripe.setBackground(editBannerAccentDrawable);
 
         LinearLayout editTextMeta = new LinearLayout(context);
         editTextMeta.setOrientation(LinearLayout.VERTICAL);
@@ -1100,15 +1380,22 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         editBannerPreview.setEllipsize(TextUtils.TruncateAt.END);
         editTextMeta.addView(editBannerPreview, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
-        editBannerRow.addView(editTextMeta, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
-
         editBannerClose = new ImageView(context);
         editBannerClose.setScaleType(ImageView.ScaleType.CENTER);
         editBannerClose.setImageResource(R.drawable.msg_close);
         editBannerClose.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_chat_messagePanelIcons, resourceProvider), PorterDuff.Mode.MULTIPLY));
         editBannerClose.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector, resourceProvider), 1));
         editBannerClose.setOnClickListener(v -> cancelEditMode());
-        editBannerRow.addView(editBannerClose, LayoutHelper.createLinear(34, 34));
+
+        if (LocaleController.isRTL) {
+            editBannerRow.addView(editBannerClose, LayoutHelper.createLinear(34, 34));
+            editBannerRow.addView(editTextMeta, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+            editBannerRow.addView(accentStripe, LayoutHelper.createLinear(3, 28, 8, 0, 0, 0));
+        } else {
+            editBannerRow.addView(accentStripe, LayoutHelper.createLinear(3, 28, 0, 0, 8, 0));
+            editBannerRow.addView(editTextMeta, LayoutHelper.createLinear(0, LayoutHelper.WRAP_CONTENT, 1f));
+            editBannerRow.addView(editBannerClose, LayoutHelper.createLinear(34, 34));
+        }
 
         composerColumn.addView(editBannerRow, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
@@ -2862,32 +3149,32 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
     }
 
     private void updateFilterChipsVisibility(boolean animated) {
-        if (filterChipsScroll == null) {
+        if (filterChipsContainer == null) {
             return;
         }
         refreshFilterChipsSelection();
         boolean show = isSearching;
         if (show) {
-            if (filterChipsScroll.getVisibility() != View.VISIBLE) {
-                filterChipsScroll.setVisibility(View.VISIBLE);
-                filterChipsScroll.setAlpha(0f);
+            if (filterChipsContainer.getVisibility() != View.VISIBLE) {
+                filterChipsContainer.setVisibility(View.VISIBLE);
+                filterChipsContainer.setAlpha(0f);
                 updateTopOverlayPositions();
                 updateListPaddingAndButtons();
                 if (animated) {
-                    filterChipsScroll.animate().alpha(1f).setDuration(200).setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT).start();
+                    filterChipsContainer.animate().alpha(1f).setDuration(200).setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT).start();
                 } else {
-                    filterChipsScroll.setAlpha(1f);
+                    filterChipsContainer.setAlpha(1f);
                 }
             }
-        } else if (filterChipsScroll.getVisibility() == View.VISIBLE) {
+        } else if (filterChipsContainer.getVisibility() == View.VISIBLE) {
             if (animated) {
-                filterChipsScroll.animate().alpha(0f).setDuration(160).withEndAction(() -> {
-                    filterChipsScroll.setVisibility(View.GONE);
+                filterChipsContainer.animate().alpha(0f).setDuration(160).withEndAction(() -> {
+                    filterChipsContainer.setVisibility(View.GONE);
                     updateTopOverlayPositions();
                     updateListPaddingAndButtons();
                 }).start();
             } else {
-                filterChipsScroll.setVisibility(View.GONE);
+                filterChipsContainer.setVisibility(View.GONE);
                 updateTopOverlayPositions();
                 updateListPaddingAndButtons();
             }
@@ -2961,7 +3248,7 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
             return;
         }
         ItemOptions options = ItemOptions.makeOptions(this, filterItem)
-                .setBlur(true)
+                .setBlur(true, false)
                 .setBlurBackground(glassBackgroundDrawableFactory, BlurredBackgroundProviderImpl.messageMenuBackground(resourceProvider), false)
                 .setGravity(Gravity.RIGHT);
 
@@ -3023,7 +3310,7 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         }
 
         ItemOptions options = ItemOptions.makeOptions(this, cell)
-                .setBlur(true)
+                .setBlur(true, false)
                 .setBlurBackground(glassBackgroundDrawableFactory, BlurredBackgroundProviderImpl.messageMenuBackground(resourceProvider), false)
                 .setGravity(Gravity.RIGHT);
 
@@ -3101,9 +3388,6 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
     }
 
     private void updateActionModeTitle() {
-        if (actionBar != null && actionBar.getActionMode() != null) {
-            actionBar.setTitle(LocaleController.formatString(R.string.MirrlyNotesSelectedCount, selectedNoteIds.size()));
-        }
         if (actionModeCountView != null) {
             actionModeCountView.setText(LocaleController.formatString(R.string.MirrlyNotesSelectedCount, selectedNoteIds.size()));
         }
@@ -3771,13 +4055,322 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
             }
             int offset = minDateChild.getBottom() - chatListView.getPaddingTop();
             if (offset > floatingDateView.getMeasuredHeight() && offset < floatingDateView.getMeasuredHeight() * 2) {
-                floatingDateView.setTranslationY(-floatingDateView.getMeasuredHeight() * 2 + offset);
+                floatingDateOffset = -floatingDateView.getMeasuredHeight() * 2 + offset;
             } else {
-                floatingDateView.setTranslationY(0);
+                floatingDateOffset = 0f;
             }
         } else {
             hideFloatingDateView(true);
-            floatingDateView.setTranslationY(0);
+            floatingDateOffset = 0f;
+        }
+        floatingDateView.setTranslationY(getFloatingDateRestTop() - floatingDateView.getTop() + floatingDateOffset);
+        floatingDateView.setVisiblePart(floatingDateView.getY() - contentView.getBackgroundTranslationY(), contentView.getBackgroundSizeY());
+        scheduleNotesAdaptiveGlassContrastUpdate(false);
+    }
+
+    private BlurredBackgroundColorProvider createNotesFloatingPillColorProvider(int textColorKey) {
+        return new BlurredBackgroundColorProvider() {
+            private boolean isLightText() {
+                return AndroidUtilities.computePerceivedBrightness(Theme.getColor(textColorKey, resourceProvider)) >= 0.55f;
+            }
+
+            @Override
+            public int getShadowColor() {
+                return isLightText() ? 0x28000000 : 0x1A000000;
+            }
+
+            @Override
+            public int getBackgroundColor() {
+                final boolean lightText = isLightText();
+                final int serviceBg = Theme.getColor(Theme.key_chat_serviceBackground, resourceProvider);
+                if (lightText) {
+                    if ((serviceBg >>> 24) > 0 && AndroidUtilities.computePerceivedBrightness(serviceBg) < 0.52f) {
+                        return Theme.multAlpha(ColorUtils.setAlphaComponent(serviceBg, 0xFF), org.telegram.messenger.mirrly.MirrlyConfig.getEffectiveGlassAlpha(0.60f));
+                    }
+                    return Theme.multAlpha(0xFF14181E, org.telegram.messenger.mirrly.MirrlyConfig.getEffectiveGlassAlpha(0.55f));
+                }
+                if ((serviceBg >>> 24) > 0 && AndroidUtilities.computePerceivedBrightness(serviceBg) > 0.52f) {
+                    return Theme.multAlpha(ColorUtils.setAlphaComponent(serviceBg, 0xFF), org.telegram.messenger.mirrly.MirrlyConfig.getEffectiveGlassAlpha(0.65f));
+                }
+                return Theme.multAlpha(0xFFF5F7FA, org.telegram.messenger.mirrly.MirrlyConfig.getEffectiveGlassAlpha(0.72f));
+            }
+
+            @Override
+            public int getStrokeColorTop() {
+                return isLightText() ? 0x3DFFFFFF : 0xB8FFFFFF;
+            }
+
+            @Override
+            public int getStrokeColorBottom() {
+                return isLightText() ? 0x1AFFFFFF : 0x45FFFFFF;
+            }
+        };
+    }
+
+    private BlurredBackgroundProvider notesTopPanelGlassColors;
+    private final Rect notesBackZoneRect = new Rect();
+    private final Rect notesTitleZoneRect = new Rect();
+    private final Rect notesMenuZoneRect = new Rect();
+    private final Runnable notesAdaptiveTickRunnable = () -> {
+        notesAdaptiveTickPosted = false;
+        updateNotesAdaptiveGlassContrast(false);
+    };
+    private int notesAdaptiveScrollGen;
+    private boolean notesAdaptiveTickPosted;
+    private long lastNotesAdaptiveSampleMs;
+    private float notesBarBackTarget, notesBarTitleTarget, notesBarMenuTarget;
+    private float notesBarBackFactor, notesBarTitleFactor, notesBarMenuFactor;
+    private float notesPinnedTarget, notesPinnedFactor, lastNotesPinnedApplied = -1f;
+    private float notesFilterBannerTarget, notesFilterBannerFactor, lastNotesFilterBannerApplied = -1f;
+    private float notesInputTarget, notesInputFactor;
+    private float notesScrollDownTarget, notesScrollDownFactor;
+    private int lastNotesPinnedCloseColor, lastNotesFilterClearColor;
+    private PorterDuffColorFilter notesPinnedCloseFilter, notesFilterClearFilter;
+
+    private float getNotesTopBackdropLuminance() {
+        if (contentView != null) {
+            final int wpColor = contentView.wallpaperBitmapProvider.getStatusBarColor(navbarContentSourceWallpaper);
+            if (Color.alpha(wpColor) > 8) {
+                return GlassContrastHelper.computeLuminance(wpColor);
+            }
+        }
+        return GlassContrastHelper.resolveThemeBackdropLuminance(resourceProvider, Theme.getColor(Theme.key_windowBackgroundWhite, resourceProvider));
+    }
+
+    private float getNotesBottomBackdropLuminance() {
+        if (contentView != null) {
+            final int wpColor = contentView.wallpaperBitmapProvider.getNavigationBarColor(navbarContentSourceWallpaper);
+            if (Color.alpha(wpColor) > 8) {
+                return GlassContrastHelper.computeLuminance(wpColor);
+            }
+        }
+        return GlassContrastHelper.resolveThemeBackdropLuminance(resourceProvider, Theme.getColor(Theme.key_windowBackgroundWhite, resourceProvider));
+    }
+
+    private void cancelNotesAdaptiveTick() {
+        if (notesAdaptiveTickPosted && contentView != null) {
+            contentView.removeCallbacks(notesAdaptiveTickRunnable);
+        }
+        notesAdaptiveTickPosted = false;
+    }
+
+    private void resetNotesAdaptiveState() {
+        notesBarBackTarget = notesBarTitleTarget = notesBarMenuTarget = 0f;
+        notesBarBackFactor = notesBarTitleFactor = notesBarMenuFactor = 0f;
+        notesPinnedTarget = notesPinnedFactor = 0f;
+        notesFilterBannerTarget = notesFilterBannerFactor = 0f;
+        notesInputTarget = notesInputFactor = 0f;
+        notesScrollDownTarget = notesScrollDownFactor = 0f;
+        lastNotesPinnedApplied = -1f;
+        lastNotesFilterBannerApplied = -1f;
+        notesTopPanelGlassColors = null;
+        if (actionBar != null) {
+            actionBar.applyAdaptiveGlassContrast(0f);
+        }
+        applyNotesOverlayContrast(0f, 0f);
+        if (chatActivityEnterView != null) {
+            chatActivityEnterView.applyAdaptiveGlassContrast(0f);
+        }
+        if (scrollDownButton != null) {
+            scrollDownButton.updateColors();
+        }
+    }
+
+    private void scheduleNotesAdaptiveGlassContrastUpdate(boolean forceSample) {
+        updateNotesAdaptiveGlassContrast(forceSample);
+    }
+
+    private void updateNotesAdaptiveGlassContrast(boolean forceSample) {
+        if (contentView == null || chatListView == null) {
+            return;
+        }
+        if (!BlurredBackgroundProviderImpl.checkBlurEnabled(currentAccount, resourceProvider)) {
+            if (notesBarBackFactor > 0.001f || notesBarTitleFactor > 0.001f || notesBarMenuFactor > 0.001f
+                    || notesPinnedFactor > 0.001f || notesInputFactor > 0.001f || notesScrollDownFactor > 0.001f) {
+                resetNotesAdaptiveState();
+            }
+            return;
+        }
+
+        final long now = SystemClock.uptimeMillis();
+        final float topBackdrop = getNotesTopBackdropLuminance();
+        final float bottomBackdrop = getNotesBottomBackdropLuminance();
+        if (forceSample || (now - lastNotesAdaptiveSampleMs >= 80L)) {
+            lastNotesAdaptiveSampleMs = now;
+            if (notesTopPanelGlassColors == null) {
+                notesTopPanelGlassColors = BlurredBackgroundProviderImpl.topPanelChatActivity(resourceProvider);
+            }
+            final int topPillBg = notesTopPanelGlassColors.getBackgroundColor();
+            final int inputPillBg = blurredBackgroundColorProvider != null ? blurredBackgroundColorProvider.getBackgroundColor() : topPillBg;
+            final boolean liquidActive = org.telegram.messenger.mirrly.MirrlyConfig.isGlassLiquidEnabled();
+
+            if (actionBar != null && actionBar.getVisibility() == View.VISIBLE && actionBar.getWidth() > 0) {
+                actionBar.getGlassPillZones(notesBackZoneRect, notesTitleZoneRect, notesMenuZoneRect);
+                final boolean expectDarkTitle = GlassContrastHelper.computeLuminance(Theme.getColor(Theme.key_actionBarDefaultTitle, resourceProvider)) < 0.5f;
+                final boolean expectDarkIcons = GlassContrastHelper.computeLuminance(Theme.getColor(Theme.key_actionBarDefaultIcon, resourceProvider)) < 0.5f;
+
+                final float backEff = GlassContrastHelper.computeEffectiveGlassLuminance(topPillBg,
+                        GlassContrastHelper.estimateUnderlyingLuminanceInBand(actionBar, chatListView,
+                                notesBackZoneRect.left, notesBackZoneRect.top, notesBackZoneRect.right, notesBackZoneRect.bottom,
+                                topBackdrop, resourceProvider), liquidActive);
+                final float titleEff = GlassContrastHelper.computeEffectiveGlassLuminance(topPillBg,
+                        GlassContrastHelper.estimateUnderlyingLuminanceInBand(actionBar, chatListView,
+                                notesTitleZoneRect.left, notesTitleZoneRect.top, notesTitleZoneRect.right, notesTitleZoneRect.bottom,
+                                topBackdrop, resourceProvider), liquidActive);
+                final float menuEff = GlassContrastHelper.computeEffectiveGlassLuminance(topPillBg,
+                        GlassContrastHelper.estimateUnderlyingLuminanceInBand(actionBar, chatListView,
+                                notesMenuZoneRect.left, notesMenuZoneRect.top, notesMenuZoneRect.right, notesMenuZoneRect.bottom,
+                                topBackdrop, resourceProvider), liquidActive);
+
+                notesBarBackTarget = GlassContrastHelper.updateContrastInvertFactor(notesBarBackTarget, backEff, expectDarkIcons, 1f);
+                notesBarTitleTarget = GlassContrastHelper.updateContrastInvertFactor(notesBarTitleTarget, titleEff, expectDarkTitle, 1f);
+                notesBarMenuTarget = GlassContrastHelper.updateContrastInvertFactor(notesBarMenuTarget, menuEff, expectDarkIcons, 1f);
+            }
+
+            if (pinnedNoteBar != null && pinnedNoteBar.getVisibility() == View.VISIBLE && pinnedNoteBar.getWidth() > 0) {
+                final float pEff = GlassContrastHelper.computeEffectiveGlassLuminance(topPillBg,
+                        GlassContrastHelper.estimateUnderlyingLuminanceInBand(pinnedNoteBar, chatListView,
+                                dp(6), 0f, pinnedNoteBar.getWidth() - dp(6), pinnedNoteBar.getHeight(),
+                                topBackdrop, resourceProvider), liquidActive);
+                final boolean expectDark = GlassContrastHelper.computeLuminance(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourceProvider)) < 0.5f;
+                notesPinnedTarget = GlassContrastHelper.updateContrastInvertFactor(notesPinnedTarget, pEff, expectDark, 1f);
+            } else {
+                notesPinnedTarget = 0f;
+            }
+
+            if (filterBanner != null && filterBanner.getVisibility() == View.VISIBLE && filterBanner.getWidth() > 0) {
+                final float fEff = GlassContrastHelper.computeEffectiveGlassLuminance(topPillBg,
+                        GlassContrastHelper.estimateUnderlyingLuminanceInBand(filterBanner, chatListView,
+                                0f, 0f, filterBanner.getWidth(), filterBanner.getHeight(),
+                                topBackdrop, resourceProvider), liquidActive);
+                final boolean expectDark = GlassContrastHelper.computeLuminance(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourceProvider)) < 0.5f;
+                notesFilterBannerTarget = GlassContrastHelper.updateContrastInvertFactor(notesFilterBannerTarget, fEff, expectDark, 1f);
+            } else {
+                notesFilterBannerTarget = 0f;
+            }
+
+            if (chatInputViewsContainer != null && chatActivityEnterView != null && chatInputViewsContainer.getVisibility() == View.VISIBLE && chatInputViewsContainer.getWidth() > 0) {
+                final float iEff = GlassContrastHelper.computeEffectiveGlassLuminance(inputPillBg,
+                        GlassContrastHelper.estimateUnderlyingLuminanceInBand(chatInputViewsContainer, chatListView,
+                                dp(10), 0f, Math.max(dp(80), chatInputViewsContainer.getWidth() - dp(56)), chatInputViewsContainer.getHeight(),
+                                bottomBackdrop, resourceProvider), liquidActive);
+                final boolean expectDark = GlassContrastHelper.computeLuminance(Theme.getColor(Theme.key_chat_messagePanelText, resourceProvider)) < 0.5f;
+                notesInputTarget = GlassContrastHelper.updateContrastInvertFactor(notesInputTarget, iEff, expectDark, 1f);
+            }
+
+            if (scrollDownButton != null && scrollDownButton.getVisibility() == View.VISIBLE && scrollDownButton.getWidth() > 0) {
+                final float sEff = GlassContrastHelper.computeEffectiveGlassLuminance(inputPillBg,
+                        GlassContrastHelper.estimateUnderlyingLuminanceInBand(scrollDownButton, chatListView,
+                                0f, 0f, scrollDownButton.getWidth(), scrollDownButton.getHeight(),
+                                bottomBackdrop, resourceProvider), liquidActive);
+                final boolean expectDark = GlassContrastHelper.computeLuminance(Theme.getColor(Theme.key_glass_defaultIcon, resourceProvider)) < 0.5f;
+                notesScrollDownTarget = GlassContrastHelper.updateContrastInvertFactor(notesScrollDownTarget, sEff, expectDark, 1f);
+            } else {
+                notesScrollDownTarget = 0f;
+            }
+        }
+
+        final float step = forceSample ? 1f : 0.28f;
+        notesBarBackFactor = stepNotesFactor(notesBarBackFactor, notesBarBackTarget, step);
+        notesBarTitleFactor = stepNotesFactor(notesBarTitleFactor, notesBarTitleTarget, step);
+        notesBarMenuFactor = stepNotesFactor(notesBarMenuFactor, notesBarMenuTarget, step);
+        notesPinnedFactor = stepNotesFactor(notesPinnedFactor, notesPinnedTarget, step);
+        notesFilterBannerFactor = stepNotesFactor(notesFilterBannerFactor, notesFilterBannerTarget, step);
+        notesInputFactor = stepNotesFactor(notesInputFactor, notesInputTarget, step);
+        notesScrollDownFactor = stepNotesFactor(notesScrollDownFactor, notesScrollDownTarget, step);
+
+        if (actionBar != null) {
+            actionBar.applyAdaptiveGlassContrast(notesBarBackFactor, notesBarTitleFactor, notesBarMenuFactor);
+        }
+        applyNotesOverlayContrast(notesPinnedFactor, notesFilterBannerFactor);
+        if (chatActivityEnterView != null) {
+            chatActivityEnterView.applyAdaptiveGlassContrast(notesInputFactor);
+        }
+        if (searchBottomCountView != null) {
+            final int baseSearch = Theme.getColor(Theme.key_chat_messagePanelText, resourceProvider);
+            searchBottomCountView.setTextColor(GlassContrastHelper.blendAdaptiveTextColor(baseSearch, notesInputFactor, false));
+        }
+        if (actionModeCountView != null) {
+            final int baseAction = Theme.getColor(Theme.key_chat_messagePanelText, resourceProvider);
+            actionModeCountView.setTextColor(GlassContrastHelper.blendAdaptiveTextColor(baseAction, notesInputFactor, false));
+        }
+        if (scrollDownButton != null) {
+            final View inner = scrollDownButton.getChildAt(0);
+            if (inner instanceof org.telegram.ui.Components.chat.buttons.ChatActivityBlurredRoundButton) {
+                ((org.telegram.ui.Components.chat.buttons.ChatActivityBlurredRoundButton) inner).applyAdaptiveGlassContrast(notesScrollDownFactor);
+            }
+        }
+
+        final boolean settled = Math.abs(notesBarBackFactor - notesBarBackTarget) < 0.006f
+                && Math.abs(notesBarTitleFactor - notesBarTitleTarget) < 0.006f
+                && Math.abs(notesBarMenuFactor - notesBarMenuTarget) < 0.006f
+                && Math.abs(notesPinnedFactor - notesPinnedTarget) < 0.006f
+                && Math.abs(notesFilterBannerFactor - notesFilterBannerTarget) < 0.006f
+                && Math.abs(notesInputFactor - notesInputTarget) < 0.006f
+                && Math.abs(notesScrollDownFactor - notesScrollDownTarget) < 0.006f;
+
+        if (!settled && !notesAdaptiveTickPosted && !removingFromParent) {
+            notesAdaptiveTickPosted = true;
+            contentView.postOnAnimation(notesAdaptiveTickRunnable);
+        }
+    }
+
+    private static float stepNotesFactor(float current, float target, float step) {
+        final float next = current + (target - current) * step;
+        if (Math.abs(target - next) < 0.008f) {
+            return target;
+        }
+        return MathUtils.clamp(next, 0f, 1f);
+    }
+
+    private void applyNotesOverlayContrast(float pinnedFactor, float filterFactor) {
+        if (lastNotesPinnedApplied < 0f || Math.abs(lastNotesPinnedApplied - pinnedFactor) >= 0.006f) {
+            lastNotesPinnedApplied = pinnedFactor;
+            if (pinnedNoteTitleView != null) {
+                final int baseAccent = Theme.getColor(Theme.key_chat_messagePanelSend, resourceProvider);
+                pinnedNoteTitleView.setTextColor(pinnedFactor > 0.001f
+                        ? GlassContrastHelper.blendAdaptiveAccentColor(baseAccent, pinnedFactor)
+                        : baseAccent);
+            }
+            if (pinnedNoteBodyView != null) {
+                final int baseBody = Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourceProvider);
+                pinnedNoteBodyView.setTextColor(GlassContrastHelper.blendAdaptiveTextColor(baseBody, pinnedFactor, false));
+            }
+            if (pinnedNoteUnpinBtn != null) {
+                if (pinnedFactor <= 0.001f) {
+                    pinnedNoteUnpinBtn.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_chat_topPanelClose, resourceProvider), PorterDuff.Mode.MULTIPLY));
+                } else {
+                    final int adapted = GlassContrastHelper.blendAdaptiveIconColor(Theme.getColor(Theme.key_chat_topPanelClose, resourceProvider), pinnedFactor);
+                    if (notesPinnedCloseFilter == null || lastNotesPinnedCloseColor != adapted) {
+                        lastNotesPinnedCloseColor = adapted;
+                        notesPinnedCloseFilter = new PorterDuffColorFilter(adapted, PorterDuff.Mode.SRC_IN);
+                    }
+                    pinnedNoteUnpinBtn.setColorFilter(notesPinnedCloseFilter);
+                }
+            }
+        }
+        if (lastNotesFilterBannerApplied < 0f || Math.abs(lastNotesFilterBannerApplied - filterFactor) >= 0.006f) {
+            lastNotesFilterBannerApplied = filterFactor;
+            if (filterBannerText != null) {
+                if (filterFactor <= 0.001f) {
+                    ThemeBind.textColor(filterBannerText, Theme.key_windowBackgroundWhiteBlackText, resourceProvider);
+                } else {
+                    filterBannerText.setTextColor(GlassContrastHelper.blendAdaptiveTextColor(
+                            Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourceProvider), filterFactor, false));
+                }
+            }
+            if (filterBannerClear != null) {
+                if (filterFactor <= 0.001f) {
+                    ThemeBind.colorFilter(filterBannerClear, Theme.key_chat_topPanelClose, resourceProvider, PorterDuff.Mode.MULTIPLY);
+                } else {
+                    final int adapted = GlassContrastHelper.blendAdaptiveIconColor(Theme.getColor(Theme.key_chat_topPanelClose, resourceProvider), filterFactor);
+                    if (notesFilterClearFilter == null || lastNotesFilterClearColor != adapted) {
+                        lastNotesFilterClearColor = adapted;
+                        notesFilterClearFilter = new PorterDuffColorFilter(adapted, PorterDuff.Mode.SRC_IN);
+                    }
+                    filterBannerClear.setColorFilter(notesFilterClearFilter);
+                }
+            }
         }
     }
 
@@ -3806,23 +4399,23 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
 
     private float getTopExtraOverlayHeight() {
         float extra = 0f;
-        if (filterChipsScroll != null && filterChipsScroll.getVisibility() == View.VISIBLE) {
-            extra += dp(44);
+        if (filterChipsContainer != null && filterChipsContainer.getVisibility() == View.VISIBLE) {
+            extra += dp(46);
         }
         if (pinnedNoteBar != null && pinnedNoteBar.getVisibility() == View.VISIBLE) {
             extra += Math.max(dp(46), pinnedNoteBar.getMeasuredHeight()) + dp(6);
         }
         if (filterBanner != null && filterBanner.getVisibility() == View.VISIBLE) {
-            extra += dp(38);
+            extra += Math.max(dp(38), filterBanner.getMeasuredHeight()) + dp(4);
         }
         return extra;
     }
 
     private void updateTopOverlayPositions() {
         float y = AndroidUtilities.statusBarHeight + ActionBar.getCurrentActionBarHeight() + dp(4) + contentPanTranslation;
-        if (filterChipsScroll != null && filterChipsScroll.getVisibility() == View.VISIBLE) {
-            filterChipsScroll.setTranslationY(y);
-            y += dp(42);
+        if (filterChipsContainer != null && filterChipsContainer.getVisibility() == View.VISIBLE) {
+            filterChipsContainer.setTranslationY(y);
+            y += Math.max(dp(44), filterChipsContainer.getMeasuredHeight()) + dp(2);
         }
         if (pinnedNoteBar != null && pinnedNoteBar.getVisibility() == View.VISIBLE) {
             pinnedNoteBar.setTranslationY(y);
@@ -3830,6 +4423,12 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
         }
         if (filterBanner != null && filterBanner.getVisibility() == View.VISIBLE) {
             filterBanner.setTranslationY(y + dp(2));
+        }
+        if (floatingDateView != null) {
+            floatingDateView.setTranslationY(getFloatingDateRestTop() - floatingDateView.getTop() + floatingDateOffset);
+            if (contentView != null) {
+                floatingDateView.setVisiblePart(floatingDateView.getY() - contentView.getBackgroundTranslationY(), contentView.getBackgroundSizeY());
+            }
         }
     }
 
@@ -3901,7 +4500,45 @@ public class MirrlyNotesChatActivity extends BaseFragment implements Notificatio
             if (chatListView != null) {
                 chatListView.invalidateViews();
             }
+            if (pinnedNoteIconView != null) {
+                pinnedNoteIconView.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_chat_messagePanelSend, resourceProvider), PorterDuff.Mode.SRC_IN));
+            }
+            if (pinnedNoteTitleView != null) {
+                pinnedNoteTitleView.setTextColor(Theme.getColor(Theme.key_chat_messagePanelSend, resourceProvider));
+            }
+            if (pinnedNoteBodyView != null) {
+                pinnedNoteBodyView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourceProvider));
+            }
+            if (pinnedNoteUnpinBtn != null) {
+                pinnedNoteUnpinBtn.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_chat_topPanelClose, resourceProvider), PorterDuff.Mode.MULTIPLY));
+            }
+            if (editBannerAccentDrawable != null) {
+                editBannerAccentDrawable.setColor(Theme.getColor(Theme.key_chat_messagePanelSend, resourceProvider));
+            }
+            if (editBannerTitle != null) {
+                editBannerTitle.setTextColor(Theme.getColor(Theme.key_chat_messagePanelSend, resourceProvider));
+            }
+            if (editBannerPreview != null) {
+                editBannerPreview.setTextColor(Theme.getColor(Theme.key_chat_messagePanelHint, resourceProvider));
+            }
+            if (editBannerClose != null) {
+                editBannerClose.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_chat_messagePanelIcons, resourceProvider), PorterDuff.Mode.MULTIPLY));
+            }
+            if (pinnedNoteBar != null) {
+                pinnedNoteBar.invalidate();
+            }
+            if (filterChipsContainer != null) {
+                filterChipsContainer.invalidate();
+            }
+            if (filterBanner != null) {
+                filterBanner.invalidate();
+            }
+            if (floatingDateView != null) {
+                floatingDateView.invalidate();
+            }
             refreshFilterChipsSelection();
+            resetNotesAdaptiveState();
+            scheduleNotesAdaptiveGlassContrastUpdate(true);
         } else if (id == NotificationCenter.emojiLoaded) {
             if (chatListView != null) {
                 chatListView.invalidateViews();

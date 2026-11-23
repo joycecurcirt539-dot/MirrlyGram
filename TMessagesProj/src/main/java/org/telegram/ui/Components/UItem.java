@@ -925,6 +925,13 @@ public class UItem extends AdapterWithDiffUtils.Item {
         if (factoryInstances == null) factoryInstances = new HashMap<>();
         if (factories == null) factories = new LongSparseArray<>();
         UItemFactory<?> factory = factoryInstances.get(factoryClass);
+        if (factory == null) {
+            try {
+                Class.forName(factoryClass.getName(), true, factoryClass.getClassLoader());
+                factory = factoryInstances.get(factoryClass);
+            } catch (ClassNotFoundException ignored) {
+            }
+        }
         if (factory == null) throw new RuntimeException("UItemFactory was not setuped: " + factoryClass);
         return factory;
     }

@@ -63,7 +63,7 @@ public abstract class BaseCell extends ViewGroup implements SizeNotifierFrameLay
         super(context);
         setWillNotDraw(false);
         setFocusable(true);
-        setHapticFeedbackEnabled(true);
+        org.telegram.messenger.mirrly.MirrlyHaptics.setHapticFeedbackEnabled(this, true);
     }
 
     public static void setDrawableBounds(Drawable drawable, int x, int y) {
@@ -163,5 +163,21 @@ public abstract class BaseCell extends ViewGroup implements SizeNotifierFrameLay
                 canvas.restoreToCount(save);
             }
         }
+    }
+
+    @Override
+    public boolean performHapticFeedback(int feedbackConstant) {
+        if (org.telegram.messenger.mirrly.MirrlyHaptics.isDisabled()) {
+            return false;
+        }
+        return super.performHapticFeedback(feedbackConstant);
+    }
+
+    @Override
+    public boolean performHapticFeedback(int feedbackConstant, int flags) {
+        if (org.telegram.messenger.mirrly.MirrlyHaptics.isDisabled()) {
+            return false;
+        }
+        return super.performHapticFeedback(feedbackConstant, flags);
     }
 }

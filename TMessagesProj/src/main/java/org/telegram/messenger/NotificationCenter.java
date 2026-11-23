@@ -387,6 +387,20 @@ public class NotificationCenter {
     public static final int communitySwitchedCollapsed = totalEvents++;
     public static final int mirrlyNotesDidUpdate = totalEvents++;
     public static final int mirrlyLocalVoiceRecorded = totalEvents++;
+    public static final int mirrlyPhonePrivacyChanged = totalEvents++;
+    public static final int mirrlyGlassSettingsDidChange = totalEvents++;
+    public static final int mirrlyChatTagSettingsChanged = totalEvents++;
+    public static final int mirrlyInterfaceSettingsChanged = totalEvents++;
+    public static final int mirrlyBottomBarConfigChanged = totalEvents++;
+    public static final int mirrlyMessageMenuConfigChanged = totalEvents++;
+    public static final int mirrlyTranslatorSettingsChanged = totalEvents++;
+    public static final int mirrlyDatacenterCheckDone = totalEvents++;
+    public static final int mirrlyVibrationSettingsChanged = totalEvents++;
+    public static final int mirrlyDeletedDidUpdate = totalEvents++;
+    public static final int mirrlyDeletedAppearanceChanged = totalEvents++;
+    public static final int mirrlyDeletedChatsDidUpdate = totalEvents++;
+    public static final int mirrlyPowerStatsUpdated = totalEvents++;
+    public static final int mirrlyPowerPolicyChanged = totalEvents++;
 
     public static boolean alreadyLogged;
 

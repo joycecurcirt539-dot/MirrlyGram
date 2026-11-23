@@ -151,6 +151,7 @@ import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundProvider
 import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
 import org.telegram.ui.Components.blur3.utils.Blur3Utils;
 import org.telegram.ui.Components.chat.ViewPositionWatcher;
+import org.telegram.utils.glass.GlassContrastHelper;
 import org.telegram.utils.glass.GlassEngine;
 import org.telegram.utils.glass.source.GlassSourceColor;
 import org.telegram.ui.Components.poll.PollAttachedMediaPack;
@@ -2464,6 +2465,7 @@ public class SharedMediaLayout extends FrameLayout implements Theme.Colorable, N
                     checkUi_topPanelLayoutY();
                 }
             };
+            storiesContainer.setGlassFactory(iBlur3FactoryLiquidGlass, BlurredBackgroundProviderImpl.simpleActionBar(resourcesProvider));
 //            storiesContainer.setBackgroundColor(Theme.blendOver(
 //                Theme.getColor(Theme.key_windowBackgroundWhite, resourcesProvider),
 //                Theme.multAlpha(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider), 0.04f)
@@ -3310,6 +3312,10 @@ public class SharedMediaLayout extends FrameLayout implements Theme.Colorable, N
                     if (mediaPage.fastScrollHintView != null) {
                         mediaPage.invalidate();
                     }
+                    updateScrollTabStripAdaptiveContrast(mediaPage.listView);
+                    if (onMediaScrolledCallback != null) {
+                        onMediaScrolledCallback.run();
+                    }
                 }
             });
             mediaPages[a].listView.setOnItemLongClickListener(new RecyclerListView.OnItemLongClickListenerExtended() {
@@ -3475,7 +3481,7 @@ public class SharedMediaLayout extends FrameLayout implements Theme.Colorable, N
         }
 
         if (storiesContainer != null) {
-            addView(storiesContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 42, Gravity.TOP, 0, 48, 0, 0));
+            addView(storiesContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 42, Gravity.TOP, 6, 48, 6, 0));
         }
 
         floatingDateView = new ChatActionCell(context);
@@ -4836,7 +4842,82 @@ public class SharedMediaLayout extends FrameLayout implements Theme.Colorable, N
         return false;
     }
 
+    private Runnable onMediaScrolledCallback;
+
+    public void setOnMediaScrolledCallback(@Nullable Runnable callback) {
+        this.onMediaScrolledCallback = callback;
+    }
+
+    @Nullable
+    public RecyclerListView getPrimaryListView() {
+        return mediaPages != null && mediaPages.length > 0 && mediaPages[0] != null ? mediaPages[0].listView : null;
+    }
+
+    private BlurredBackgroundProvider adaptiveTabStripGlassProvider;
+    private long lastTabStripSampleMs;
+    private float tabStripAdaptiveTarget;
+    private float tabStripAdaptiveFactor;
+    private boolean tabStripAdaptiveTickPosted;
+    private final Runnable tabStripAdaptiveTickRunnable = () -> {
+        tabStripAdaptiveTickPosted = false;
+        if (mediaPages != null && mediaPages.length > 0 && mediaPages[0] != null) {
+            updateScrollTabStripAdaptiveContrast(mediaPages[0].listView);
+        }
+    };
+
+    private void updateScrollTabStripAdaptiveContrast(@Nullable RecyclerListView list) {
+        if (scrollSlidingTextTabStrip == null || list == null) {
+            return;
+        }
+        if (!BlurredBackgroundProviderImpl.checkBlurEnabled(UserConfig.selectedAccount, resourcesProvider)) {
+            if (tabStripAdaptiveFactor > 0.001f) {
+                tabStripAdaptiveTarget = tabStripAdaptiveFactor = 0f;
+                scrollSlidingTextTabStrip.applyAdaptiveGlassContrast(0f);
+            }
+            return;
+        }
+        final long now = android.os.SystemClock.uptimeMillis();
+        if (now - lastTabStripSampleMs >= 24L) {
+            lastTabStripSampleMs = now;
+            if (adaptiveTabStripGlassProvider == null) {
+                adaptiveTabStripGlassProvider = BlurredBackgroundProviderImpl.topPanel(resourcesProvider);
+            }
+            final int glassBg = adaptiveTabStripGlassProvider.getBackgroundColor();
+            final float backdropLuma = GlassContrastHelper.computeLuminance(Theme.getColor(Theme.key_windowBackgroundWhite, resourcesProvider));
+            final float underLuma = GlassContrastHelper.estimateUnderlyingLuminanceInBand(
+                    scrollSlidingTextTabStrip,
+                    list,
+                    0f,
+                    0f,
+                    scrollSlidingTextTabStrip.getWidth(),
+                    scrollSlidingTextTabStrip.getHeight(),
+                    backdropLuma,
+                    resourcesProvider
+            );
+            final float effLuma = GlassContrastHelper.computeEffectiveGlassLuminance(
+                    glassBg, underLuma, org.telegram.messenger.mirrly.MirrlyConfig.isGlassLiquidEnabled());
+            final boolean expectDark = GlassContrastHelper.computeLuminance(Theme.getColor(Theme.key_actionBarTabUnactiveText, resourcesProvider)) < 0.5f;
+            tabStripAdaptiveTarget = GlassContrastHelper.updateContrastInvertFactor(tabStripAdaptiveTarget, effLuma, expectDark, 1f);
+        }
+        float next = tabStripAdaptiveFactor + (tabStripAdaptiveTarget - tabStripAdaptiveFactor) * 0.28f;
+        if (Math.abs(tabStripAdaptiveTarget - next) < 0.008f) {
+            next = tabStripAdaptiveTarget;
+        }
+        tabStripAdaptiveFactor = Math.max(0f, Math.min(1f, next));
+        scrollSlidingTextTabStrip.applyAdaptiveGlassContrast(tabStripAdaptiveFactor);
+
+        if (Math.abs(tabStripAdaptiveFactor - tabStripAdaptiveTarget) >= 0.006f && !tabStripAdaptiveTickPosted && isAttachedToWindow()) {
+            tabStripAdaptiveTickPosted = true;
+            postOnAnimation(tabStripAdaptiveTickRunnable);
+        }
+    }
+
     public void onDestroy() {
+        if (tabStripAdaptiveTickPosted) {
+            removeCallbacks(tabStripAdaptiveTickRunnable);
+            tabStripAdaptiveTickPosted = false;
+        }
+        onMediaScrolledCallback = null;
         observersGroup.removeAllObservers();
 
         if (storiesAdapter != null && storiesAdapter.storiesList != null) {
@@ -13186,6 +13267,12 @@ public class SharedMediaLayout extends FrameLayout implements Theme.Colorable, N
                 selectedMessagesCountTextView.setTextColor(getThemedColor(Theme.key_actionBarActionModeDefaultIcon));
             }
             updateActionModeItemsColors();
+            if (storiesContainer != null && storiesContainer.tabsView != null) {
+                storiesContainer.tabsView.updateColors();
+            }
+            if (giftsContainer != null) {
+                giftsContainer.updateColors();
+            }
             invalidate();
             for (MediaPage page : mediaPages) {
                 if (page != null && page.drawPageBackground) {

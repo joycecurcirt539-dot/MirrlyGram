@@ -72,10 +72,22 @@ public class PinnedLineView extends View {
         updateColors();
     }
 
+    private int adaptiveOverrideColor = 0;
+
     public void updateColors() {
-        color = getThemedColor(Theme.key_chat_topPanelLine);
+        final int baseColor = getThemedColor(Theme.key_chat_topPanelLine);
+        color = adaptiveOverrideColor != 0 ? adaptiveOverrideColor : baseColor;
         paint.setColor(ColorUtils.setAlphaComponent(color, (int) ((Color.alpha(color) / 255f) * 112)));
         selectedPaint.setColor(color);
+        invalidate();
+    }
+
+    public void applyAdaptiveColor(int customColor) {
+        if (adaptiveOverrideColor == customColor) {
+            return;
+        }
+        adaptiveOverrideColor = customColor;
+        updateColors();
     }
 
     private void selectPosition(int position) {

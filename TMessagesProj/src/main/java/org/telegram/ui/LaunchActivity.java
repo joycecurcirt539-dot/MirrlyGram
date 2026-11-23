@@ -450,6 +450,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         }
         getWindow().setBackgroundDrawable(new ActivityWindowEmptyBackgroundDrawable());
         getWindow().setFormat(PixelFormat.OPAQUE);
+        AndroidUtilities.setPreferredMaxRefreshRate(getWindow());
 
         flagSecureReason = new FlagSecureReason(getWindow(), () -> SharedConfig.passcodeHash.length() > 0 && !SharedConfig.allowScreenCapture);
         flagSecureReason.attach();
@@ -529,6 +530,9 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             }
         });
         setupActionBarLayout();
+        if (actionBarLayout != null) {
+            AndroidUtilities.setHighFrameRateCategory(actionBarLayout.getView(), true);
+        }
         drawerLayoutContainer.setParentActionBarLayout(actionBarLayout);
         actionBarLayout.setDrawerLayoutContainer(drawerLayoutContainer);
         actionBarLayout.setFragmentStack(mainFragmentsStack);
@@ -3424,7 +3428,9 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             if (fragment != null) {
                 Bulletin.make(fragment, layout, duration).show();
                 try {
-                    fragment.fragmentView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
+                    if (!org.telegram.messenger.mirrly.MirrlyHaptics.isDisabled()) {
+                        fragment.fragmentView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
+                    }
                 } catch (Exception ignored) {}
             }
         });
@@ -6944,6 +6950,9 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             VoIPPiPView.getInstance().onPause();
         }
         SpoilerEffect2.pause(true);
+        if (actionBarLayout != null) {
+            AndroidUtilities.setHighFrameRateCategory(actionBarLayout.getView(), false);
+        }
         //if (refreshRateController != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
         //    refreshRateController.stop();
         //}
@@ -7209,6 +7218,10 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
     @Override
     protected void onResume() {
         super.onResume();
+        AndroidUtilities.setPreferredMaxRefreshRate(getWindow());
+        if (actionBarLayout != null) {
+            AndroidUtilities.setHighFrameRateCategory(actionBarLayout.getView(), true);
+        }
         WidgetMedia.onAppPaused(false);
         isResumed = true;
         PipCoordinator.getInstance().onActivityResume(this);
@@ -7216,6 +7229,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             onResumeStaticCallback.run();
             onResumeStaticCallback = null;
         }
+        org.telegram.messenger.mirrly.MirrlyMonetThemeHelper.onConfigurationOrResume(this);
         if (Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_SYSTEM) {
             Theme.checkAutoNightThemeConditions();
         }
@@ -7304,6 +7318,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             // Re-check if the user updated their email from another client
             MessagesController.getInstance(currentAccount).checkPromoInfo(true);
         }
+        org.telegram.messenger.mirrly.MirrlyHaptics.syncWindowHaptics(getWindow());
         //if (refreshRateController != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
         //    refreshRateController.start();
         //}
@@ -7346,6 +7361,9 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
             }
 
             setupActionBarLayout();
+            if (actionBarLayout != null) {
+                AndroidUtilities.setHighFrameRateCategory(actionBarLayout.getView(), true);
+            }
             actionBarLayout.rebuildFragments(INavigationLayout.REBUILD_FLAG_REBUILD_LAST);
             if (AndroidUtilities.isTablet()) {
                 rightActionBarLayout.rebuildFragments(INavigationLayout.REBUILD_FLAG_REBUILD_LAST);
@@ -7402,6 +7420,7 @@ public class LaunchActivity extends BasePermissionsActivity implements INavigati
         if (editorView != null) {
             editorView.onConfigurationChanged();
         }
+        org.telegram.messenger.mirrly.MirrlyMonetThemeHelper.onConfigurationOrResume(this);
         if (Theme.selectedAutoNightType == Theme.AUTO_NIGHT_TYPE_SYSTEM) {
             Theme.checkAutoNightThemeConditions();
         }

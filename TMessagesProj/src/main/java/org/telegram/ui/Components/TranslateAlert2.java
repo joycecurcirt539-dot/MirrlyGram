@@ -474,17 +474,15 @@ public class TranslateAlert2 extends BottomSheet implements NotificationCenter.N
         }
         final String toLng = _toLng;
 
-        alternativeTranslate(text, fromLng, toLng, (res, rateLimit) -> {
+        org.telegram.messenger.mirrly.MirrlyTranslatorEngine.translateAsync(text, fromLng, toLng, -1, null, trRes -> {
+            String res = trRes.success ? trRes.translatedText : null;
+            boolean rateLimit = trRes.rateLimited;
             if (res != null) {
                 firstTranslation = false;
                 textView.setText(preprocessText(res));
                 adapter.updateMainView(textViewContainer);
             } else {
                 if (isDismissed()) return;
-//                if ("system".equals(MessagesController.getInstance(currentAccount).translationsManualEnabled)) {
-//                    translateSystem();
-//                    return;
-//                }
                 if (firstTranslation) {
                     dismiss();
                     NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.showBulletin, Bulletin.TYPE_ERROR, LocaleController.getString(rateLimit ? R.string.TranslationFailedAlert1 : R.string.TranslationFailedAlert2));

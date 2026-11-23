@@ -54,6 +54,10 @@ public abstract class RightSlidingDialogContainer extends FrameLayout {
         super(context);
     }
 
+    public float getOpenedProgress() {
+        return openedProgress;
+    }
+
     public void presentFragment(INavigationLayout navigationLayout, BaseFragment fragment) {
         if (isPaused) {
             return;

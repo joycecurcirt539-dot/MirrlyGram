@@ -2,6 +2,7 @@ package org.telegram.ui.Cells;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
@@ -16,6 +17,7 @@ import org.telegram.messenger.UserObject;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.ChatActivity;
 import org.telegram.ui.Components.TranscribeButton;
+import org.telegram.utils.glass.GlassContrastHelper;
 
 class ChatMessageAudio {
 
@@ -353,12 +355,40 @@ class ChatMessageAudio {
             AndroidUtilities.lerp(dp(24), dp(32), 1f - cell.getVideoTranscriptionProgress()),
             AndroidUtilities.lerp(dp(8), dp(16), 1f - cell.getVideoTranscriptionProgress())
         );
+        final boolean isOut = cell.currentMessageObject != null && cell.currentMessageObject.isOutOwner();
+        final float underLuma = cell.getDelegate() != null
+                ? cell.getDelegate().getChatBackdropLuminance()
+                : GlassContrastHelper.resolveThemeBackdropLuminance(null, cell.getThemedColor(Theme.key_windowBackgroundWhite));
+
+        int bubbleColor = cell.getThemedColor(isOut ? Theme.key_chat_outBubble : Theme.key_chat_inBubble);
+        if (isOut) {
+            final int grad1 = cell.getThemedColor(Theme.key_chat_outBubbleGradient1);
+            if (Color.alpha(grad1) > 12) {
+                bubbleColor = ColorUtils.blendARGB(bubbleColor, grad1, 0.5f);
+            }
+        }
+        final float bubbleWcag = GlassContrastHelper.computeCompositeWcagLuminance(bubbleColor, underLuma);
+        final int rawAudioFg = cell.getThemedColor(isOut ? Theme.key_chat_outReactionButtonBackground : Theme.key_chat_inReactionButtonBackground);
+        final int safeAudioFg = GlassContrastHelper.resolveAdaptiveColorFromWcag(
+                Color.alpha(rawAudioFg) > 0 ? ColorUtils.setAlphaComponent(rawAudioFg, 255) : (isOut ? Color.WHITE : 0xFF161A20),
+                bubbleWcag,
+                false,
+                false
+        );
+
+        final int actionBgColor = cell.getThemedPaint(Theme.key_paint_chatActionBackground).getColor();
+        final float badgeWcag = GlassContrastHelper.computeCompositeWcagLuminance(actionBgColor, underLuma);
+        final int rawRoundFg = cell.getThemedColor(cell.isCompactLayout() ? Theme.key_chat_compact_sideButtonIcon : Theme.key_chat_serviceText);
+        final int safeRoundFg = GlassContrastHelper.resolveAdaptiveColorFromWcag(
+                Color.alpha(rawRoundFg) > 0 ? ColorUtils.setAlphaComponent(rawRoundFg, 255) : Color.WHITE,
+                badgeWcag,
+                false,
+                false
+        );
+
+        final float fgProgress = cell.documentAttachType == ChatMessageCell.DOCUMENT_ATTACH_TYPE_AUDIO ? 1f : cell.getVideoTranscriptionProgress();
         cell.transcribeButton.setColor(
-            ColorUtils.blendARGB(
-                cell.getThemedColor(cell.isCompactLayout() ? Theme.key_chat_compact_sideButtonIcon : Theme.key_chat_serviceText),
-                cell.getThemedColor(cell.currentMessageObject.isOutOwner() ? Theme.key_chat_outReactionButtonBackground : Theme.key_chat_inReactionButtonBackground),
-                cell.documentAttachType == ChatMessageCell.DOCUMENT_ATTACH_TYPE_AUDIO ? 1 : cell.getVideoTranscriptionProgress()
-            ),
+            ColorUtils.blendARGB(safeRoundFg, safeAudioFg, fgProgress),
             cell.getThemedColor(Theme.key_windowBackgroundWhiteGrayText),
             cell.currentMessageObject.isOut(),
             cell.documentAttachType == ChatMessageCell.DOCUMENT_ATTACH_TYPE_AUDIO ? 0 : 1f - cell.getVideoTranscriptionProgress()

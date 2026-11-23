@@ -17,6 +17,14 @@ public class ChatMessagesMetadataController {
 
     ArrayList<Integer> reactionsRequests = new ArrayList<>();
     ArrayList<Integer> extendedMediaRequests = new ArrayList<>();
+    private final ArrayList<MessageObject> pendingReactionsToCheck = new ArrayList<>(16);
+    private long pendingReactionsDialogId;
+    private long lastReactionsSendTime;
+    private boolean reactionsFlushScheduled;
+    private final Runnable flushReactionsRunnable = () -> {
+        reactionsFlushScheduled = false;
+        flushPendingReactions(System.currentTimeMillis());
+    };
 
 
     public ChatMessagesMetadataController(ChatActivity chatActivity) {
@@ -58,10 +66,48 @@ public class ChatMessagesMetadataController {
                     }
                 }
             }
-            loadReactionsForMessages(chatActivity.getDialogId(), reactionsToCheck);
+            scheduleReactionsForMessages(chatActivity.getDialogId(), reactionsToCheck, currentTime);
             loadExtendedMediaForMessages(chatActivity.getDialogId(), extendedMediaToCheck);
             loadStoriesForMessages(chatActivity.getDialogId(), storiesToCheck);
         }
+    }
+
+    private void scheduleReactionsForMessages(long dialogId, ArrayList<MessageObject> visibleObjects, long currentTime) {
+        if (visibleObjects.isEmpty()) {
+            return;
+        }
+        if (pendingReactionsDialogId != dialogId) {
+            pendingReactionsToCheck.clear();
+            pendingReactionsDialogId = dialogId;
+        }
+        for (int i = 0; i < visibleObjects.size(); i++) {
+            MessageObject obj = visibleObjects.get(i);
+            if (!pendingReactionsToCheck.contains(obj)) {
+                pendingReactionsToCheck.add(obj);
+            }
+        }
+        long elapsed = currentTime - lastReactionsSendTime;
+        if (elapsed < 0L || elapsed >= 160L || pendingReactionsToCheck.size() >= 25) {
+            if (reactionsFlushScheduled) {
+                AndroidUtilities.cancelRunOnUIThread(flushReactionsRunnable);
+                reactionsFlushScheduled = false;
+            }
+            flushPendingReactions(currentTime);
+        } else if (!reactionsFlushScheduled) {
+            reactionsFlushScheduled = true;
+            AndroidUtilities.runOnUIThread(flushReactionsRunnable, Math.max(40L, 160L - elapsed));
+        }
+    }
+
+    private void flushPendingReactions(long currentTime) {
+        if (pendingReactionsToCheck.isEmpty()) {
+            return;
+        }
+        long dialogId = pendingReactionsDialogId != 0 ? pendingReactionsDialogId : chatActivity.getDialogId();
+        lastReactionsSendTime = currentTime;
+        ArrayList<MessageObject> batch = new ArrayList<>(pendingReactionsToCheck);
+        pendingReactionsToCheck.clear();
+        loadReactionsForMessages(dialogId, batch);
     }
 
     private void loadStoriesForMessages(long dialogId, ArrayList<MessageObject> visibleObjects) {
@@ -132,7 +178,9 @@ public class ChatMessagesMetadataController {
             MessageObject messageObject = visibleObjects.get(i);
             req.id.add(messageObject.getId());
         }
+        final int[] reqIdHolder = new int[1];
         int reqId = chatActivity.getConnectionsManager().sendRequest(req, (response, error) -> {
+            AndroidUtilities.runOnUIThread(() -> reactionsRequests.remove(Integer.valueOf(reqIdHolder[0])));
             if (error == null) {
                 TLRPC.Updates updates = (TLRPC.Updates) response;
                 for (int i = 0; i < updates.updates.size(); i++) {
@@ -143,8 +191,9 @@ public class ChatMessagesMetadataController {
                 chatActivity.getMessagesController().processUpdates(updates, false);
             }
         });
+        reqIdHolder[0] = reqId;
         reactionsRequests.add(reqId);
-        if (reactionsRequests.size() > 5) {
+        if (reactionsRequests.size() > 12) {
             chatActivity.getConnectionsManager().cancelRequest(reactionsRequests.remove(0), true);
         }
     }
@@ -171,6 +220,11 @@ public class ChatMessagesMetadataController {
     }
 
     public void onFragmentDestroy() {
+        if (reactionsFlushScheduled) {
+            AndroidUtilities.cancelRunOnUIThread(flushReactionsRunnable);
+            reactionsFlushScheduled = false;
+        }
+        pendingReactionsToCheck.clear();
         for (int i = 0; i < reactionsRequests.size(); i++) {
             chatActivity.getConnectionsManager().cancelRequest(reactionsRequests.get(i), false);
         }

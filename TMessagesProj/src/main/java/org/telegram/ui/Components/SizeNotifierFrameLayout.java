@@ -711,7 +711,7 @@ public class SizeNotifierFrameLayout extends FrameLayout implements Theme.Colora
         if (blurQueue == null) {
             blurQueue = new DispatchQueue("BlurQueue");
         }
-        blurBackgroundTask.radius = (int) ((int) (Math.max(6, Math.max(lastH, lastW) / 180) * 2.5f) * BlurSettingsBottomSheet.blurRadius);
+        blurBackgroundTask.radius = Math.max(1, (int) ((int) (Math.max(6, Math.max(lastH, lastW) / 180) * 2.5f) * BlurSettingsBottomSheet.blurRadius * org.telegram.messenger.mirrly.MirrlyConfig.getGlassBlurScale()));
         blurBackgroundTask.finalBitmap = finalBitmap;
         blurQueue.postRunnable(blurBackgroundTask);
     }

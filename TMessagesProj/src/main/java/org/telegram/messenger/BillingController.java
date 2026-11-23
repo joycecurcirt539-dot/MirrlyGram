@@ -7,6 +7,7 @@ import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.text.TextUtils;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -26,6 +27,7 @@ import com.android.billingclient.api.PurchasesUpdatedListener;
 import com.android.billingclient.api.QueryProductDetailsParams;
 import com.android.billingclient.api.QueryPurchasesParams;
 
+import org.telegram.messenger.browser.Browser;
 import org.telegram.messenger.utils.BillingUtilities;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
@@ -172,7 +174,7 @@ public class BillingController implements PurchasesUpdatedListener, BillingClien
     }
 
     public boolean isReady() {
-        return billingClient.isReady();
+        return !BuildVars.useInvoiceBilling() && billingClient.isReady();
     }
 
     public interface ProductDetailsResponseListenerLegacy {
@@ -195,6 +197,17 @@ public class BillingController implements PurchasesUpdatedListener, BillingClien
     }
 
     public boolean startManageSubscription(Context ctx, String productId) {
+        if (ctx == null) {
+            return false;
+        }
+        if (BuildVars.useInvoiceBilling()) {
+            String url = MessagesController.getInstance(UserConfig.selectedAccount).premiumManageSubscriptionUrl;
+            if (TextUtils.isEmpty(url) || url.startsWith("https://play.google.com/")) {
+                url = "https://t.me/premiumbot?start=status";
+            }
+            Browser.openUrl(ctx, url);
+            return true;
+        }
         try {
             ctx.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(String.format("https://play.google.com/store/account/subscriptions?sku=%s&package=%s", productId, ctx.getPackageName()))));
             return true;

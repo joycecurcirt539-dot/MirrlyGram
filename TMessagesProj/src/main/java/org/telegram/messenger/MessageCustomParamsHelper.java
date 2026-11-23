@@ -31,6 +31,9 @@ public class MessageCustomParamsHelper {
             !message.premiumEffectWasPlayed &&
             message.originalLanguage == null &&
             message.translatedToLanguage == null &&
+            !message.mirrlyTranslatedOpen &&
+            !message.mirrlyDeleted &&
+            message.mirrlySavedAttachPath == null &&
             message.translatedPoll == null &&
             message.translatedText == null &&
             message.translatedRichMessage == null &&
@@ -49,6 +52,11 @@ public class MessageCustomParamsHelper {
         toMessage.premiumEffectWasPlayed = fromMessage.premiumEffectWasPlayed;
         toMessage.originalLanguage = fromMessage.originalLanguage;
         toMessage.translatedToLanguage = fromMessage.translatedToLanguage;
+        toMessage.mirrlyTranslatedOpen = fromMessage.mirrlyTranslatedOpen;
+        toMessage.mirrlyDeleted = fromMessage.mirrlyDeleted;
+        toMessage.mirrlyDeletedAt = fromMessage.mirrlyDeletedAt;
+        toMessage.mirrlyDeletedByMe = fromMessage.mirrlyDeletedByMe;
+        toMessage.mirrlySavedAttachPath = fromMessage.mirrlySavedAttachPath;
         toMessage.translatedPoll = fromMessage.translatedPoll;
         toMessage.translatedText = fromMessage.translatedText;
         toMessage.translatedRichMessage = fromMessage.translatedRichMessage;
@@ -121,6 +129,10 @@ public class MessageCustomParamsHelper {
 
             flags = setFlag(flags, FLAG_13, message.translatedRichMessage != null);
             flags = setFlag(flags, FLAG_14, isCommentEncryptionPreparing(message));
+            flags = setFlag(flags, FLAG_15, message.mirrlyTranslatedOpen);
+            flags = setFlag(flags, FLAG_16, message.mirrlyDeleted);
+            flags = setFlag(flags, FLAG_17, message.mirrlyDeleted && message.mirrlyDeletedByMe);
+            flags = setFlag(flags, FLAG_18, !android.text.TextUtils.isEmpty(message.mirrlySavedAttachPath));
         }
 
         @Override
@@ -172,6 +184,12 @@ public class MessageCustomParamsHelper {
             }
             if (hasFlag(flags, FLAG_13)) {
                 message.translatedRichMessage.serializeToStream(stream);
+            }
+            if (hasFlag(flags, FLAG_16)) {
+                stream.writeInt32(message.mirrlyDeletedAt);
+            }
+            if (hasFlag(flags, FLAG_18)) {
+                stream.writeString(message.mirrlySavedAttachPath);
             }
         }
 
@@ -227,6 +245,21 @@ public class MessageCustomParamsHelper {
             }
             if (hasFlag(flags, FLAG_13)) {
                 message.translatedRichMessage = TL_iv.RichMessage.TLdeserialize(stream, stream.readInt32(exception), exception);
+            }
+            message.mirrlyTranslatedOpen = hasFlag(flags, FLAG_15);
+            message.mirrlyDeleted = hasFlag(flags, FLAG_16);
+            if (message.mirrlyDeleted) {
+                message.mirrlyDeletedAt = stream.readInt32(exception);
+                message.mirrlyDeletedByMe = hasFlag(flags, FLAG_17);
+            } else {
+                message.mirrlyDeletedAt = 0;
+                message.mirrlyDeletedByMe = false;
+            }
+            if (hasFlag(flags, FLAG_18)) {
+                message.mirrlySavedAttachPath = stream.readString(exception);
+                if (!android.text.TextUtils.isEmpty(message.mirrlySavedAttachPath) && android.text.TextUtils.isEmpty(message.attachPath)) {
+                    message.attachPath = message.mirrlySavedAttachPath;
+                }
             }
         }
 

@@ -5,6 +5,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
+import android.os.Looper;
 import android.text.TextUtils;
 
 import androidx.annotation.Keep;
@@ -13,6 +14,7 @@ import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.SharedConfig;
+import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.utils.proxy.ProxySettings;
 
@@ -85,7 +87,15 @@ public final class MirrlyEngineController {
         return sb.toString();
     }
 
-    public static synchronized void ensureStarted() {
+    public static void ensureStarted() {
+        MirrlyConfig.load();
+        if (engineStarted) {
+            return;
+        }
+        ensureStartedInternal();
+    }
+
+    private static synchronized void ensureStartedInternal() {
         MirrlyConfig.load();
         if (!libraryLoaded) {
             try {
@@ -103,6 +113,10 @@ public final class MirrlyEngineController {
             nativeSetTlsEnabled(MirrlyConfig.tlsEnabled);
             nativeSetTlsClientHelloSplit(MirrlyConfig.tlsClientHelloSplit);
             nativeSetTlsFingerprintProfile("chrome124");
+            try {
+                nativeSetFlowsealPerDcEnabled(MirrlyConfig.flowsealPerDcEnabled);
+            } catch (UnsatisfiedLinkError ignore) {
+            }
 
             // CRITICAL: Activate Cloudflare Anycast CDN / Worker upstream tunnel in mirrlyengine!
             // When userDomain is empty, mirrlyengine uses the embedded Anycast CDN pool with Fast Anycast Race.
@@ -114,24 +128,23 @@ public final class MirrlyEngineController {
             nativeSetSecret(secret);
 
             int targetSocksPort = MirrlyConfig.DEFAULT_SOCKS5_PORT;
-            boolean socksBusy = !isPortAvailable(MirrlyConfig.LOCALHOST, targetSocksPort);
-            if (socksBusy) {
-                targetSocksPort = findAvailablePort(MirrlyConfig.LOCALHOST, targetSocksPort + 1);
-            }
+            boolean socksBusy = false;
             String socksErr = nativeStartSocks5(MirrlyConfig.LOCALHOST, targetSocksPort);
             if ("PORT_BUSY".equals(socksErr)) {
                 socksBusy = true;
-                targetSocksPort = findAvailablePort(MirrlyConfig.LOCALHOST, targetSocksPort + 1);
-                nativeStartSocks5(MirrlyConfig.LOCALHOST, targetSocksPort);
+                for (int p = targetSocksPort + 1; p < targetSocksPort + 50; p++) {
+                    String err = nativeStartSocks5(MirrlyConfig.LOCALHOST, p);
+                    if (!"PORT_BUSY".equals(err)) {
+                        targetSocksPort = p;
+                        break;
+                    }
+                }
             }
             MirrlyConfig.setEffectiveSocks5Port(targetSocksPort);
             FileLog.d("MirrlyEngine SOCKS5 listening on 127.0.0.1:" + targetSocksPort);
 
             int targetMtprotoPort = MirrlyConfig.DEFAULT_MTPROTO_PORT;
-            boolean mtprotoBusy = !isPortAvailable(MirrlyConfig.LOCALHOST, targetMtprotoPort);
-            if (mtprotoBusy) {
-                targetMtprotoPort = findAvailablePort(MirrlyConfig.LOCALHOST, targetMtprotoPort + 1);
-            }
+            boolean mtprotoBusy = false;
             String mtprotoErr = nativeStartMtproto(
                     MirrlyConfig.LOCALHOST,
                     targetMtprotoPort,
@@ -140,8 +153,13 @@ public final class MirrlyEngineController {
             );
             if ("PORT_BUSY".equals(mtprotoErr)) {
                 mtprotoBusy = true;
-                targetMtprotoPort = findAvailablePort(MirrlyConfig.LOCALHOST, targetMtprotoPort + 1);
-                nativeStartMtproto(MirrlyConfig.LOCALHOST, targetMtprotoPort, secret, DEFAULT_DC_IP_LIST);
+                for (int p = targetMtprotoPort + 1; p < targetMtprotoPort + 50; p++) {
+                    String err = nativeStartMtproto(MirrlyConfig.LOCALHOST, p, secret, DEFAULT_DC_IP_LIST);
+                    if (!"PORT_BUSY".equals(err)) {
+                        targetMtprotoPort = p;
+                        break;
+                    }
+                }
             }
             MirrlyConfig.setEffectiveMtprotoPort(targetMtprotoPort);
             FileLog.d("MirrlyEngine MTProto listening on 127.0.0.1:" + targetMtprotoPort);
@@ -190,8 +208,38 @@ public final class MirrlyEngineController {
         }
     }
 
-    public static synchronized void ensureDefaultProxyPreconfigured() {
-        ensureStarted();
+    public static void ensureDefaultProxyPreconfigured() {
+        MirrlyConfig.load();
+        Context context = ApplicationLoader.applicationContext;
+        if (context == null) {
+            return;
+        }
+        SharedPreferences preferences = context.getSharedPreferences("mainconfig", Activity.MODE_PRIVATE);
+        boolean seeded = preferences.getBoolean("mirrly_default_proxy_v1", false);
+        if (!seeded) {
+            ProxySettings socks5Settings = buildSocks5Settings();
+            SharedPreferences.Editor editor = preferences.edit();
+            socks5Settings.toSharedPreferences(editor);
+            editor.putBoolean("proxy_enabled", true);
+            editor.putBoolean("mirrly_default_proxy_v1", true);
+            editor.apply();
+            ConnectionsManager.setProxySettings(true, socks5Settings);
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            if (!engineStarted) {
+                Utilities.globalQueue.postRunnable(() -> {
+                    ensureStarted();
+                    ensureDefaultProxyPreconfiguredInternal();
+                });
+                return;
+            }
+        } else {
+            ensureStarted();
+        }
+        ensureDefaultProxyPreconfiguredInternal();
+    }
+
+    private static synchronized void ensureDefaultProxyPreconfiguredInternal() {
         Context context = ApplicationLoader.applicationContext;
         if (context == null) {
             return;
@@ -207,7 +255,7 @@ public final class MirrlyEngineController {
             socks5Settings.toSharedPreferences(editor);
             editor.putBoolean("proxy_enabled", true);
             editor.putBoolean("mirrly_default_proxy_v1", true);
-            editor.commit();
+            editor.apply();
             ConnectionsManager.setProxySettings(true, socks5Settings);
         } else if (isLocalProxy) {
             ProxySettings updatedSettings = null;
@@ -225,7 +273,7 @@ public final class MirrlyEngineController {
             if (updatedSettings != null) {
                 SharedPreferences.Editor editor = preferences.edit();
                 updatedSettings.toSharedPreferences(editor);
-                editor.commit();
+                editor.apply();
                 if (preferences.getBoolean("proxy_enabled", false)) {
                     ConnectionsManager.setProxySettings(true, updatedSettings);
                 }
@@ -294,7 +342,7 @@ public final class MirrlyEngineController {
             SharedConfig.currentProxy.settings.toSharedPreferences(editor);
             editor.putBoolean("proxy_enabled", shouldEnable);
             editor.putBoolean("mirrly_proxy_list_seeded_v1", true);
-            editor.commit();
+            editor.apply();
             if (shouldEnable) {
                 ConnectionsManager.setProxySettings(true, SharedConfig.currentProxy.settings);
             }
@@ -381,7 +429,7 @@ public final class MirrlyEngineController {
         SharedPreferences.Editor editor = preferences.edit();
         target.settings.toSharedPreferences(editor);
         editor.putBoolean("proxy_enabled", true);
-        editor.commit();
+        editor.apply();
         SharedConfig.saveProxyList();
         ConnectionsManager.setProxySettings(true, target.settings);
         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.proxySettingsChanged);
@@ -477,6 +525,30 @@ public final class MirrlyEngineController {
         }
     }
 
+    public static void applyFlowsealPerDcEnabled(boolean enabled) {
+        if (!libraryLoaded) {
+            return;
+        }
+        try {
+            nativeSetFlowsealPerDcEnabled(enabled);
+        } catch (Throwable t) {
+            FileLog.e(t);
+        }
+    }
+
+    public static String getFlowsealDcConfigJson() {
+        if (!libraryLoaded) {
+            return "{}";
+        }
+        try {
+            String json = nativeGetFlowsealDcConfigJson();
+            return json != null ? json : "{}";
+        } catch (Throwable t) {
+            FileLog.e(t);
+            return "{}";
+        }
+    }
+
     public static void notifyNetworkState() {
         if (!libraryLoaded || ApplicationLoader.applicationContext == null) {
             return;
@@ -541,4 +613,10 @@ public final class MirrlyEngineController {
     public static native void nativeSetTlsClientHelloSplit(boolean enabled);
     public static native int nativeSetTlsFingerprintProfile(String profile);
     public static native void nativeResetNetworkSockets();
+    public static native void nativeSetFlowsealPerDcEnabled(boolean enabled);
+    public static native boolean nativeIsFlowsealPerDcEnabled();
+    public static native boolean nativeSetFlowsealDcDomain(int dcId, int isMedia, String domain);
+    public static native boolean nativeSetFlowsealDcDomainsJson(String json);
+    public static native void nativeClearFlowsealDcDomains();
+    public static native String nativeGetFlowsealDcConfigJson();
 }

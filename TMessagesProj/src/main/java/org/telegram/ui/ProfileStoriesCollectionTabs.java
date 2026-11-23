@@ -24,6 +24,9 @@ import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.SharedMediaLayout;
 import org.telegram.ui.Components.ViewPagerFixed;
+import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
+import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
+import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundProvider;
 import org.telegram.ui.Stories.StoriesController;
 
 import java.util.ArrayList;
@@ -117,6 +120,16 @@ public class ProfileStoriesCollectionTabs extends FrameLayout implements Notific
         addView(tabsView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 42, Gravity.TOP));
 
         setVisibility(!collections.collections.isEmpty(), false, true);
+    }
+
+    public void setGlassFactory(BlurredBackgroundDrawableViewFactory factory, BlurredBackgroundProvider colorProvider) {
+        if (factory == null || tabsView == null) {
+            return;
+        }
+        final BlurredBackgroundDrawable tabsGlass = factory.create(tabsView, colorProvider);
+        tabsGlass.setRadius(dp(18));
+        tabsGlass.setPadding(dp(6));
+        tabsView.setBlurredBackground(tabsGlass);
     }
 
     protected void updatedReordering(boolean reordering) {

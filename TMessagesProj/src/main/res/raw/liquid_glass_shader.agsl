@@ -43,5 +43,6 @@ half4 main(in float2 fragCoord) {
   // on a small shape the edge samples past the far side: stay within the shape, whatever the grid of a downsampled node
   uv = clamp(uv, center - size + 0.5, center + size - 0.5);
 
-  return srcOver(half4(foreground_color_premultiplied), img.eval(uv));
+  half4 bg = img.eval(uv);
+  return srcOver(half4(foreground_color_premultiplied), bg);
 }
